@@ -184,6 +184,11 @@ junit.lib=${junit.home}
 junit.jar=${junit.lib}/junit-4.8.2.jar
 junit.loc=http://cloud.github.com/downloads/KentBeck/junit/junit4.8.2.zip
 
+# ----- JSLib ----
+jzlib.loc=${base-maven.loc}/com/jcraft/jzlib/1.0.7/jzlib-1.0.7.jar
+jzlib.home=${base.path}/jzlib-1.0.7
+jzlib.jar=${base.path}/jzlib-1.0.7/jzlib-1.0.7.jar
+
 # ----- Checkstyle, version 5.1 or later -----
 checkstyle.version=5.5
 checkstyle.home=${base.path}/checkstyle-${checkstyle.version}

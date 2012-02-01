@@ -163,7 +163,8 @@
 
   <!-- Classpaths -->
   <path id="compile.classpath">
-    <pathelement location="${jdt.jar}"/>
+      <pathelement location="${jdt.jar}"/>
+      <pathelement location="${jzlib.jar}"/>
   </path>
 
   <path id="tomcat.classpath">
@@ -870,6 +871,7 @@
     <copy file="${tomcat-dbcp.jar}" todir="${tomcat.build}/lib"
       failonerror="false"/>
     <copy file="${jdt.jar}" todir="${tomcat.build}/lib" />
+    <copy file="${jzlib.jar}" todir="${tomcat.build}/lib" />
 
     <!-- build the jdbc-pool jar and source jar-->
     <echo message="Building Tomcat JDBC pool libraries"/>
@@ -2283,6 +2285,13 @@ Apache Tomcat ${version} native binaries for Win64 AMD64/EMT64 platform.
       <param name="destfile" value="${jdt.jar}"/>
       <param name="destdir" value="${jdt.home}"/>
     </antcall>
+      
+    <antcall target="downloadfile">
+      <param name="sourcefile" value="${jzlib.loc}"/>
+      <param name="destfile" value="${jzlib.jar}"/>
+      <param name="destdir" value="${jzlib.home}"/>
+    </antcall>
+      
   </target>
 
   <target name="download-test-compile"
