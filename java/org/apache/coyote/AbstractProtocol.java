@@ -208,6 +208,11 @@ public abstract class AbstractProtocol implements ProtocolHandler,
         endpoint.setPort(port);
     }
 
+    public String getSpdy() { return endpoint.getSpdy(); }
+    public void setSpdy(String spdy) {
+        endpoint.setSpdy(spdy);
+    }
+
 
     public int getLocalPort() { return endpoint.getLocalPort(); }
 

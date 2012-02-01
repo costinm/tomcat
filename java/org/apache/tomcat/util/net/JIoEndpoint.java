@@ -30,6 +30,10 @@ import java.util.concurrent.RejectedExecutionException;
 
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
+import org.apache.tomcat.spdy.LightChannel;
+import org.apache.tomcat.spdy.LightChannelJio;
+import org.apache.tomcat.spdy.LightProtocol;
+import org.apache.tomcat.spdy.SpdyFramer;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 
@@ -303,11 +307,20 @@ public class JIoEndpoint extends AbstractEndpoint {
                     }
 
                     if ((state != SocketState.CLOSED)) {
-                        if (status == null) {
-                            state = handler.process(socket, SocketStatus.OPEN);
+                        if (spdy != null) {
+                            LightChannel ch =
+                                    new LightChannelJio(socket.getSocket());
+                            LightProtocol proto = SpdyFramer.getSpdy(ch, 
+                                    spdy, JIoEndpoint.this);
+                            proto.onData();
+                            state = SocketState.CLOSED;
                         } else {
-                            state = handler.process(socket,status);
-                        }
+                            if (status == null) {
+                                state = handler.process(socket, SocketStatus.OPEN);
+                            } else {
+                                state = handler.process(socket,status);
+                            }
+                        }   
                     }
                     if (state == SocketState.CLOSED) {
                         // Close socket

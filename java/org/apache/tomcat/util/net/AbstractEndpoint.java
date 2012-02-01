@@ -178,6 +178,11 @@ public abstract class AbstractEndpoint {
     }
     public Executor getExecutor() { return executor; }
 
+    protected String spdy;
+    public String getSpdy() { return spdy; }
+    public void setSpdy(String mode) { 
+        spdy = mode; 
+    }
 
     /**
      * Server socket port.
@@ -854,6 +859,19 @@ public abstract class AbstractEndpoint {
                     new String[sslEnabledProtocols.size()]);
         }
     }
+    
+    protected Object protocol; // AbstractProtocol
+    /**
+     * Let endpoint know about protocol. Object is used to avoid
+     * adding a dep between util.net and coyote.
+     * 
+     * Endpoints are typically configured with a Handler that is specific 
+     * to the transport implementation. 
+     */
+    public void setProtocol(Object protocol) {
+        this.protocol = protocol;
+    }
+    public Object getProtocol() { return protocol; }
 
 }
 
