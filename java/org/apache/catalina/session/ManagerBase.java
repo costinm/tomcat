@@ -186,7 +186,12 @@ public abstract class ManagerBase extends LifecycleMBeanBase
      * Iteration count for background processing.
      */
     private int count = 0;
-
+    
+    /** 
+     * If false startup will be faster ( dev mode )
+     */
+    private boolean generateSessionOnStartup = true;
+    
 
     /**
      * Frequency of the session expiration, and related manager operations.
@@ -364,7 +369,14 @@ public abstract class ManagerBase extends LifecycleMBeanBase
 
     }
 
+    public boolean getGenerateSessionOnStartup() {
+        return generateSessionOnStartup;
+    }
 
+    public void setGenerateSessionOnStartup(boolean b) {
+        generateSessionOnStartup = b;
+    }
+    
     /**
      * Set the secure random number generator class name.
      *
@@ -550,11 +562,13 @@ public abstract class ManagerBase extends LifecycleMBeanBase
         sessionIdGenerator.setSessionIdLength(getSessionIdLength());
 
         // Force initialization of the random number generator
-        if (log.isDebugEnabled())
-            log.debug("Force random number initialization starting");
-        sessionIdGenerator.generateSessionId();
-        if (log.isDebugEnabled())
-            log.debug("Force random number initialization completed");
+        if (generateSessionOnStartup) {
+            if (log.isDebugEnabled())
+                log.debug("Force random number initialization starting");
+            sessionIdGenerator.generateSessionId();
+            if (log.isDebugEnabled())
+                log.debug("Force random number initialization completed");
+        }
     }
 
     @Override
