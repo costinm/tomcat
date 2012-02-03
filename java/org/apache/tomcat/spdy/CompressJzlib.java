@@ -1,38 +1,15 @@
 /*
- *  Licensed to the Apache Software Foundation (ASF) under one or more
- *  contributor license agreements.  See the NOTICE file distributed with
- *  this work for additional information regarding copyright ownership.
- *  The ASF licenses this file to You under the Apache License, Version 2.0
- *  (the "License"); you may not use this file except in compliance with
- *  the License.  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
  */
 package org.apache.tomcat.spdy;
 
 import java.io.IOException;
 
-import org.apache.tomcat.jni.SSLExt;
+import org.apache.tomcat.spdy.SpdyFramer.CompressSupport;
 
 import com.jcraft.jzlib.JZlib;
 import com.jcraft.jzlib.ZStream;
 
-
-/** 
- * The 'real' SPDY protocol - used by chrome and browsers, with SSL NPN 
- * extension and header compression.
- * 
- * The base class is intended for SPDY in a proxy environment, where SSL, 
- * NPN and compression are handled by a frontend proxy/load balancer.
- * 
- */
-public class SpdyFramerNPN extends SpdyFramer {
+public class CompressJzlib implements CompressSupport {
     public static long DICT_ID = 3751956914L;
     // Make sure to use the latest from net/spdy/spdy_framer.cc, not from spec
     private static String SPDY_DICT_S = 
@@ -83,49 +60,10 @@ public class SpdyFramerNPN extends SpdyFramer {
     byte[] decompressBuffer;
     byte[] compressBuffer;
     
-    
-    SpdyFramerNPN(LightChannel socket) {
-        super(socket);
+
+    public CompressJzlib() {
         setDictionary(SPDY_DICT, DICT_ID);
     }
-    
-    public static boolean checkNPN(LightChannel socket) {
-        byte[] npn = new byte[8];
-        int npnLen = 0;
-        try {
-            long aprSocket = ((LightChannelApr) socket).socket;
-            npnLen = SSLExt.getNPN(aprSocket, npn);
-        } catch (Throwable t) {
-            // ignore
-            return false;
-        }
-        if (npnLen == 6 && npn[0] == 's' && npn[1] == 'p' && npn[2] == 'd'
-                && npn[3] == 'y') {
-            
-            return true;
-        }    
-        return false;
-    }
-    
-    public static boolean checkNPN(byte[] npn, int len) {
-        // Quick check
-        return npn[0] == 's';
-    }
-    
-    public static void setNPN(long sslContext) {
-        try {
-            String npn = "spdy/2";
-            byte[] spdyNPN = new byte[npn.length() + 2];
-            System.arraycopy(npn.getBytes(), 0, spdyNPN, 1, npn.length());
-            spdyNPN[0] = (byte) npn.length();
-            spdyNPN[npn.length() + 1] = 0;        
-            SSLExt.setNPN(sslContext, spdyNPN, spdyNPN.length);
-        } catch (Throwable t) {
-            log.warn("SPDY NPN not available");
-        }        
-    }
-    
-    
     
     public void recycle() {
         if (cStream == null) {
@@ -152,33 +90,16 @@ public class SpdyFramerNPN extends SpdyFramer {
 
     }
     
-    public SpdyFramerNPN setDictionary(byte[] dict, long id) {
+    public void setDictionary(byte[] dict, long id) {
         init();
         this.dict = dict;
         this.dictId = id;
         cStream.deflateSetDictionary(dict, dict.length);
-        return this;
     }
-
-//    public void compress(IOBuffer in, IOBuffer out) throws IOException {
-//        init();
-//        BBuffer bb = in.popFirst();
-//        
-//        while (bb != null) {
-//            // TODO: only the last one needs flush
-//
-//            // TODO: size missmatches ?
-//            compress(bb, out, false);
-//            bb = in.popFirst();
-//        }
-//        
-//        if (in.isClosedAndEmpty()) {
-//            compressEnd(out);
-//        }
-//    }
-//    
+    
+    
     @Override
-    protected void compress(SpdyFrame frame) throws IOException {
+    public void compress(SpdyFrame frame) throws IOException {
         // TODO: only the last one needs flush
         // TODO: size missmatches ?
         init();
@@ -214,26 +135,9 @@ public class SpdyFramerNPN extends SpdyFramer {
 //            compressEnd(out);
 //        }
     }
-//
-//    private void compressEnd(IOBuffer out) throws IOException {
-//        while (true) {
-//            BBuffer outB = out.getAppendBuffer();
-//            cStream.next_out = outB.array();
-//        
-//            cStream.next_out_index = outB.end();
-//            cStream.avail_out = outB.appendSpace();
-//            cStream.deflate(JZlib.Z_FINISH);
-//            cStream.deflateEnd();
-//            
-//            outB.end(cStream.next_out_index);
-//            if (cStream.avail_out > 0) {
-//                break;
-//            }
-//        }
-//    }
-
+    
     @Override
-    protected void decompress(SpdyFrame frame) throws IOException {
+    public void decompress(SpdyFrame frame) throws IOException {
         // stream id ( 4 ) + unused ( 2 ) 
         // nvCount is compressed in impl - spec is different
         init();
@@ -290,4 +194,3 @@ public class SpdyFramerNPN extends SpdyFramer {
     }
     
 }
-

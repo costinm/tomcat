@@ -26,6 +26,7 @@ import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.Iterator;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 
 import org.apache.juli.logging.Log;
@@ -33,6 +34,9 @@ import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.spdy.LightChannel;
 import org.apache.tomcat.spdy.LightChannelJio;
 import org.apache.tomcat.spdy.LightProtocol;
+import org.apache.tomcat.spdy.SpdyChannelProcessor;
+import org.apache.tomcat.spdy.SpdyContext;
+import org.apache.tomcat.spdy.SpdyCoyoteProcessor;
 import org.apache.tomcat.spdy.SpdyFramer;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
@@ -93,6 +97,22 @@ public class JIoEndpoint extends AbstractEndpoint {
     public void setServerSocketFactory(ServerSocketFactory factory) { this.serverSocketFactory = factory; }
     public ServerSocketFactory getServerSocketFactory() { return serverSocketFactory; }
 
+    protected SpdyContext spdyContext;
+    @Override
+    public void setSpdy(String mode) {
+        super.setSpdy(mode);
+        spdyContext = new SpdyContext() {
+            @Override
+            public SpdyChannelProcessor getProcessor(SpdyFramer framer) {
+                return new SpdyCoyoteProcessor(framer, JIoEndpoint.this);
+            }
+            
+            public Executor getExecutor() {
+                return JIoEndpoint.this.getExecutor();
+            }
+        };
+    }
+    
     /**
      * Port in use.
      */
@@ -307,11 +327,11 @@ public class JIoEndpoint extends AbstractEndpoint {
                     }
 
                     if ((state != SocketState.CLOSED)) {
-                        if (spdy != null) {
+                        if (spdyContext != null) {
+                            // Fully blocking mode.
                             LightChannel ch =
                                     new LightChannelJio(socket.getSocket());
-                            LightProtocol proto = SpdyFramer.getSpdy(ch, 
-                                    spdy, JIoEndpoint.this);
+                            LightProtocol proto = spdyContext.getSpdy(ch); 
                             proto.onData();
                             state = SocketState.CLOSED;
                         } else {

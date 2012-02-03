@@ -31,12 +31,18 @@ public class SpdyFrame {
             if (type == 6) {
                 return "C PING " + read32(data, 0);
             }
-            return "C t=" + type + " " + " L=" + size +
-                  " off=" + off + " S=" + streamId +   
+            return "C" + 
+                " S=" + streamId +   
                 (flags != 0 ? " F=" + flags: "") +
-                (version != 2 ? "  v" + version: "");
+                (version != 2 ? "  v" + version: "") + 
+                " t=" + type + 
+                " L=" + size +
+                "/" + off;
         } else {
-            return "D L=" + size + " S=" + streamId + " off=" + off;
+            return "D" + 
+                    " S=" + streamId +
+                    (flags != 0 ? " F=" + flags: "") +
+                    " L=" + size + "/" + off;
         }
      }
     
@@ -47,14 +53,14 @@ public class SpdyFrame {
             head[2] = 0;
             head[3] = (byte) type;
             head[4] = (byte) flags;
-            if (type == SpdyFrameHandler.TYPE_SYN_STREAM) {
+            if (type == SpdyFramer.TYPE_SYN_STREAM) {
                 append24(head, 5, size + 10);                
                 append32(head, 8, streamId);
                 append32(head, 12, associated);
                 head[16] = 0;
                 head[17] = 0;
                 return 18;
-            } else if (type == SpdyFrameHandler.TYPE_SYN_REPLY) {
+            } else if (type == SpdyFramer.TYPE_SYN_REPLY) {
                 append24(head, 5, size + 6);                
                 append32(head, 8, streamId);
                 head[12] = 0;

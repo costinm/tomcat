@@ -48,7 +48,6 @@ public class LightChannelApr implements LightChannel {
      */
     @Override
     public int read(byte[] data, int off, int len) {
-        System.err.println("RECV: " + socket+ " " + len);
         if (socket == 0) {
             return 0;
         }

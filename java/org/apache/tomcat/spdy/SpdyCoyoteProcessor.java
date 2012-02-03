@@ -28,21 +28,33 @@ import org.apache.coyote.AsyncContextCallback;
 import org.apache.coyote.InputBuffer;
 import org.apache.coyote.OutputBuffer;
 import org.apache.coyote.Request;
+import org.apache.coyote.RequestInfo;
 import org.apache.coyote.Response;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.buf.Ascii;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
+import org.apache.tomcat.util.http.HttpMessages;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.net.AbstractEndpoint;
+import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SocketStatus;
 import org.apache.tomcat.util.net.SocketWrapper;
-import org.apache.tomcat.util.net.AbstractEndpoint.Handler;
-import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 
+/**
+ * Dispatch a SPDY stream.
+ * 
+ * Based on the AJP processor.
+ */
 public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol> 
-        implements SpdyChannelProcessor {
+        implements SpdyChannelProcessor, Runnable {
 
+    // TODO: handle input
+    // TODO: recycle
+    // TODO: swallow input ( recycle only after input close )
+    // TODO: find a way to inject an OutputBuffer, or interecept close() - 
+    // so we can send FIN in the last data packet.
+    
     private SpdyFramer spdy;
     private int channelId;
     byte[] requestHead;
@@ -51,9 +63,11 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
 
     SpdyFrame oframe = new SpdyFrame();
     SpdyFrame rframe = new SpdyFrame();
+    private boolean finished;
 
     public SpdyCoyoteProcessor(SpdyFramer spdy, AbstractEndpoint endpoint) {
         super(endpoint);
+        
         this.spdy = spdy;
         
         request.setInputBuffer(new LiteInputBuffer());
@@ -105,20 +119,20 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
     
     
     @Override
-    public void dataFrame(SpdyFrame currentInFrame) {
+    public void onDataFrame(SpdyFrame currentInFrame) {
+        // TODO: take the data[], queue it to the InputBuffer.
     }
 
     @Override
-    public void setChannelId(int chId) {
-        this.channelId = chId;
-    }
-
-    @Override
-    public void request(SpdyFrame frame) throws IOException {
+    public void onSynStream(SpdyFrame frame) throws IOException {
         // We need to make a copy - the frame buffer will be reused. 
         // We use the 'wrap' methods of MimeHeaders - which should be 
         // lighter on mem in some cases.
-    
+        this.channelId = frame.streamId;
+        
+        RequestInfo rp = request.getRequestProcessor();
+        rp.setStage(org.apache.coyote.Constants.STAGE_PREPARE);
+        
         if (requestHead == null || requestHead.length < frame.size) {
             requestHead = new byte[frame.size];
         }
@@ -171,10 +185,20 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
             }
         }
         
+    }
+
+    /**
+     * Execute the request.
+     */
+    @Override
+    public void run() {
+        RequestInfo rp = request.getRequestProcessor();
         // 
         AbstractProtocol proto = (AbstractProtocol) endpoint.getProtocol();
+        adapter = proto.getAdapter();
         try {
-            proto.getAdapter().service(request, response);
+            rp.setStage(org.apache.coyote.Constants.STAGE_SERVICE);
+            adapter.service(request, response);
         } catch (InterruptedIOException e) {
             error = true;
         } catch (Throwable t) {
@@ -183,19 +207,45 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
             // 500 - Internal Server Error
             t.printStackTrace();
             response.setStatus(500);
-            proto.getAdapter().log(request, response, 0);
+            adapter.log(request, response, 0);
             error = true;
         }
         
         // TODO: async, etc ( detached mode - use a special light protocol)
+   
+        // Finish the response if not done yet
+        if (!finished) {
+            try {
+                finish();
+            } catch (Throwable t) {
+                ExceptionUtils.handleThrowable(t);
+                error = true;
+            }
+        }
+
+        if (error) {
+            response.setStatus(500);
+        }
         
+        request.updateCounters();
+        rp.setStage(org.apache.coyote.Constants.STAGE_KEEPALIVE);
+        // TODO: recycle
+    }
+
+
+    private void finish() {
         if (!response.isCommitted()) {
             response.action(ActionCode.COMMIT, response);
         }
-        response.finish();
         
-        // TODO: recycle
+        if (finished)
+            return;
+
+        finished = true;
+        
+        response.finish();
     }
+    
 
     static final byte[] EMPTY=new byte[0];
     // Processor implementation
@@ -219,7 +269,7 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
         if (!response.isCommitted()) {
             // Validate and write response headers
             try {
-                prepareResponse();
+                sendSynReply();
             } catch (IOException e) {
                 // Set error flag
                 error = true;
@@ -235,6 +285,8 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
     public void action(ActionCode actionCode, Object param) {
         System.err.println(actionCode);
 
+        // TODO: async
+        
         if (actionCode == ActionCode.COMMIT) {
             maybeCommit();
         } else if (actionCode == ActionCode.CLIENT_FLUSH) {
@@ -369,8 +421,34 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
     private static byte[] HTTP11 = "HTTP/1.1".getBytes();
     private static byte[] OK200 = "200 OK".getBytes();
     
-    private void prepareResponse() throws IOException {
-        rframe.type = SpdyFrameHandler.TYPE_SYN_REPLY;
+    /**
+     * When committing the response, we have to validate the set of headers, as
+     * well as setup the response filters.
+     */
+    protected void sendSynReply() throws IOException {
+
+        response.setCommitted(true);
+
+        // Special headers
+        MimeHeaders headers = response.getMimeHeaders();
+        String contentType = response.getContentType();
+        if (contentType != null) {
+            headers.setValue("Content-Type").setString(contentType);
+        }
+        String contentLanguage = response.getContentLanguage();
+        if (contentLanguage != null) {
+            headers.setValue("Content-Language").setString(contentLanguage);
+        }
+        long contentLength = response.getContentLengthLong();
+        if (contentLength >= 0) {
+            headers.setValue("Content-Length").setLong(contentLength);
+        }
+
+        sendResponseHead();
+    }
+    
+    private void sendResponseHead() throws IOException {
+        rframe.type = SpdyFramer.TYPE_SYN_REPLY;
         rframe.c = true;
         rframe.flags = 0;
         rframe.streamId = channelId;
@@ -394,11 +472,25 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
         }
         rframe.appendString(STATUS, 0, STATUS.length);
         
+
         if (response.getStatus() == 0) {
             rframe.appendString(OK200, 0, OK200.length);            
         } else {
+            // HTTP header contents
+            String message = null;
+            if (org.apache.coyote.Constants.USE_CUSTOM_STATUS_MSG_IN_HEADER &&
+                    HttpMessages.isSafeInHttpHeader(response.getMessage())) {
+                message = response.getMessage();
+            }
+            if (message == null){
+                message = HttpMessages.getMessage(response.getStatus());
+            }
+            if (message == null) {
+                // mod_jk + httpd 2.x fails with a null status message - bug 45026
+                message = Integer.toString(response.getStatus());
+            }
             // TODO: optimize
-            String status = response.getStatus() + " " + response.getMessage();
+            String status = response.getStatus() + " " + message;
             byte[] statusB = status.getBytes();
             rframe.appendString(statusB, 0, statusB.length);            
         }

@@ -24,6 +24,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 
 import org.apache.juli.logging.Log;
@@ -37,13 +38,19 @@ import org.apache.tomcat.jni.Poll;
 import org.apache.tomcat.jni.Pool;
 import org.apache.tomcat.jni.SSL;
 import org.apache.tomcat.jni.SSLContext;
+import org.apache.tomcat.jni.SSLExt;
 import org.apache.tomcat.jni.SSLSocket;
 import org.apache.tomcat.jni.Sockaddr;
 import org.apache.tomcat.jni.Socket;
 import org.apache.tomcat.jni.Status;
+import org.apache.tomcat.spdy.CompressJzlib;
 import org.apache.tomcat.spdy.LightChannelApr;
 import org.apache.tomcat.spdy.LightProtocol;
+import org.apache.tomcat.spdy.SpdyChannelProcessor;
+import org.apache.tomcat.spdy.SpdyContext;
+import org.apache.tomcat.spdy.SpdyCoyoteProcessor;
 import org.apache.tomcat.spdy.SpdyFramer;
+import org.apache.tomcat.spdy.SpdyFramer.CompressSupport;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.net.AbstractEndpoint.Acceptor.AcceptorState;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
@@ -96,6 +103,8 @@ public class AprEndpoint extends AbstractEndpoint {
      */
     protected long sslContext = 0;
 
+    // APR connector supports full NPN mode.
+    protected SpdyContext spdyContext;
 
     protected ConcurrentLinkedQueue<SocketWrapper<Long>> waitingRequests =
         new ConcurrentLinkedQueue<SocketWrapper<Long>>();
@@ -585,7 +594,22 @@ public class AprEndpoint extends AbstractEndpoint {
             SSLContext.setVerify(sslContext, value, SSLVerifyDepth);
             
             if ("npn".equals(spdy)) {
-                SpdyFramer.setNPN(sslContext);
+                if (0 == SSLExt.setNPN(sslContext, SpdyContext.SPDY_NPN_OUT)) {
+                    spdyContext = new SpdyContext() {
+                        @Override
+                        public SpdyChannelProcessor getProcessor(SpdyFramer framer) {
+                            return new SpdyCoyoteProcessor(framer, AprEndpoint.this);
+                        }
+                        public CompressSupport getCompressor() {
+                            return new CompressJzlib();
+                        }
+                        public Executor getExecutor() {
+                            return AprEndpoint.this.getExecutor();
+                        }
+                    };
+                } else {
+                    log.warn("SPDY/NPN not supported");
+                }
             }
             
             // For now, sendfile is not supported with SSL
@@ -1814,10 +1838,13 @@ public class AprEndpoint extends AbstractEndpoint {
                         return;
                     }
                     LightProtocol proto = null;
-                    if (spdy != null) {
-                        proto = SpdyFramer.getSpdy(
-                                new LightChannelApr(socket.getSocket().longValue()), 
-                                spdy, AprEndpoint.this);
+                    if (spdyContext != null) {
+                        if (SSLExt.checkNPN(socket.getSocket(), 
+                                SpdyContext.SPDY_NPN)) {
+                            // NPN negotiated
+                            proto = spdyContext.getSpdy(
+                                    new LightChannelApr(socket.getSocket().longValue()));
+                        }
                     }
                     
                     // Process the request from this socket

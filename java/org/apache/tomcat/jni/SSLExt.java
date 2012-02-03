@@ -17,6 +17,9 @@
 
 package org.apache.tomcat.jni;
 
+import org.apache.tomcat.spdy.LightChannel;
+import org.apache.tomcat.spdy.LightChannelApr;
+
 /** 
  * Support TLS extensions and extra methods. 
  * 
@@ -42,7 +45,7 @@ public final class SSLExt {
      * 
      * Not supported in 1.0.0, seems to be in 1.0.1 and after
      */
-    public static native void setNPN(long tcctx, byte[] proto, int len);
+    public static native int setNPN(long tcctx, byte[] proto, int len);
     
     /**
      * Get other side's advertised protocols. 
@@ -114,6 +117,39 @@ public final class SSLExt {
      * SSL_set_mode
      */
     public static native int sslSetMode(long tcsock, int mode);
+
+    public static int setNPN(long sslContext, byte[] spdyNPN) {
+        try {
+            return SSLExt.setNPN(sslContext, spdyNPN, spdyNPN.length);
+        } catch (Throwable t) {
+            t.printStackTrace();
+            return -1;
+        }        
+    }
+    
+    /**
+     * Higher level method, checking if the specified protocol has been 
+     * negotiated.
+     */
+    public static boolean checkNPN(long tcsocket, byte[] expected) {
+        byte[] npn = new byte[expected.length + 1];
+        int npnLen = 0;
+        try {
+            npnLen = SSLExt.getNPN(tcsocket, npn);
+            if (npnLen != expected.length) {
+                return false;
+            }
+        } catch (Throwable t) {
+            // ignore
+            return false;
+        }
+        for (int i = 0; i < expected.length; i++) {
+            if (expected[i] != npn[i]) {
+                return false;
+            }
+        }   
+        return true;
+    }
     
     
     

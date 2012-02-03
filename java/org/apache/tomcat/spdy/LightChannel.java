@@ -32,8 +32,14 @@ import java.io.IOException;
  * MEMORY: please keep it light, just minimal state.
  */
 public interface LightChannel {
+    
     /** 
-     * Blocking write. 
+     * Write. The current implementation is blocking - write is typically
+     * invoked from user code running in the thread pool, so it should be 
+     * ok to block.
+     *  
+     * TODO: add a separate non-blocking write, with a callback 
+     * and flow control to support output in the IO thread. 
      */
     public int write(byte[] data, int off, int len) throws IOException;
     
