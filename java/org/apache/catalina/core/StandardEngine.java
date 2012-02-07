@@ -18,6 +18,7 @@ package org.apache.catalina.core;
 
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
+import java.io.File;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -27,13 +28,13 @@ import org.apache.catalina.ContainerEvent;
 import org.apache.catalina.ContainerListener;
 import org.apache.catalina.Context;
 import org.apache.catalina.Engine;
-import org.apache.catalina.Globals;
 import org.apache.catalina.Host;
 import org.apache.catalina.Lifecycle;
 import org.apache.catalina.LifecycleEvent;
 import org.apache.catalina.LifecycleException;
 import org.apache.catalina.LifecycleListener;
 import org.apache.catalina.Realm;
+import org.apache.catalina.Server;
 import org.apache.catalina.Service;
 import org.apache.catalina.connector.Request;
 import org.apache.catalina.connector.Response;
@@ -92,12 +93,6 @@ public class StandardEngine extends ContainerBase implements Engine {
      * The <code>Service</code> that owns this Engine, if any.
      */
     private Service service = null;
-
-    /** Allow the base dir to be specified explicitly for
-     * each engine. In time we should stop using catalina.base property -
-     * otherwise we loose some flexibility.
-     */
-    private String baseDir = null;
 
     /**
      * The JVM Route ID for this Tomcat instance. All Route ID's must be unique
@@ -207,20 +202,6 @@ public class StandardEngine extends ContainerBase implements Engine {
         this.service = service;
     }
 
-    public String getBaseDir() {
-        if( baseDir==null ) {
-            baseDir=System.getProperty(Globals.CATALINA_BASE_PROP);
-        }
-        if( baseDir==null ) {
-            baseDir=System.getProperty(Globals.CATALINA_HOME_PROP);
-        }
-        return baseDir;
-    }
-
-    public void setBaseDir(String baseDir) {
-        this.baseDir = baseDir;
-    }
-
     // --------------------------------------------------------- Public Methods
 
 
@@ -253,6 +234,15 @@ public class StandardEngine extends ContainerBase implements Engine {
         throw new IllegalArgumentException
             (sm.getString("standardEngine.notParent"));
 
+    }
+
+
+    @Override
+    protected void initInternal() throws LifecycleException {
+        // Ensure that a Realm is present before any attempt is made to start
+        // one. This will create the default NullRealm if necessary.
+        getRealm();
+        super.initInternal();
     }
 
 
@@ -369,12 +359,36 @@ public class StandardEngine extends ContainerBase implements Engine {
         return (ClassLoader.getSystemClassLoader());
     }
 
+
+    @Override
+    public File getCatalinaBase() {
+        if (service != null) {
+            Server s = service.getServer();
+            if (s != null) {
+                File base = s.getCatalinaBase();
+                if (base != null) {
+                    return base;
+                }
+            }
+        }
+        // Fall-back
+        return super.getCatalinaBase();
+    }
+
+
     // -------------------- JMX registration  --------------------
 
     @Override
     protected String getObjectNameKeyProperties() {
         return "type=Engine";
     }
+
+
+    @Override
+    protected String getDomainInternal() {
+        return getName();
+    }
+
 
     // ----------------------------------------------------------- Inner classes
     protected static final class NoopAccessLog implements AccessLog {

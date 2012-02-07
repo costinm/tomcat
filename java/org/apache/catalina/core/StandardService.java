@@ -14,8 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-
 package org.apache.catalina.core;
 
 
@@ -28,12 +26,12 @@ import javax.management.ObjectName;
 import org.apache.catalina.Container;
 import org.apache.catalina.Engine;
 import org.apache.catalina.Executor;
+import org.apache.catalina.JmxEnabled;
 import org.apache.catalina.LifecycleException;
 import org.apache.catalina.LifecycleState;
 import org.apache.catalina.Server;
 import org.apache.catalina.Service;
 import org.apache.catalina.connector.Connector;
-import org.apache.catalina.mbeans.MBeanUtils;
 import org.apache.catalina.util.LifecycleMBeanBase;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -523,8 +521,8 @@ public class StandardService extends LifecycleMBeanBase implements Service {
 
         // Initialize any Executors
         for (Executor executor : findExecutors()) {
-            if (executor instanceof LifecycleMBeanBase) {
-                ((LifecycleMBeanBase) executor).setDomain(getDomain());
+            if (executor instanceof JmxEnabled) {
+                ((JmxEnabled) executor).setDomain(getDomain());
             }
             executor.init();
         }
@@ -598,10 +596,25 @@ public class StandardService extends LifecycleMBeanBase implements Service {
         support.firePropertyChange("parentClassLoader", oldParentClassLoader,
                                    this.parentClassLoader);
     }
+
     @Override
     protected String getDomainInternal() {
+        String domain = null;
+        Container engine = getContainer();
 
-        return MBeanUtils.getDomain(this);
+        // Use the engine name first
+        if (engine != null) {
+            domain = engine.getName();
+        }
+
+        // No engine or no engine name, use the service name
+        if (domain == null) {
+            domain = getName();
+        }
+
+        // No service name, return null which will trigger the use of the
+        // default
+        return domain;
     }
 
     @Override

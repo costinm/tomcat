@@ -22,15 +22,15 @@ import java.io.File;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
+import org.apache.catalina.Container;
 import org.apache.catalina.Context;
 import org.apache.catalina.Engine;
 import org.apache.catalina.Host;
+import org.apache.catalina.JmxEnabled;
 import org.apache.catalina.Server;
 import org.apache.catalina.Service;
 import org.apache.catalina.Valve;
-import org.apache.catalina.authenticator.SingleSignOn;
 import org.apache.catalina.connector.Connector;
-import org.apache.catalina.core.ContainerBase;
 import org.apache.catalina.core.StandardContext;
 import org.apache.catalina.core.StandardEngine;
 import org.apache.catalina.core.StandardHost;
@@ -44,10 +44,6 @@ import org.apache.catalina.realm.UserDatabaseRealm;
 import org.apache.catalina.session.StandardManager;
 import org.apache.catalina.startup.ContextConfig;
 import org.apache.catalina.startup.HostConfig;
-import org.apache.catalina.valves.AccessLogValve;
-import org.apache.catalina.valves.RemoteAddrValve;
-import org.apache.catalina.valves.RemoteHostValve;
-import org.apache.catalina.valves.ValveBase;
 
 
 /**
@@ -140,10 +136,10 @@ public class MBeanFactory {
     }
 
    /**
-     * Get Parent ContainerBase to add its child component
+     * Get Parent Container to add its child component
      * from parent's ObjectName
      */
-    private ContainerBase getParentContainerFromParent(ObjectName pname)
+    private Container getParentContainerFromParent(ObjectName pname)
         throws Exception {
 
         String type = pname.getKeyProperty("type");
@@ -156,16 +152,16 @@ public class MBeanFactory {
             int i = name.indexOf("/");
             String hostName = name.substring(0,i);
             String path = name.substring(i);
-            Host host = (Host) engine.findChild(hostName);
+            Container host = engine.findChild(hostName);
             String pathStr = getPathStr(path);
-            StandardContext context = (StandardContext)host.findChild(pathStr);
+            Container context = host.findChild(pathStr);
             return context;
         } else if (type != null) {
             if (type.equals("Engine")) {
                 return engine;
             } else if (type.equals("Host")) {
                 String hostName = pname.getKeyProperty("host");
-                StandardHost host = (StandardHost) engine.findChild(hostName);
+                Container host = engine.findChild(hostName);
                 return host;
             }
         }
@@ -178,25 +174,25 @@ public class MBeanFactory {
      * Get Parent ContainerBase to add its child component
      * from child component's ObjectName  as a String
      */
-    private ContainerBase getParentContainerFromChild(ObjectName oname)
+    private Container getParentContainerFromChild(ObjectName oname)
         throws Exception {
 
         String hostName = oname.getKeyProperty("host");
         String path = oname.getKeyProperty("path");
         Service service = getService(oname);
-        StandardEngine engine = (StandardEngine) service.getContainer();
+        Container engine = service.getContainer();
         if (hostName == null) {
             // child's container is Engine
             return engine;
         } else if (path == null) {
             // child's container is Host
-            StandardHost host = (StandardHost) engine.findChild(hostName);
+            Container host = engine.findChild(hostName);
             return host;
         } else {
             // child's container is Context
-            StandardHost host = (StandardHost) engine.findChild(hostName);
+            Container host = engine.findChild(hostName);
             path = getPathStr(path);
-            StandardContext context = (StandardContext) host.findChild(path);
+            Container context = host.findChild(path);
             return context;
         }
     }
@@ -225,28 +221,6 @@ public class MBeanFactory {
             throw new Exception("Service with the domain is not found");
         }
         return service;
-
-    }
-
-
-    /**
-     * Create a new AccessLoggerValve.
-     *
-     * @param parent MBean Name of the associated parent component
-     *
-     * @exception Exception if an MBean cannot be created or registered
-     */
-    public String createAccessLoggerValve(String parent)
-        throws Exception {
-
-        ObjectName pname = new ObjectName(parent);
-        // Create a new AccessLogValve instance
-        AccessLogValve accessLogger = new AccessLogValve();
-        ContainerBase containerBase = getParentContainerFromParent(pname);
-        // Add the new instance to its parent component
-        containerBase.getPipeline().addValve(accessLogger);
-        ObjectName oname = accessLogger.getObjectName();
-        return (oname.toString());
 
     }
 
@@ -288,9 +262,9 @@ public class MBeanFactory {
 
         // Add the new instance to its parent component
         ObjectName pname = new ObjectName(parent);
-        ContainerBase containerBase = getParentContainerFromParent(pname);
+        Container container = getParentContainerFromParent(pname);
         // Add the new instance to its parent component
-        containerBase.setRealm(realm);
+        container.setRealm(realm);
         // Return the corresponding MBean name
         ObjectName oname = realm.getObjectName();
         if (oname != null) {
@@ -386,9 +360,9 @@ public class MBeanFactory {
 
         // Add the new instance to its parent component
         ObjectName pname = new ObjectName(parent);
-        ContainerBase containerBase = getParentContainerFromParent(pname);
+        Container container = getParentContainerFromParent(pname);
         // Add the new instance to its parent component
-        containerBase.setRealm(realm);
+        container.setRealm(realm);
         // Return the corresponding MBean name
         ObjectName oname = realm.getObjectName();
 
@@ -416,9 +390,9 @@ public class MBeanFactory {
 
         // Add the new instance to its parent component
         ObjectName pname = new ObjectName(parent);
-        ContainerBase containerBase = getParentContainerFromParent(pname);
+        Container container = getParentContainerFromParent(pname);
         // Add the new instance to its parent component
-        containerBase.setRealm(realm);
+        container.setRealm(realm);
         // Return the corresponding MBean name
         ObjectName oname = realm.getObjectName();
 
@@ -447,9 +421,9 @@ public class MBeanFactory {
 
         // Add the new instance to its parent component
         ObjectName pname = new ObjectName(parent);
-        ContainerBase containerBase = getParentContainerFromParent(pname);
+        Container container = getParentContainerFromParent(pname);
         // Add the new instance to its parent component
-        containerBase.setRealm(realm);
+        container.setRealm(realm);
         // Return the corresponding MBean name
         ObjectName oname = realm.getObjectName();
         if (oname != null) {
@@ -457,75 +431,6 @@ public class MBeanFactory {
         } else {
             return null;
         }
-
-    }
-
-
-    /**
-     * Create a new Remote Address Filter Valve.
-     *
-     * @param parent MBean Name of the associated parent component
-     *
-     * @exception Exception if an MBean cannot be created or registered
-     */
-    public String createRemoteAddrValve(String parent)
-        throws Exception {
-
-        // Create a new RemoteAddrValve instance
-        RemoteAddrValve valve = new RemoteAddrValve();
-
-        // Add the new instance to its parent component
-        ObjectName pname = new ObjectName(parent);
-        ContainerBase containerBase = getParentContainerFromParent(pname);
-        containerBase.getPipeline().addValve(valve);
-        ObjectName oname = valve.getObjectName();
-        return (oname.toString());
-
-    }
-
-
-     /**
-     * Create a new Remote Host Filter Valve.
-     *
-     * @param parent MBean Name of the associated parent component
-     *
-     * @exception Exception if an MBean cannot be created or registered
-     */
-    public String createRemoteHostValve(String parent)
-        throws Exception {
-
-        // Create a new RemoteHostValve instance
-        RemoteHostValve valve = new RemoteHostValve();
-
-        // Add the new instance to its parent component
-        ObjectName pname = new ObjectName(parent);
-        ContainerBase containerBase = getParentContainerFromParent(pname);
-        containerBase.getPipeline().addValve(valve);
-        ObjectName oname = valve.getObjectName();
-        return (oname.toString());
-
-    }
-
-
-    /**
-     * Create a new Single Sign On Valve.
-     *
-     * @param parent MBean Name of the associated parent component
-     *
-     * @exception Exception if an MBean cannot be created or registered
-     */
-    public String createSingleSignOn(String parent)
-        throws Exception {
-
-        // Create a new SingleSignOn instance
-        SingleSignOn valve = new SingleSignOn();
-
-        // Add the new instance to its parent component
-        ObjectName pname = new ObjectName(parent);
-        ContainerBase containerBase = getParentContainerFromParent(pname);
-        containerBase.getPipeline().addValve(valve);
-        ObjectName oname = valve.getObjectName();
-        return (oname.toString());
 
     }
 
@@ -683,7 +588,6 @@ public class MBeanFactory {
         engine.setDomain(domain);
         engine.setName(domain);
         engine.setDefaultHost(defaultHost);
-        engine.setBaseDir(baseDir);
 
         Service service = new StandardService();
         service.setContainer(engine);
@@ -710,9 +614,9 @@ public class MBeanFactory {
 
         // Add the new instance to its parent component
         ObjectName pname = new ObjectName(parent);
-        ContainerBase containerBase = getParentContainerFromParent(pname);
-        if (containerBase != null) {
-            containerBase.setManager(manager);
+        Container container = getParentContainerFromParent(pname);
+        if (container != null) {
+            container.setManager(manager);
         }
         ObjectName oname = manager.getObjectName();
         if (oname != null) {
@@ -742,9 +646,9 @@ public class MBeanFactory {
 
         // Add the new instance to its parent component
         ObjectName pname = new ObjectName(parent);
-        ContainerBase containerBase = getParentContainerFromParent(pname);
+        Container container = getParentContainerFromParent(pname);
         // Add the new instance to its parent component
-        containerBase.setRealm(realm);
+        container.setRealm(realm);
         // Return the corresponding MBean name
         ObjectName oname = realm.getObjectName();
         // FIXME getObjectName() returns null
@@ -756,6 +660,42 @@ public class MBeanFactory {
             return null;
         }
 
+    }
+
+
+    /**
+     * Create a new Valve and associate it with a {@link Container}.
+     *
+     * @param className The fully qualified class name of the {@link Valve} to
+     *                  create
+     * @param parent    The MBean name of the associated parent
+     *                  {@link Container}.
+     *
+     * @return  The MBean name of the {@link Valve} that was created or
+     *          <code>null</code> if the {@link Valve} does not implement
+     *          {@link JmxEnabled}.
+     */
+    public String createValve(String className, String parent)
+            throws Exception {
+
+        // Look for the parent
+        ObjectName parentName = new ObjectName(parent);
+        Container container = getParentContainerFromParent(parentName);
+
+        if (container == null) {
+            // TODO
+            throw new IllegalArgumentException();
+        }
+
+        Valve valve = (Valve) Class.forName(className).newInstance();
+
+        container.getPipeline().addValve(valve);
+
+        if (valve instanceof JmxEnabled) {
+            return ((JmxEnabled) valve).getObjectName().toString();
+        } else {
+            return null;
+        }
     }
 
 
@@ -774,9 +714,9 @@ public class MBeanFactory {
 
         // Add the new instance to its parent component
         ObjectName pname = new ObjectName(parent);
-        ContainerBase containerBase = getParentContainerFromParent(pname);
-        if (containerBase != null) {
-            containerBase.setLoader(loader);
+        Container container = getParentContainerFromParent(pname);
+        if (container != null) {
+            container.setLoader(loader);
         }
         // FIXME add Loader.getObjectName
         //ObjectName oname = loader.getObjectName();
@@ -911,7 +851,7 @@ public class MBeanFactory {
 
         ObjectName oname = new ObjectName(name);
         // Acquire a reference to the component to be removed
-        ContainerBase container = getParentContainerFromChild(oname);
+        Container container = getParentContainerFromChild(oname);
         container.setLoader(null);
 
     }
@@ -928,7 +868,7 @@ public class MBeanFactory {
 
         ObjectName oname = new ObjectName(name);
         // Acquire a reference to the component to be removed
-        ContainerBase container = getParentContainerFromChild(oname);
+        Container container = getParentContainerFromChild(oname);
         container.setManager(null);
 
     }
@@ -945,7 +885,7 @@ public class MBeanFactory {
 
         ObjectName oname = new ObjectName(name);
         // Acquire a reference to the component to be removed
-        ContainerBase container = getParentContainerFromChild(oname);
+        Container container = getParentContainerFromChild(oname);
         container.setRealm(null);
     }
 
@@ -981,10 +921,10 @@ public class MBeanFactory {
 
         // Acquire a reference to the component to be removed
         ObjectName oname = new ObjectName(name);
-        ContainerBase container = getParentContainerFromChild(oname);
+        Container container = getParentContainerFromChild(oname);
         Valve[] valves = container.getPipeline().getValves();
         for (int i = 0; i < valves.length; i++) {
-            ObjectName voname = ((ValveBase) valves[i]).getObjectName();
+            ObjectName voname = ((JmxEnabled) valves[i]).getObjectName();
             if (voname.equals(oname)) {
                 container.getPipeline().removeValve(valves[i]);
             }

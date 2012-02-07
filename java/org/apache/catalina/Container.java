@@ -16,8 +16,8 @@
  */
 package org.apache.catalina;
 
-
 import java.beans.PropertyChangeListener;
+import java.io.File;
 
 import javax.management.ObjectName;
 import javax.naming.directory.DirContext;
@@ -158,6 +158,24 @@ public interface Container extends Lifecycle {
      * Return the JMX name associated with this container.
      */
     public ObjectName getObjectName();
+
+
+    /**
+     * Obtain the domain under which this container will be / has been
+     * registered.
+     */
+    public String getDomain();
+
+
+    /**
+     * Calculate the key properties string to be added to an object's
+     * {@link ObjectName} to indicate that it is associated with this container.
+     *
+     * @return          A string suitable for appending to the ObjectName
+     *
+     */
+    public String getMBeanKeyProperties();
+
 
     /**
      * Return the Pipeline object that manages the Valves associated with
@@ -443,4 +461,10 @@ public interface Container extends Lifecycle {
      * @param   startStopThreads    The new number of threads to be used
      */
     public void setStartStopThreads(int startStopThreads);
+
+
+    /**
+     *
+     */
+    public File getCatalinaBase();
 }

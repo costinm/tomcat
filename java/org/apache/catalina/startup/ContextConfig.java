@@ -65,9 +65,7 @@ import org.apache.catalina.Server;
 import org.apache.catalina.Service;
 import org.apache.catalina.Valve;
 import org.apache.catalina.Wrapper;
-import org.apache.catalina.core.ContainerBase;
 import org.apache.catalina.core.StandardContext;
-import org.apache.catalina.core.StandardEngine;
 import org.apache.catalina.core.StandardHost;
 import org.apache.catalina.deploy.ErrorPage;
 import org.apache.catalina.deploy.FilterDef;
@@ -361,10 +359,6 @@ public class ContextConfig implements LifecycleListener {
             return;
         }
 
-        if (!(context instanceof ContainerBase)) {
-            return;     // Cannot install a Valve even if it would be needed
-        }
-
         // Has a Realm been configured for us to authenticate against?
         if (context.getRealm() == null) {
             log.error(sm.getString("contextConfig.missingRealm"));
@@ -429,10 +423,10 @@ public class ContextConfig implements LifecycleListener {
             }
         }
 
-        if (authenticator != null && context instanceof ContainerBase) {
-            Pipeline pipeline = ((ContainerBase) context).getPipeline();
+        if (authenticator != null) {
+            Pipeline pipeline = context.getPipeline();
             if (pipeline != null) {
-                ((ContainerBase) context).getPipeline().addValve(authenticator);
+                pipeline.addValve(authenticator);
                 if (log.isDebugEnabled()) {
                     log.debug(sm.getString(
                                     "contextConfig.authenticatorConfigured",
@@ -440,7 +434,6 @@ public class ContextConfig implements LifecycleListener {
                 }
             }
         }
-
     }
 
 
@@ -485,15 +478,6 @@ public class ContextConfig implements LifecycleListener {
     }
 
 
-    protected String getBaseDir() {
-        Container engineC=context.getParent().getParent();
-        if( engineC instanceof StandardEngine ) {
-            return ((StandardEngine)engineC).getBaseDir();
-        }
-        return System.getProperty(Globals.CATALINA_BASE_PROP);
-    }
-
-
     /**
      * Process the default configuration file, if it exists.
      */
@@ -513,7 +497,8 @@ public class ContextConfig implements LifecycleListener {
         if (!context.getOverride()) {
             File defaultContextFile = new File(defaultContextXml);
             if (!defaultContextFile.isAbsolute()) {
-                defaultContextFile =new File(getBaseDir(), defaultContextXml);
+                defaultContextFile =
+                        new File(context.getCatalinaBase(), defaultContextXml);
             }
             if (defaultContextFile.exists()) {
                 try {
@@ -825,9 +810,9 @@ public class ContextConfig implements LifecycleListener {
         }
 
         // Dump the contents of this pipeline if requested
-        if ((log.isDebugEnabled()) && (context instanceof ContainerBase)) {
+        if (log.isDebugEnabled()) {
             log.debug("Pipeline Configuration:");
-            Pipeline pipeline = ((ContainerBase) context).getPipeline();
+            Pipeline pipeline = context.getPipeline();
             Valve valves[] = null;
             if (pipeline != null) {
                 valves = pipeline.getValves();
@@ -1106,8 +1091,12 @@ public class ContextConfig implements LifecycleListener {
      * Get config base.
      */
     protected File getConfigBase() {
-        File configBase =
-            new File(System.getProperty(Globals.CATALINA_BASE_PROP), "conf");
+        File catalinaBase = context.getCatalinaBase();
+        if (catalinaBase == null) {
+            return null;
+        }
+
+        File configBase = new File(catalinaBase, "conf");
         if (!configBase.exists()) {
             return null;
         }
@@ -1627,7 +1616,8 @@ public class ContextConfig implements LifecycleListener {
         if (Constants.NoDefaultWebXml.equals(defaultWebXml)) {
             return null;
         }
-        return getWebXmlSource(defaultWebXml, getBaseDir());
+        return getWebXmlSource(defaultWebXml,
+                context.getCatalinaBase().getPath());
     }
 
     /**

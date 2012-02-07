@@ -18,6 +18,7 @@ package org.apache.catalina.core;
 
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetAddress;
@@ -35,7 +36,6 @@ import org.apache.catalina.Server;
 import org.apache.catalina.Service;
 import org.apache.catalina.deploy.NamingResources;
 import org.apache.catalina.mbeans.MBeanFactory;
-import org.apache.catalina.mbeans.MBeanUtils;
 import org.apache.catalina.startup.Catalina;
 import org.apache.catalina.util.LifecycleMBeanBase;
 import org.apache.catalina.util.ServerInfo;
@@ -160,8 +160,12 @@ public final class StandardServer extends LifecycleMBeanBase implements Server {
      */
     private volatile ServerSocket awaitSocket = null;
 
-    // ------------------------------------------------------------- Properties
+    private File catalinaHome = null;
 
+    private File catalinaBase = null;
+
+
+    // ------------------------------------------------------------- Properties
 
     /**
      * Return the global naming resources context.
@@ -583,8 +587,36 @@ public final class StandardServer extends LifecycleMBeanBase implements Server {
     }
 
 
-    // --------------------------------------------------------- Public Methods
+    @Override
+    public File getCatalinaBase() {
+        if (catalinaBase != null) {
+            return catalinaBase;
+        }
 
+        catalinaBase = getCatalinaHome();
+        return catalinaBase;
+    }
+
+
+    @Override
+    public void setCatalinaBase(File catalinaBase) {
+        this.catalinaBase = catalinaBase;
+    }
+
+
+    @Override
+    public File getCatalinaHome() {
+        return catalinaHome;
+    }
+
+
+    @Override
+    public void setCatalinaHome(File catalinaHome) {
+        this.catalinaHome = catalinaHome;
+    }
+
+
+    // --------------------------------------------------------- Public Methods
 
     /**
      * Add a property change listener to this component.
@@ -826,7 +858,7 @@ public final class StandardServer extends LifecycleMBeanBase implements Server {
         if (services.length > 0) {
             Service service = services[0];
             if (service != null) {
-                domain = MBeanUtils.getDomain(service);
+                domain = service.getDomain();
             }
         }
         return domain;

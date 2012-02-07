@@ -19,6 +19,7 @@ package org.apache.catalina.core;
 
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
+import java.io.File;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.ArrayList;
@@ -44,7 +45,10 @@ import org.apache.catalina.Cluster;
 import org.apache.catalina.Container;
 import org.apache.catalina.ContainerEvent;
 import org.apache.catalina.ContainerListener;
+import org.apache.catalina.Context;
+import org.apache.catalina.Engine;
 import org.apache.catalina.Globals;
+import org.apache.catalina.Host;
 import org.apache.catalina.Lifecycle;
 import org.apache.catalina.LifecycleException;
 import org.apache.catalina.LifecycleState;
@@ -53,9 +57,10 @@ import org.apache.catalina.Manager;
 import org.apache.catalina.Pipeline;
 import org.apache.catalina.Realm;
 import org.apache.catalina.Valve;
+import org.apache.catalina.Wrapper;
 import org.apache.catalina.connector.Request;
 import org.apache.catalina.connector.Response;
-import org.apache.catalina.mbeans.MBeanUtils;
+import org.apache.catalina.util.ContextName;
 import org.apache.catalina.util.LifecycleMBeanBase;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -291,6 +296,7 @@ public abstract class ContainerBase extends LifecycleMBeanBase
      */
     private int startStopThreads = 1;
     protected ThreadPoolExecutor startStopExecutor;
+
 
     // ------------------------------------------------------------- Properties
 
@@ -1332,8 +1338,18 @@ public abstract class ContainerBase extends LifecycleMBeanBase
     }
 
 
-    // ------------------------------------------------------ Protected Methods
+    @Override
+    public File getCatalinaBase() {
 
+        if (parent == null) {
+            return null;
+        }
+
+        return parent.getCatalinaBase();
+    }
+
+
+    // ------------------------------------------------------ Protected Methods
 
     /**
      * Notify all container event listeners that a particular event has
@@ -1390,7 +1406,51 @@ public abstract class ContainerBase extends LifecycleMBeanBase
 
     @Override
     protected String getDomainInternal() {
-        return MBeanUtils.getDomain(this);
+
+        Container p = this.getParent();
+        if (p == null) {
+            return null;
+        } else {
+            return p.getDomain();
+        }
+    }
+
+
+    @Override
+    public String getMBeanKeyProperties() {
+        Container c = this;
+        StringBuilder keyProperties = new StringBuilder();
+        int containerCount = 0;
+
+        // Work up container hierarchy, add a component to the name for
+        // each container
+        while (!(c instanceof Engine)) {
+            if (c instanceof Wrapper) {
+                keyProperties.append(",servlet=");
+                keyProperties.append(c.getName());
+            } else if (c instanceof Context) {
+                keyProperties.append(",context=");
+                ContextName cn = new ContextName(c.getName());
+                keyProperties.append(cn.getDisplayName());
+            } else if (c instanceof Host) {
+                keyProperties.append(",host=");
+                keyProperties.append(c.getName());
+            } else if (c == null) {
+                // May happen in unit testing and/or some embedding scenarios
+                keyProperties.append(",container");
+                keyProperties.append(containerCount++);
+                keyProperties.append("=null");
+                break;
+            } else {
+                // Should never happen...
+                keyProperties.append(",container");
+                keyProperties.append(containerCount++);
+                keyProperties.append('=');
+                keyProperties.append(c.getName());
+            }
+            c = c.getParent();
+        }
+        return keyProperties.toString();
     }
 
     public ObjectName[] getChildren() {

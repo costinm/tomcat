@@ -154,11 +154,9 @@ public class Tomcat {
      *
      * By default, if this method is not called, we use:
      *  - system properties - catalina.base, catalina.home
-     *  - $HOME/tomcat.$PORT
-     * ( /tmp doesn't seem a good choice for security ).
+     *  - $PWD/tomcat.$PORT
+     * (/tmp doesn't seem a good choice for security).
      *
-     *
-     * TODO: better default ? Maybe current dir ?
      * TODO: disable work dir if not needed ( no jsp, etc ).
      */
     public void setBaseDir(String basedir) {
@@ -459,11 +457,12 @@ public class Tomcat {
             return server;
         }
 
-        initBaseDir();
-
         System.setProperty("catalina.useNaming", "false");
 
         server = new StandardServer();
+
+        initBaseDir();
+
         server.setPort( -1 );
 
         service = new StandardService();
@@ -591,20 +590,33 @@ public class Tomcat {
             // Create a temp dir.
             basedir = System.getProperty("user.dir") +
                 "/tomcat." + port;
-            File home = new File(basedir);
-            home.mkdir();
-            if (!home.isAbsolute()) {
-                try {
-                    basedir = home.getCanonicalPath();
-                } catch (IOException e) {
-                    basedir = home.getAbsolutePath();
-                }
-            }
         }
+
+        File baseFile = new File(basedir);
+        baseFile.mkdirs();
+        try {
+            baseFile = baseFile.getCanonicalFile();
+        } catch (IOException e) {
+            baseFile = baseFile.getAbsoluteFile();
+        }
+        server.setCatalinaBase(baseFile);
+        System.setProperty(Globals.CATALINA_BASE_PROP, baseFile.getPath());
+        basedir = baseFile.getPath();
+
         if (catalinaHome == null) {
-            System.setProperty(Globals.CATALINA_HOME_PROP, basedir);
+            server.setCatalinaHome(baseFile);
+        } else {
+            File homeFile = new File(catalinaHome);
+            homeFile.mkdirs();
+            try {
+                homeFile = homeFile.getCanonicalFile();
+            } catch (IOException e) {
+                homeFile = homeFile.getAbsoluteFile();
+            }
+            server.setCatalinaHome(homeFile);
         }
-        System.setProperty(Globals.CATALINA_BASE_PROP, basedir);
+        System.setProperty(Globals.CATALINA_HOME_PROP,
+                server.getCatalinaHome().getPath());
     }
 
     static final String[] silences = new String[] {

@@ -16,7 +16,6 @@
  */
 package org.apache.catalina.core;
 
-
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -29,7 +28,6 @@ import java.util.regex.Pattern;
 
 import org.apache.catalina.Container;
 import org.apache.catalina.Context;
-import org.apache.catalina.Globals;
 import org.apache.catalina.Host;
 import org.apache.catalina.Lifecycle;
 import org.apache.catalina.LifecycleEvent;
@@ -37,10 +35,8 @@ import org.apache.catalina.LifecycleException;
 import org.apache.catalina.LifecycleListener;
 import org.apache.catalina.Valve;
 import org.apache.catalina.loader.WebappClassLoader;
-import org.apache.catalina.mbeans.MBeanUtils;
 import org.apache.catalina.valves.ValveBase;
 import org.apache.tomcat.util.ExceptionUtils;
-
 
 /**
  * Standard implementation of the <b>Host</b> interface.  Each
@@ -208,9 +204,7 @@ public class StandardHost extends ContainerBase implements Host {
 
         // If not absolute, make it absolute
         if (!file.isAbsolute()) {
-            // This system property should always be set
-            file = new File(System.getProperty(Globals.CATALINA_BASE_PROP),
-                    file.getPath());
+            file = new File(getCatalinaBase(), file.getPath());
         }
 
         // Make it canonical if possible
@@ -830,7 +824,7 @@ public class StandardHost extends ContainerBase implements Host {
     protected String getObjectNameKeyProperties() {
 
         StringBuilder keyProperties = new StringBuilder("type=Host");
-        keyProperties.append(MBeanUtils.getContainerKeyProperties(this));
+        keyProperties.append(getMBeanKeyProperties());
 
         return keyProperties.toString();
     }
