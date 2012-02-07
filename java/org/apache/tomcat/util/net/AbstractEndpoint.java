@@ -178,10 +178,17 @@ public abstract class AbstractEndpoint {
     }
     public Executor getExecutor() { return executor; }
 
-    protected String spdy;
-    public String getSpdy() { return spdy; }
-    public void setSpdy(String mode) { 
-        spdy = mode; 
+    protected LightProtocol lightProtocol;
+    public String getLightProtocol() { 
+        return lightProtocol == null ? null : lightProtocol.toString(); 
+    }
+    public void setLightProtocol(String impl) {
+        try {
+            Class c = Class.forName(impl);
+            lightProtocol = (LightProtocol) c.newInstance();
+        } catch (Exception ex) {
+            getLog().warn("Failed to init light protocol " + impl, ex);
+        }
     }
 
     /**

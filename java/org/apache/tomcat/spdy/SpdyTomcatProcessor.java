@@ -19,9 +19,7 @@ package org.apache.tomcat.spdy;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.net.InetAddress;
-import java.util.Queue;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -43,6 +41,7 @@ import org.apache.tomcat.util.http.HttpMessages;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.net.AbstractEndpoint;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
+import org.apache.tomcat.util.net.LightProcessor;
 import org.apache.tomcat.util.net.SocketStatus;
 import org.apache.tomcat.util.net.SocketWrapper;
 
@@ -51,7 +50,7 @@ import org.apache.tomcat.util.net.SocketWrapper;
  * 
  * Based on the AJP processor.
  */
-public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol> 
+public class SpdyTomcatProcessor extends AbstractProcessor<LightProcessor> 
         implements SpdyStream, Runnable {
 
     // TODO: handle input
@@ -80,7 +79,7 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
     boolean finSent;
     boolean finRcvd;
 
-    public SpdyCoyoteProcessor(SpdyFramer spdy, AbstractEndpoint endpoint) {
+    public SpdyTomcatProcessor(SpdyFramer spdy, AbstractEndpoint endpoint) {
         super(endpoint);
         
         this.spdy = spdy;
@@ -545,7 +544,7 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
     }
 
     @Override
-    public SocketState process(SocketWrapper<LightProtocol> socket)
+    public SocketState process(SocketWrapper<LightProcessor> socket)
             throws IOException {
         throw new IOException("Unimplemented");
     }

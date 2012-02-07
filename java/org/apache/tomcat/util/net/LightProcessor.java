@@ -14,7 +14,7 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
-package org.apache.tomcat.spdy;
+package org.apache.tomcat.util.net;
 
 
 /** 
@@ -28,7 +28,7 @@ package org.apache.tomcat.spdy;
  * Unlike Handler, ProtocolHandler, this class is associated with and handles a 
  * single socket.
  */
-public interface LightProtocol {
+public interface LightProcessor {
     public static final int OPEN = 1;
     public static final int CLOSE = -1;
     
@@ -47,6 +47,4 @@ public interface LightProtocol {
      * JIO will never retun 0 on read(), so the code will be all blocking.
      */
     public int onData();
-    
-    public void setSocket(LightChannel socket);
 }

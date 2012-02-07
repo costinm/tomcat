@@ -21,6 +21,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.Logger;
 
+import org.apache.tomcat.util.net.LightProcessor;
+
 /**
  * Handle SPDY protocol.
  *
@@ -31,14 +33,12 @@ import java.util.logging.Logger;
  * 
  * 
  */
-public class SpdyFramer implements LightProtocol {
+public abstract class SpdyFramer implements LightProcessor {
 
     // TODO: this can be pooled, to avoid allocation on idle connections
     // TODO: override socket timeout
     
     protected SpdyFrame inFrame;
-    
-    protected LightChannel socket;
     
     protected CompressSupport compressSupport;
     
@@ -109,10 +109,25 @@ public class SpdyFramer implements LightProtocol {
     public static byte[] NPN = "spdy/2".getBytes();
     
     
-    public SpdyFramer(LightChannel socket, SpdyContext spdyContext) {
-        this.socket = socket;
+    public SpdyFramer(SpdyContext spdyContext) {
         this.spdyContext = spdyContext;        
     }
+    
+    /** 
+     * Write. The current implementation is blocking - write is typically
+     * invoked from user code running in the thread pool, so it should be 
+     * ok to block.
+     *  
+     * TODO: add a separate non-blocking write, with a callback 
+     * and flow control to support output in the IO thread. 
+     */
+    public abstract int write(byte[] data, int off, int len) throws IOException;
+    
+    /**
+     * Like read, but may return 0 if no data is available and the channel
+     * supports polling. 
+     */
+    public abstract int read(byte[] data, int off, int len) throws IOException;
 
     public void setCompressSupport(CompressSupport cs) {
         compressSupport = cs;
@@ -169,7 +184,7 @@ public class SpdyFramer implements LightProtocol {
         oframe.serializeHead();
         
         System.err.println("> " + oframe);
-        socket.write(oframe.data, 0, oframe.endData);        
+        write(oframe.data, 0, oframe.endData);        
     }
     
 
@@ -225,7 +240,7 @@ public class SpdyFramer implements LightProtocol {
             // we might already have data from previous frame
             if (inFrame.endData < 8 || // we don't have the header
                     inFrame.endData < inFrame.endFrame) { // size != 0 - we parsed the header
-                int rd = socket.read(inFrame.data, inFrame.endData, 
+                int rd = read(inFrame.data, inFrame.endData, 
                         inFrame.data.length - inFrame.endData);
                 if (rd < 0) {
                     abort("Closed");
@@ -329,11 +344,6 @@ public class SpdyFramer implements LightProtocol {
         }
     }
     
-    @Override
-    public void setSocket(LightChannel socket) {
-        this.socket = socket;
-    }
-
     // Framing error or shutdown- close all streams.
     public void abort(String msg) throws IOException {
         System.err.println(msg);
@@ -363,7 +373,7 @@ public class SpdyFramer implements LightProtocol {
                 int lastStream = inFrame.readInt();
                 log.info("GOAWAY last=" + lastStream);
                 abort("GOAWAY");
-                return LightProtocol.CLOSE;
+                return LightProcessor.CLOSE;
             } 
             case TYPE_RST_STREAM: {
                 inFrame.streamId = inFrame.read32();
@@ -373,14 +383,14 @@ public class SpdyFramer implements LightProtocol {
                 SpdyStream sch = channels.get(inFrame.streamId);
                 if (sch == null) {
                     abort("Missing channel " + inFrame.streamId);
-                    return LightProtocol.CLOSE;
+                    return LightProcessor.CLOSE;
                 }
                 sch.onCtlFrame();
                 break;
             }
             case TYPE_SYN_STREAM: {
 
-                SpdyStream ch = spdyContext.getProcessor(this);
+                SpdyStream ch = spdyContext.getStream(this);
                 
                 synchronized (channels) {
                     channels.put(inFrame.streamId, ch);                    
@@ -391,7 +401,7 @@ public class SpdyFramer implements LightProtocol {
                 } catch (Throwable t) {
                     log.info("Error parsing head SYN_STREAM" + t);
                     abort("Error reading headers " + t);
-                    return LightProtocol.CLOSE;
+                    return LightProcessor.CLOSE;
                 }
                 break;
             } 
@@ -399,14 +409,14 @@ public class SpdyFramer implements LightProtocol {
                 SpdyStream sch = channels.get(inFrame.streamId);
                 if (sch == null) {
                     abort("Missing channel");
-                    return LightProtocol.CLOSE;
+                    return LightProcessor.CLOSE;
                 }
                 try {
                     sch.onCtlFrame();        
                 } catch (Throwable t) {
                     log.info("Error parsing head SYN_STREAM" + t);
                     abort("Error reading headers " + t);
-                    return LightProtocol.CLOSE;
+                    return LightProcessor.CLOSE;
                 }
                 break;
             }   
@@ -430,11 +440,11 @@ public class SpdyFramer implements LightProtocol {
             SpdyStream sch = channels.get(inFrame.streamId);
             if (sch == null) {
                 abort("Missing channel");
-                return LightProtocol.CLOSE;
+                return LightProcessor.CLOSE;
             }
             sch.onDataFrame();
         }
-        return LightProtocol.OPEN;
+        return LightProcessor.OPEN;
     }
     
     /**

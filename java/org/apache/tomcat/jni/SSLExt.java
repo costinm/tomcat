@@ -17,9 +17,6 @@
 
 package org.apache.tomcat.jni;
 
-import org.apache.tomcat.spdy.LightChannel;
-import org.apache.tomcat.spdy.LightChannelApr;
-
 /** 
  * Support TLS extensions and extra methods. 
  * 

@@ -18,7 +18,7 @@ import org.apache.tomcat.spdy.SpdyFramer.CompressSupport;
  * that handles SSL and compression.
  * Test with:  --user-data-dir=/tmp/test --use-spdy=no-compress,no-ssl
  */
-public abstract class SpdyContext {
+public class SpdyContext {
 
     public static final byte[] SPDY_NPN; 
     public static final byte[] SPDY_NPN_OUT;
@@ -31,12 +31,6 @@ public abstract class SpdyContext {
 
     private Executor executor;
 
-    public SpdyFramer getSpdy(LightChannel socket) {
-        SpdyFramer spdyHandler = new SpdyFramer(socket, this);
-        spdyHandler.setCompressSupport(getCompressor());
-        return spdyHandler;
-    }
-
     /**
      *  Get a frame - frames are heavy buffers, may be reused.
      */
@@ -47,12 +41,9 @@ public abstract class SpdyContext {
     public void releaseFrame(SpdyFrame done) {
     }
     
-    public CompressSupport getCompressor() {
+    public SpdyStream getStream(SpdyFramer framer) {
         return null;
     }
-
-
-    public abstract SpdyStream getProcessor(SpdyFramer framer);
 
     public void setExecutor(Executor executor) {
         this.executor = executor;

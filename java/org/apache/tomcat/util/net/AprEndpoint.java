@@ -24,7 +24,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 
 import org.apache.juli.logging.Log;
@@ -38,19 +37,10 @@ import org.apache.tomcat.jni.Poll;
 import org.apache.tomcat.jni.Pool;
 import org.apache.tomcat.jni.SSL;
 import org.apache.tomcat.jni.SSLContext;
-import org.apache.tomcat.jni.SSLExt;
 import org.apache.tomcat.jni.SSLSocket;
 import org.apache.tomcat.jni.Sockaddr;
 import org.apache.tomcat.jni.Socket;
 import org.apache.tomcat.jni.Status;
-import org.apache.tomcat.spdy.CompressJzlib;
-import org.apache.tomcat.spdy.LightChannelApr;
-import org.apache.tomcat.spdy.LightProtocol;
-import org.apache.tomcat.spdy.SpdyStream;
-import org.apache.tomcat.spdy.SpdyContext;
-import org.apache.tomcat.spdy.SpdyCoyoteProcessor;
-import org.apache.tomcat.spdy.SpdyFramer;
-import org.apache.tomcat.spdy.SpdyFramer.CompressSupport;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.net.AbstractEndpoint.Acceptor.AcceptorState;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
@@ -103,8 +93,7 @@ public class AprEndpoint extends AbstractEndpoint {
      */
     protected long sslContext = 0;
 
-    // APR connector supports full NPN mode.
-    protected SpdyContext spdyContext;
+    protected LightProtocol lightProtocol;
 
     protected ConcurrentLinkedQueue<SocketWrapper<Long>> waitingRequests =
         new ConcurrentLinkedQueue<SocketWrapper<Long>>();
@@ -112,8 +101,8 @@ public class AprEndpoint extends AbstractEndpoint {
 
     // apr normally creates a new object on each poll.
     // For 'upgraded' protocols we need to remember it's handled differently.
-    Map<Long, LightProtocol> upgraded = 
-            new HashMap<Long, LightProtocol>();
+    Map<Long, LightProcessor> upgraded = 
+            new HashMap<Long, LightProcessor>();
     
     // ------------------------------------------------------------ Constructor
 
@@ -335,7 +324,6 @@ public class AprEndpoint extends AbstractEndpoint {
     protected boolean SSLInsecureRenegotiation = false;
     public void setSSLInsecureRenegotiation(boolean SSLInsecureRenegotiation) { this.SSLInsecureRenegotiation = SSLInsecureRenegotiation; }
     public boolean getSSLInsecureRenegotiation() { return SSLInsecureRenegotiation; }
-
 
     /**
      * Port in use.
@@ -593,23 +581,8 @@ public class AprEndpoint extends AbstractEndpoint {
             }
             SSLContext.setVerify(sslContext, value, SSLVerifyDepth);
             
-            if ("npn".equals(spdy)) {
-                if (0 == SSLExt.setNPN(sslContext, SpdyContext.SPDY_NPN_OUT)) {
-                    spdyContext = new SpdyContext() {
-                        @Override
-                        public SpdyStream getProcessor(SpdyFramer framer) {
-                            return new SpdyCoyoteProcessor(framer, AprEndpoint.this);
-                        }
-                        public CompressSupport getCompressor() {
-                            return new CompressJzlib();
-                        }
-                        public Executor getExecutor() {
-                            return AprEndpoint.this.getExecutor();
-                        }
-                    };
-                } else {
-                    log.warn("SPDY/NPN not supported");
-                }
+            if (lightProtocol != null) {
+                lightProtocol.init(sslContext, this);
             }
             
             // For now, sendfile is not supported with SSL
@@ -878,7 +851,7 @@ public class AprEndpoint extends AbstractEndpoint {
     /** 
      * Handle event for an upgraded light proto.
      */
-    protected boolean processSocket(long socket, LightProtocol proto) {
+    protected boolean processSocket(long socket, LightProcessor proto) {
         try {
             getExecutor().execute(new LightBlockingProcessor(socket, proto));
         } catch (RejectedExecutionException x) {
@@ -900,9 +873,8 @@ public class AprEndpoint extends AbstractEndpoint {
      */
     protected boolean processSocket(long socket) {
         try {
-            SocketWrapper<Long> wrapper = null;
-            wrapper = new SocketWrapper<Long>(Long.valueOf(socket));
-            
+            SocketWrapper<Long> wrapper =
+                new SocketWrapper<Long>(Long.valueOf(socket));
             getExecutor().execute(new SocketProcessor(wrapper, null));
         } catch (RejectedExecutionException x) {
             log.warn("Socket processing request was rejected for:"+socket,x);
@@ -988,7 +960,7 @@ public class AprEndpoint extends AbstractEndpoint {
     {
         if (upgraded != null) {
             synchronized (upgraded) {
-                LightProtocol wrapper = upgraded.remove(socket);
+                LightProcessor wrapper = upgraded.remove(socket);
                 if (wrapper != null) {
                     wrapper.onClose();
                 }
@@ -1393,7 +1365,7 @@ public class AprEndpoint extends AbstractEndpoint {
                     if (upgraded != null) {
                         synchronized (upgraded) {
                             long socket = desc[n*2+1];
-                            LightProtocol proto = upgraded.get(socket);
+                            LightProcessor proto = upgraded.get(socket);
                             if (proto != null) {
                                 processSocket(socket, proto);
                                 continue;
@@ -1837,14 +1809,9 @@ public class AprEndpoint extends AbstractEndpoint {
                         socket = null;
                         return;
                     }
-                    LightProtocol proto = null;
-                    if (spdyContext != null) {
-                        if (SSLExt.checkNPN(socket.getSocket(), 
-                                SpdyContext.SPDY_NPN)) {
-                            // NPN negotiated
-                            proto = spdyContext.getSpdy(
-                                    new LightChannelApr(socket.getSocket().longValue()));
-                        }
+                    LightProcessor proto = null;
+                    if (lightProtocol != null) {
+                        proto = lightProtocol.getProcessor(socket.getSocket().longValue());
                     }
                     
                     // Process the request from this socket
@@ -1852,7 +1819,7 @@ public class AprEndpoint extends AbstractEndpoint {
                     if (proto != null) {
                         upgraded.put(socket.getSocket(), proto);
                         int rc = proto.onData();
-                        state = (LightProtocol.OPEN == rc) ? 
+                        state = (LightProcessor.OPEN == rc) ? 
                                 SocketState.OPEN: SocketState.CLOSED;
                     } else {
                         state = handler.process(socket,
@@ -1926,11 +1893,11 @@ public class AprEndpoint extends AbstractEndpoint {
      */
     protected class LightBlockingProcessor implements Runnable {
 
-        protected LightProtocol proto = null;
+        protected LightProcessor proto = null;
         private long socket;
 
         public LightBlockingProcessor(long socket, 
-                LightProtocol proto) {
+                LightProcessor proto) {
             this.proto = proto;
             this.socket = socket;
         }
@@ -1940,7 +1907,7 @@ public class AprEndpoint extends AbstractEndpoint {
             synchronized (proto) {
                 // Process the request from this socket
                 int rc = proto.onData();
-                if (rc == LightProtocol.CLOSE) {
+                if (rc == LightProcessor.CLOSE) {
                     // Close socket and pool
                     destroySocket(socket);
                     proto = null;
