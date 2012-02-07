@@ -34,7 +34,7 @@ import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.spdy.LightChannel;
 import org.apache.tomcat.spdy.LightChannelJio;
 import org.apache.tomcat.spdy.LightProtocol;
-import org.apache.tomcat.spdy.SpdyChannelProcessor;
+import org.apache.tomcat.spdy.SpdyStream;
 import org.apache.tomcat.spdy.SpdyContext;
 import org.apache.tomcat.spdy.SpdyCoyoteProcessor;
 import org.apache.tomcat.spdy.SpdyFramer;
@@ -103,7 +103,7 @@ public class JIoEndpoint extends AbstractEndpoint {
         super.setSpdy(mode);
         spdyContext = new SpdyContext() {
             @Override
-            public SpdyChannelProcessor getProcessor(SpdyFramer framer) {
+            public SpdyStream getProcessor(SpdyFramer framer) {
                 return new SpdyCoyoteProcessor(framer, JIoEndpoint.this);
             }
             

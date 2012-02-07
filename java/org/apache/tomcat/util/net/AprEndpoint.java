@@ -46,7 +46,7 @@ import org.apache.tomcat.jni.Status;
 import org.apache.tomcat.spdy.CompressJzlib;
 import org.apache.tomcat.spdy.LightChannelApr;
 import org.apache.tomcat.spdy.LightProtocol;
-import org.apache.tomcat.spdy.SpdyChannelProcessor;
+import org.apache.tomcat.spdy.SpdyStream;
 import org.apache.tomcat.spdy.SpdyContext;
 import org.apache.tomcat.spdy.SpdyCoyoteProcessor;
 import org.apache.tomcat.spdy.SpdyFramer;
@@ -597,7 +597,7 @@ public class AprEndpoint extends AbstractEndpoint {
                 if (0 == SSLExt.setNPN(sslContext, SpdyContext.SPDY_NPN_OUT)) {
                     spdyContext = new SpdyContext() {
                         @Override
-                        public SpdyChannelProcessor getProcessor(SpdyFramer framer) {
+                        public SpdyStream getProcessor(SpdyFramer framer) {
                             return new SpdyCoyoteProcessor(framer, AprEndpoint.this);
                         }
                         public CompressSupport getCompressor() {

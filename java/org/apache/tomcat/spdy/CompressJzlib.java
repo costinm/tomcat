@@ -99,20 +99,20 @@ public class CompressJzlib implements CompressSupport {
     
     
     @Override
-    public void compress(SpdyFrame frame) throws IOException {
+    public void compress(SpdyFrame frame, int start) throws IOException {
         // TODO: only the last one needs flush
         // TODO: size missmatches ?
         init();
         int flush = JZlib.Z_PARTIAL_FLUSH;
 
         cStream.next_in = frame.data;
-        cStream.next_in_index = 0;
-        cStream.avail_in = frame.size;
+        cStream.next_in_index = start;
+        cStream.avail_in = frame.endData - start;
 
-        if (compressBuffer == null || compressBuffer.length < frame.size + 256) {
-            compressBuffer = new byte[frame.size + 256];
+        if (compressBuffer == null || compressBuffer.length < frame.endData + 256) {
+            compressBuffer = new byte[frame.endData + 256];
         }
-        int outOff = 0;
+        int outOff = start; // same position
         while (true) {
             cStream.next_out = compressBuffer;
             cStream.next_out_index = outOff;
@@ -129,7 +129,7 @@ public class CompressJzlib implements CompressSupport {
                 break;
             }
          }
-         frame.size = outOff;
+         frame.endData = outOff;
         
 //        if (last) {
 //            compressEnd(out);
@@ -137,18 +137,18 @@ public class CompressJzlib implements CompressSupport {
     }
     
     @Override
-    public void decompress(SpdyFrame frame) throws IOException {
+    public void decompress(SpdyFrame frame, int start) throws IOException {
         // stream id ( 4 ) + unused ( 2 ) 
         // nvCount is compressed in impl - spec is different
         init();
         
         dStream.next_in = frame.data;
-        dStream.next_in_index = frame.off;
-        dStream.avail_in = frame.size - frame.off;
-        if (decompressBuffer == null || decompressBuffer.length < frame.size * 2) {
-            decompressBuffer = new byte[frame.size * 2];
+        dStream.next_in_index = start;
+        dStream.avail_in = frame.endData - start;
+        if (decompressBuffer == null || decompressBuffer.length < frame.endData * 2) {
+            decompressBuffer = new byte[frame.endData * 2];
         }
-        int tmpOff = 0;
+        int tmpOff = start;
         
         while (true) {
             dStream.next_out = decompressBuffer;
@@ -183,8 +183,8 @@ public class CompressJzlib implements CompressSupport {
         byte[] tmp = frame.data;
         frame.data = decompressBuffer;
         decompressBuffer = tmp;
-        frame.off = 0;
-        frame.size = tmpOff;
+        frame.off = start;
+        frame.endFrame = tmpOff;
     }
     
     private void check(int err, ZStream stream) throws IOException {

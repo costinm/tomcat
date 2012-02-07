@@ -19,6 +19,11 @@ package org.apache.tomcat.spdy;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.net.InetAddress;
+import java.util.Queue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.coyote.AbstractProcessor;
@@ -47,7 +52,7 @@ import org.apache.tomcat.util.net.SocketWrapper;
  * Based on the AJP processor.
  */
 public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol> 
-        implements SpdyChannelProcessor, Runnable {
+        implements SpdyStream, Runnable {
 
     // TODO: handle input
     // TODO: recycle
@@ -61,9 +66,19 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
     ByteChunk keyBuffer = new ByteChunk();
     boolean error = false;
 
-    SpdyFrame oframe = new SpdyFrame();
-    SpdyFrame rframe = new SpdyFrame();
+    SpdyFrame oframe;
     private boolean finished;
+    
+    static final SpdyFrame END_FRAME = new SpdyFrame();
+    BlockingQueue<SpdyFrame> inData = new LinkedBlockingQueue<SpdyFrame>();
+    SpdyFrame inFrame = null;
+
+    boolean outClosed = false;
+    boolean outCommit = false;
+    
+
+    boolean finSent;
+    boolean finRcvd;
 
     public SpdyCoyoteProcessor(SpdyFramer spdy, AbstractEndpoint endpoint) {
         super(endpoint);
@@ -79,18 +94,31 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
         @Override
         public int doRead(ByteChunk bchunk, Request request)
                 throws IOException {
-            // TODO: mutex wait
-//            int rd =
-//                    httpReq.getBody().read(bchunk.getBytes(),
-//                        bchunk.getStart(), bchunk.getBytes().length);
-//                if (rd > 0) {
-//                    bchunk.setEnd(bchunk.getEnd() + rd);
-//                }
-//                return rd;
-            
-            return 0;
+            try {
+                if (inFrame == null) {
+                    // blocking
+                    inFrame = inData.take();
+                }
+                if (inFrame == END_FRAME) {
+                    return 0;
+                }
+
+
+                int rd = Math.min(inFrame.endData, bchunk.getBytes().length);
+                System.arraycopy(inFrame.data, inFrame.off, bchunk.getBytes(), 
+                        bchunk.getStart(), rd);
+                inFrame.advance(rd);
+                if (inFrame.off == inFrame.endData) {
+                    spdy.getContext().releaseFrame(inFrame);
+                }
+                bchunk.setEnd(bchunk.getEnd() + rd);
+                return rd;
+            } catch (InterruptedException e) {
+                throw new IOException(e);
+            }
         }        
     }
+
     final class LiteOutputBuffer implements OutputBuffer {
         long byteCount;
         
@@ -119,30 +147,34 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
     
     
     @Override
-    public void onDataFrame(SpdyFrame currentInFrame) {
-        // TODO: take the data[], queue it to the InputBuffer.
+    public void onDataFrame() {
+        SpdyFrame inFrame = spdy.popInFrame();
+        if (inFrame.closed()) {
+            inData.add(END_FRAME);
+        }
     }
 
     @Override
-    public void onSynStream(SpdyFrame frame) throws IOException {
+    public void onCtlFrame() throws IOException {
         // We need to make a copy - the frame buffer will be reused. 
         // We use the 'wrap' methods of MimeHeaders - which should be 
         // lighter on mem in some cases.
+        SpdyFrame frame = spdy.inFrame();
         this.channelId = frame.streamId;
         
         RequestInfo rp = request.getRequestProcessor();
         rp.setStage(org.apache.coyote.Constants.STAGE_PREPARE);
         
-        if (requestHead == null || requestHead.length < frame.size) {
-            requestHead = new byte[frame.size];
+        if (requestHead == null || requestHead.length < frame.endData) {
+            requestHead = new byte[frame.endData];
         }
-        System.arraycopy(frame.data, 0, requestHead, 0, frame.size);
+        System.arraycopy(frame.data, 0, requestHead, 0, frame.endData);
             
         // Request received.
         MimeHeaders mimeHeaders = request.getMimeHeaders();
 
         for (int i = 0; i < frame.nvCount; i++) {
-            int nameLen = frame.readShort();
+            int nameLen = frame.read16();
             if (nameLen > frame.remaining()) {
                 throw new IOException("Name too long");
             }
@@ -150,7 +182,7 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
             keyBuffer.setBytes(requestHead, frame.off, nameLen);
             if (keyBuffer.equals("method")) {
                 frame.advance(nameLen);                
-                int valueLen = frame.readShort();
+                int valueLen = frame.read16();
                 if (valueLen > frame.remaining()) {
                     throw new IOException("Name too long");                
                 }
@@ -158,7 +190,7 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
                 frame.advance(valueLen);
             } else if (keyBuffer.equals("url")) {
                 frame.advance(nameLen);                
-                int valueLen = frame.readShort();
+                int valueLen = frame.read16();
                 if (valueLen > frame.remaining()) {
                     throw new IOException("Name too long");                
                 }
@@ -167,7 +199,7 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
                 frame.advance(valueLen);
             } else if (keyBuffer.equals("version")) {
                 frame.advance(nameLen);                
-                int valueLen = frame.readShort();
+                int valueLen = frame.read16();
                 if (valueLen > frame.remaining()) {
                     throw new IOException("Name too long");                
                 }
@@ -176,7 +208,7 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
                 MessageBytes value = mimeHeaders.addValue(requestHead, 
                         frame.off, nameLen);
                 frame.advance(nameLen);
-                int valueLen = frame.readShort();
+                int valueLen = frame.read16();
                 if (valueLen > frame.remaining()) {
                     throw new IOException("Name too long");                
                 }
@@ -185,6 +217,14 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
             }
         }
         
+        
+        Executor exec = spdy.getContext().getExecutor();
+        if (exec != null) {
+            exec.execute(this);
+        } else {
+            run(); // probably slow, but shouldn't happen
+        }
+
     }
 
     /**
@@ -252,13 +292,13 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
     
     public synchronized void sendDataFrame(int channelId, byte[] data, 
             int start, int length, boolean close) throws IOException {
-        oframe.data = data;
-        oframe.size = length;
-        oframe.off = start;
-        oframe.c = false;
+        SpdyFrame oframe = spdy.getDataFrame();
+        // Sadly, we have to copy the data - the oframe may be queued, and
+        // coyote is reusing the buffer.
         oframe.streamId = channelId;
         oframe.flags = close ? 1 : 0;
-        
+
+        oframe.append(data, start, length);
         spdy.sendFrame(oframe);
     }
 
@@ -271,15 +311,13 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
             try {
                 sendSynReply();
             } catch (IOException e) {
+                e.printStackTrace();
                 // Set error flag
                 error = true;
                 return;
             }
         }
     }
-    
-    boolean outClosed = false;
-    boolean outCommit = false;
     
     @Override
     public void action(ActionCode actionCode, Object param) {
@@ -448,14 +486,12 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
     }
     
     private void sendResponseHead() throws IOException {
-        rframe.type = SpdyFramer.TYPE_SYN_REPLY;
-        rframe.c = true;
+        SpdyFrame rframe = spdy.getFrame(SpdyFramer.TYPE_SYN_REPLY);
         rframe.flags = 0;
         rframe.streamId = channelId;
         rframe.associated = 0;
         
         MimeHeaders headers = response.getMimeHeaders();
-        rframe.append16(headers.size() + 2);
         for (int i = 0; i < headers.size(); i++) {
             MessageBytes mb = headers.getName(i);
             mb.toBytes();
@@ -464,17 +500,17 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
             for (int j = bc.getStart(); j < bc.getEnd(); j++) {
                 bb[j] = (byte) Ascii.toLower(bb[j]);
             }
-            rframe.appendString(bc.getBuffer(), bc.getStart(),  bc.getLength());
+            rframe.headerName(bc.getBuffer(), bc.getStart(),  bc.getLength());
             mb = headers.getValue(i);
             mb.toBytes();
             bc = mb.getByteChunk();
-            rframe.appendString(bc.getBuffer(), bc.getStart(),  bc.getLength());
+            rframe.headerValue(bc.getBuffer(), bc.getStart(),  bc.getLength());
         }
-        rframe.appendString(STATUS, 0, STATUS.length);
+        rframe.headerName(STATUS, 0, STATUS.length);
         
 
         if (response.getStatus() == 0) {
-            rframe.appendString(OK200, 0, OK200.length);            
+            rframe.headerValue(OK200, 0, OK200.length);            
         } else {
             // HTTP header contents
             String message = null;
@@ -492,15 +528,14 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
             // TODO: optimize
             String status = response.getStatus() + " " + message;
             byte[] statusB = status.getBytes();
-            rframe.appendString(statusB, 0, statusB.length);            
+            rframe.headerValue(statusB, 0, statusB.length);            
         }
-        rframe.appendString(VERSION, 0, VERSION.length);
-        rframe.appendString(HTTP11, 0, HTTP11.length);
-        
-        rframe.size = rframe.off;
-        rframe.off = 0;
+        rframe.headerName(VERSION, 0, VERSION.length);
+        rframe.headerValue(HTTP11, 0, HTTP11.length);
         
         spdy.sendFrame(rframe);
+        // we can't reuse the frame - it'll be queued, the coyote processor
+        // may be reused as well.
         outCommit = true;
     }
 
@@ -535,6 +570,11 @@ public class SpdyCoyoteProcessor extends AbstractProcessor<LightProtocol>
     @Override
     public SocketState upgradeDispatch() throws IOException {
         return null;
+    }
+
+    @Override
+    public boolean isFinished() {
+        return finSent && finRcvd;
     }
 
 }
