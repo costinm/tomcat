@@ -104,6 +104,7 @@ public abstract class TomcatBaseTest extends LoggingBaseTest {
         // Use random free port
         connector.setPort(0);
         // Mainly set to reduce timeouts during async tests
+        extraConnectorSetup(connector, protocol);
         connector.setAttribute("connectionTimeout", "3000");
         tomcat.getService().addConnector(connector);
         tomcat.setConnector(connector);
@@ -134,6 +135,9 @@ public abstract class TomcatBaseTest extends LoggingBaseTest {
         // but delete known subdirectories of it.
         addDeleteOnTearDown(new File(catalinaBase, "webapps"));
         addDeleteOnTearDown(new File(catalinaBase, "work"));
+    }
+
+    protected void extraConnectorSetup(Connector connector, String protocol) {
     }
 
     protected String getProtocol() {

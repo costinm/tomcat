@@ -22,6 +22,7 @@ import java.net.InetAddress;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.coyote.AbstractProcessor;
@@ -46,7 +47,7 @@ import org.apache.tomcat.util.net.SocketStatus;
 import org.apache.tomcat.util.net.SocketWrapper;
 
 /**
- * Dispatch a SPDY stream.
+ * A spdy stream processed by a tomcat servlet
  * 
  * Based on the AJP processor.
  */
@@ -96,10 +97,14 @@ public class SpdyTomcatProcessor extends AbstractProcessor<LightProcessor>
             try {
                 if (inFrame == null) {
                     // blocking
-                    inFrame = inData.take();
+                    inFrame = inData.poll(endpoint.getSoTimeout(), 
+                            TimeUnit.MILLISECONDS);
+                }
+                if (inFrame == null) {
+                    return -1;
                 }
                 if (inFrame == END_FRAME) {
-                    return 0;
+                    return -1;
                 }
 
 
@@ -148,7 +153,9 @@ public class SpdyTomcatProcessor extends AbstractProcessor<LightProcessor>
     @Override
     public void onDataFrame() {
         SpdyFrame inFrame = spdy.popInFrame();
+        inData.add(inFrame);
         if (inFrame.closed()) {
+            finRcvd = true;
             inData.add(END_FRAME);
         }
     }
@@ -159,8 +166,15 @@ public class SpdyTomcatProcessor extends AbstractProcessor<LightProcessor>
         // We use the 'wrap' methods of MimeHeaders - which should be 
         // lighter on mem in some cases.
         SpdyFrame frame = spdy.inFrame();
+        if (frame.type != SpdyFramer.TYPE_SYN_STREAM) {
+            // TODO: handle RST, etc.
+            return;
+        }
         this.channelId = frame.streamId;
-        
+        if (frame.isHalfClose()) {
+            finRcvd = true;
+            inData.add(END_FRAME);
+        }
         RequestInfo rp = request.getRequestProcessor();
         rp.setStage(org.apache.coyote.Constants.STAGE_PREPARE);
         

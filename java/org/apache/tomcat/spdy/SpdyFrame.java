@@ -135,6 +135,10 @@ public class SpdyFrame {
         return true;
     }
     
+    boolean isHalfClose() {
+        return (flags & SpdyFramer.FLAG_HALF_CLOSE) != 0;
+    }
+
     public boolean closed() {
         return (flags & SpdyFramer.FLAG_HALF_CLOSE) != 0;
     }
@@ -272,7 +276,4 @@ public class SpdyFrame {
         off += cnt;
     }
 
-    boolean isHalfClose() {
-        return (flags & SpdyFramer.FLAG_HALF_CLOSE) != 0;
-    }
 }
