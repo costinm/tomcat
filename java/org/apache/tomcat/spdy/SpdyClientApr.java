@@ -17,8 +17,11 @@ public class SpdyClientApr extends SpdyClient {
         spdy = new SpdyFramerAprSocket(spdyCtx);
     } 
     
+    public AprSocketContext getSocketContext() {
+        return con;
+    }
+    
     public void connect() {
-        con.addHandler(new HexDump());
         if (insecureCerts) {
             con.customVerification();
         }
