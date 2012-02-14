@@ -41,7 +41,7 @@ import javax.servlet.http.Part;
 
 import org.apache.catalina.Globals;
 import org.apache.catalina.security.SecurityUtil;
-import org.apache.coyote.http11.UpgradeInbound;
+import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
@@ -1088,7 +1088,7 @@ public class RequestFacade implements HttpServletRequest {
 
     /**
      * Sets the response status to {@link
-     * HttpServletResponse.SC_SWITCHING_PROTOCOLS} and flushes the response.
+     * HttpServletResponse#SC_SWITCHING_PROTOCOLS} and flushes the response.
      * Protocol specific headers must have already been set before this method
      * is called.
      *

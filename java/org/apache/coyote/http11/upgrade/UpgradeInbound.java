@@ -14,33 +14,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.coyote.http11.upgrade;
 
+import java.io.IOException;
 
-package org.apache.catalina.loader;
-
-import java.net.URL;
-import java.net.URLClassLoader;
+import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 
 /**
- * Subclass implementation of <b>java.net.URLClassLoader</b>. There are no
- * functional differences between this class and <b>java.net.URLClassLoader</b>.
- *
- * @author Craig R. McClanahan
- * @author Remy Maucherat
- * @version $Id$
+ * Receives notification that there is data to be read on the upgraded
+ * connection and processes it.
  */
+public interface UpgradeInbound {
 
-public class StandardClassLoader
-    extends URLClassLoader
-    implements StandardClassLoaderMBean {
+    void setUpgradeProcessor(UpgradeProcessor<?> processor);
 
-    public StandardClassLoader(URL repositories[]) {
-        super(repositories);
-    }
+    SocketState onData() throws IOException;
 
-    public StandardClassLoader(URL repositories[], ClassLoader parent) {
-        super(repositories, parent);
-    }
-
+    void setUpgradeOutbound(UpgradeOutbound upgradeOutbound);
 }
-

@@ -14,17 +14,32 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.coyote.http11.upgrade;
 
+import java.io.IOException;
+import java.io.OutputStream;
 
-package org.apache.catalina.loader;
 
 /**
- * MBean interface for StandardClassLoader, to allow JMX remote management.
+ * Allows data to be written to the upgraded connection.
  *
- * @author Remy Maucherat
- * @version $Id$
+ * TODO: Override more methods for efficiency.
  */
-public interface StandardClassLoaderMBean {
-    // Marker interface
-}
+public class UpgradeOutbound extends OutputStream {
 
+    @Override
+    public void flush() throws IOException {
+        processor.flush();
+    }
+
+    private UpgradeProcessor<?> processor;
+
+    public UpgradeOutbound(UpgradeProcessor<?> processor) {
+        this.processor = processor;
+    }
+
+    @Override
+    public void write(int b) throws IOException {
+        processor.write(b);
+    }
+}

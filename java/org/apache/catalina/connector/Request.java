@@ -71,11 +71,10 @@ import org.apache.catalina.Wrapper;
 import org.apache.catalina.core.ApplicationPart;
 import org.apache.catalina.core.ApplicationSessionCookieConfig;
 import org.apache.catalina.core.AsyncContextImpl;
-import org.apache.catalina.deploy.LoginConfig;
 import org.apache.catalina.util.ParameterMap;
 import org.apache.catalina.util.StringParser;
 import org.apache.coyote.ActionCode;
-import org.apache.coyote.http11.UpgradeInbound;
+import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
@@ -2395,13 +2394,7 @@ public class Request
                     sm.getString("coyoteRequest.authenticate.ise"));
         }
 
-        LoginConfig config = context.getLoginConfig();
-
-        if (config == null) {
-            throw new ServletException(
-                    sm.getString("coyoteRequest.noLoginConfig"));
-        }
-        return context.getAuthenticator().authenticate(this, response, config);
+        return context.getAuthenticator().authenticate(this, response);
     }
 
     /**

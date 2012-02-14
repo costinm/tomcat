@@ -55,9 +55,9 @@ public abstract class AbstractEndpoint {
         public enum SocketState {
             // TODO Add a new state to the AsyncStateMachine and remove
             //      ASYNC_END (if possible)
-        	/** Socket should remain open and be notified on io events.
-        	 * Used for keepalive 
-        	 */
+            /** Socket should remain open and be notified on io events.
+              * Used for keepalive 
+              */
             OPEN,
             /** Socket should be closed by the endpoint */
             CLOSED, 
@@ -66,8 +66,9 @@ public abstract class AbstractEndpoint {
              */
             LONG, 
             ASYNC_END, 
-            SENDFILE, 
-            UPGRADE
+            SENDFILE,
+            UPGRADING, 
+            UPGRADED
         }
 
 
