@@ -78,20 +78,12 @@ public final class SSLExt {
 //     */
 //    public static native int setTicket(long tcsock, byte[] data, int len);
 //
-<<<<<<< HEAD
 //    /** 
-=======
-//    /**
->>>>>>> upstream/trunk
 //     * Set the key used by server to generate tickets.
 //     * Key must be 48 bytes.
 //     */
 //    public static native int setTicketKeys(long ctx, byte[] data, int len);
-<<<<<<< HEAD
 //    
-=======
-//
->>>>>>> upstream/trunk
     /**
      * For client side calls. Data should be a \0 terminated string
      */
@@ -100,11 +92,7 @@ public final class SSLExt {
     /* Allow SSL_write(..., n) to return r with 0 < r < n (i.e. report success
      * when just a single record has been written): */
     static final int SSL_MODE_ENABLE_PARTIAL_WRITE = 0x1;
-<<<<<<< HEAD
     
-=======
-
->>>>>>> upstream/trunk
     /* Make it possible to retry SSL_write() with changed buffer location
      * (buffer contents must stay the same!); this is not the default to avoid
      * the misconception that non-blocking SSL_write() behaves like
@@ -116,15 +104,9 @@ public final class SSLExt {
 
     /* Save RAM by releasing read and write buffers when they're empty. (SSL3 and
      * TLS only.)  "Released" buffers are put onto a free-list in the context
-<<<<<<< HEAD
      * or just freed (depending on the context's setting for freelist_max_len). */    
     static final int SSL_MODE_SMALL_BUFFERS = 0x10;
     
-=======
-     * or just freed (depending on the context's setting for freelist_max_len). */
-    static final int SSL_MODE_SMALL_BUFFERS = 0x10;
-
->>>>>>> upstream/trunk
     // 1.1
     //static final int SSL_MODE_HANDSHAKE_CUTTHROUGH = ..;
 
@@ -139,19 +121,11 @@ public final class SSLExt {
         } catch (Throwable t) {
             t.printStackTrace();
             return -1;
-<<<<<<< HEAD
         }        
     }
     
     /**
      * Higher level method, checking if the specified protocol has been 
-=======
-        }
-    }
-
-    /**
-     * Higher level method, checking if the specified protocol has been
->>>>>>> upstream/trunk
      * negotiated.
      */
     public static boolean checkNPN(long tcsocket, byte[] expected) {
@@ -170,19 +144,10 @@ public final class SSLExt {
             if (expected[i] != npn[i]) {
                 return false;
             }
-<<<<<<< HEAD
         }   
         return true;
     }
     
     
     
-=======
-        }
-        return true;
-    }
-
-
-
->>>>>>> upstream/trunk
 }

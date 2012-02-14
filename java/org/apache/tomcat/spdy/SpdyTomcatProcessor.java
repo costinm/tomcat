@@ -34,6 +34,7 @@ import org.apache.coyote.OutputBuffer;
 import org.apache.coyote.Request;
 import org.apache.coyote.RequestInfo;
 import org.apache.coyote.Response;
+import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.buf.Ascii;
 import org.apache.tomcat.util.buf.ByteChunk;
@@ -43,6 +44,7 @@ import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.net.AbstractEndpoint;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.LightProcessor;
+import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketStatus;
 import org.apache.tomcat.util.net.SocketWrapper;
 
@@ -455,7 +457,7 @@ public class SpdyTomcatProcessor extends AbstractProcessor<LightProcessor>
     }
 
     @Override
-    protected boolean isComet() {
+    public boolean isComet() {
         return false;
     }
 
@@ -478,7 +480,7 @@ public class SpdyTomcatProcessor extends AbstractProcessor<LightProcessor>
     }
 
     @Override
-    protected boolean isUpgrade() {
+    public boolean isUpgrade() {
         return false;
     }
 
@@ -582,4 +584,17 @@ public class SpdyTomcatProcessor extends AbstractProcessor<LightProcessor>
 
         
     }
+
+	@Override
+	public void recycle(boolean socketClosing) {
+	}
+
+	@Override
+	public void setSslSupport(SSLSupport sslSupport) {
+	}
+
+	@Override
+	public UpgradeInbound getUpgradeInbound() {
+		return null;
+	}
 }
