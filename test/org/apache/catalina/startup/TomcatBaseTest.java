@@ -103,11 +103,12 @@ public abstract class TomcatBaseTest extends LoggingBaseTest {
                 InetAddress.getByName("localhost").getHostAddress());
         // Use random free port
         connector.setPort(0);
-        // Mainly set to reduce timeouts during async tests
-        extraConnectorSetup(connector, protocol);
         connector.setAttribute("connectionTimeout", "3000");
         tomcat.getService().addConnector(connector);
         tomcat.setConnector(connector);
+
+        // Mainly set to reduce timeouts during async tests
+        extraConnectorSetup(connector, protocol);
 
         // Add AprLifecycleListener if we are using the Apr connector
         if (protocol.contains("Apr")) {

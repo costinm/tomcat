@@ -1809,29 +1809,27 @@ public class AprEndpoint extends AbstractEndpoint {
                         socket = null;
                         return;
                     }
-                    LightProcessor proto = null;
                     if (lightProtocol != null) {
-                        proto = lightProtocol.getProcessor(socket);
+                        LightProcessor proto = lightProtocol.getProcessor(socket);
+                        if (proto != null) {
+                            lightProcessors.put(socket.getSocket(), proto);
+                            Handler.SocketState state = proto.onData();
+                            handleLightProcessorResult(state, proto, socket.getSocket());
+                            return;
+                        }
                     }
                     
                     // Process the request from this socket
-                    Handler.SocketState state = null;
-                    if (proto != null) {
-                        lightProcessors.put(socket.getSocket(), proto);
-                        state = proto.onData();
-                        handleLightProcessorResult(state, proto, socket.getSocket());
-                    } else {
-                    	state = handler.process(socket,
-                    			SocketStatus.OPEN);
-                    	if (state == Handler.SocketState.CLOSED) {
-                    		// Close socket and pool
-                    		destroySocket(socket.getSocket().longValue());
-                    		socket = null;
-                    	} else if (state == Handler.SocketState.LONG) {
-                    		socket.access();
-                    		if (socket.async) {
-                    			waitingRequests.add(socket);
-                    		}
+                    Handler.SocketState state = handler.process(socket,
+                    		SocketStatus.OPEN);
+                    if (state == Handler.SocketState.CLOSED) {
+                    	// Close socket and pool
+                    	destroySocket(socket.getSocket().longValue());
+                    	socket = null;
+                    } else if (state == Handler.SocketState.LONG) {
+                    	socket.access();
+                    	if (socket.async) {
+                    		waitingRequests.add(socket);
                     	}
                     }
                 }
@@ -1910,12 +1908,28 @@ public class AprEndpoint extends AbstractEndpoint {
         }
     }
     
+    private boolean processLightProcessor(SocketWrapper<Long> socket) {
+    	if (lightProcessors == null) {
+    		return false;
+    	}
+    	synchronized (lightProcessors) {
+    		LightProcessor wrapper = 
+    				lightProcessors.get(socket.getSocket().longValue());
+    		if (wrapper == null) {
+    			return false;
+    		}
+    		SocketState state = wrapper.onData();
+    		handleLightProcessorResult(state, wrapper, socket.getSocket());
+    		return true;
+        }
+    }
+    
     private void handleLightProcessorResult(SocketState state, 
     		LightProcessor proto, long socket) {
     	if (state == Handler.SocketState.CLOSED) {
             // Close socket and pool
         	destroySocket(socket);
-        } else if (state == Handler.SocketState.OPEN) {
+        } else if (state == Handler.SocketState.LONG) {
         	// For normal protocol - called by longPoll(), which is called 
         	// if the AbstractProcessor returns LONG or UPGRADE
             getCometPoller().add(socket , false);
@@ -1943,19 +1957,9 @@ public class AprEndpoint extends AbstractEndpoint {
         @Override
         public void run() {
             synchronized (socket) {
-                // Process the request from this socket
-                if (lightProcessors != null) {
-                    synchronized (lightProcessors) {
-                        LightProcessor wrapper = 
-                        		lightProcessors.get(socket.getSocket().longValue());
-                        if (wrapper != null) {
-                            SocketState state = wrapper.onData();
-                            handleLightProcessorResult(state, wrapper, socket.getSocket());
-                            return;
-                        }
-                    }
-                }
-
+            	if (processLightProcessor(socket)) {
+            		return;
+            	}
                 Handler.SocketState state = handler.process(socket, status);
                 if (state == Handler.SocketState.CLOSED) {
                     // Close socket and pool

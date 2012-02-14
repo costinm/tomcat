@@ -165,7 +165,7 @@ public class AprSocketContext {
     /**
      * Root APR memory pool.
      */
-    static long rootPool = 0;
+    long rootPool = 0;
 
     /**
      * SSL context.
@@ -204,7 +204,7 @@ public class AprSocketContext {
     byte[] ticketKey;
     // For resolving DNS ( i.e. connect ), callbacks
     private ExecutorService threadPool;
-    public boolean debug = false;
+    public boolean debug = true;
 
     protected boolean serverMode;
 
@@ -365,14 +365,14 @@ public class AprSocketContext {
         try {
             apr.getPeerInfo();
 
-            //long socketpool = Pool.create(rootPool);
+            long socketpool = Pool.create(rootPool);
 
             
             int family = Socket.APR_INET;
 
             long clientSockP = Socket.create(family,
                     Socket.SOCK_STREAM,
-                    Socket.APR_PROTO_TCP, rootPool);
+                    Socket.APR_PROTO_TCP, socketpool); // or rootPool ?
             
             Socket.timeoutSet(clientSockP, connectTimeout); 
             if (OS.IS_UNIX) {
@@ -468,7 +468,7 @@ public class AprSocketContext {
         }
     }
 
-    private static long getRootPool() {
+    private long getRootPool() {
         if (rootPool == 0) {
             try {
                 Library.initialize(null);

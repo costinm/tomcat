@@ -3,8 +3,7 @@
 package org.apache.tomcat.spdy;
 
 import java.util.concurrent.Executor;
-
-import org.apache.tomcat.spdy.SpdyFramer.CompressSupport;
+import java.util.concurrent.Executors;
 
 /** 
  * Will implement polling/reuse of heavy objects, allow additional configuration.
@@ -31,11 +30,14 @@ public class SpdyContext {
 
     private Executor executor;
 
+    int defaultFrameSize = 8196;
+	static boolean debug = true;
+    
     /**
      *  Get a frame - frames are heavy buffers, may be reused.
      */
     public SpdyFrame getFrame() {
-        return new SpdyFrame();
+        return new SpdyFrame(defaultFrameSize);
     }
 
     public void releaseFrame(SpdyFrame done) {
@@ -57,6 +59,9 @@ public class SpdyContext {
      * non blocking, and will execute them in the spdy thread.
      */
     public Executor getExecutor() {
+        if (executor == null) {
+            executor = Executors.newCachedThreadPool();
+        }
         return executor;
     }
     

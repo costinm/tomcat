@@ -260,6 +260,7 @@ public class AprSocket {
     public void close() throws IOException {
         channelLock.lock();
         try {
+            inClosed = true;
             if (outClosed) {
                 return;
             }
@@ -295,21 +296,29 @@ public class AprSocket {
         }
     }
     
-    void connect() throws IOException {
-        channelLock.lock();
-        try {
-            if (connecting) {
-                return;
-            }
-            connecting = true;
-        } finally { channelLock.unlock(); }
-        
-        factory.connect(this, remoteHost, remotePort);
+    /** 
+     * Non-blocking connect method
+     */
+    public void connect() throws IOException {
+    	if (blocking) {
+    		factory.connectBlocking(this, remoteHost, remotePort);
+    		// will call handleConnected() at the end.
+    	} else {
+	        channelLock.lock();
+	        try {
+	            if (connecting) {
+	                return;
+	            }
+	            connecting = true;
+	        } finally { channelLock.unlock(); }
+	        
+	        factory.connect(this, remoteHost, remotePort);
+    	}
     }
     
 
     // after connection is done, called from a thread pool ( not IO thread )
-    // may block for handshake
+    // may block for handshake.
     void handleConnected() throws IOException {
         if (secure) {
             blockingStartTLS(); 
@@ -417,7 +426,9 @@ public class AprSocket {
                 return 0;
             }
         }
-        
+        if (outClosed || socket == 0) {
+        	return -1;
+        }
         int sent = Socket.send(socket, data, off, len); 
         
         if (sent == -Status.TIMEUP) {
@@ -464,6 +475,9 @@ public class AprSocket {
             }
             return 0;
         }
+        if (socket == 0 || inClosed) {
+        	return -1;
+        }
         int read = Socket.recv(socket, data, off, len);
 
         if (read == -Status.TIMEUP) {
@@ -472,33 +486,27 @@ public class AprSocket {
         if (read == -Status.EAGAIN) {
             read = 0;
         }
-        if (factory.debug) {
-            if (read == - Status.APR_EOF) {
-                pollIn = false;
-                log.info("apr.read(): EOF" + socket);
-                return -1;
-            } else if (read < 0){
-                pollIn = false;
-                log.info(socket + " apr.read(): " + read + " " +
-                        Error.strerror((int)-read));
-                if (secure) {
-                    log.info("SSL: " + " " + SSL.getLastError());
-                }
-            } else {
-                log.info(socket + " apr.read(): " + read);
-            }
-        }
-        if (read < 0) {
-            // mark the in buffer as closed
-            pollIn = false;
-            inClosed = true;
+        if (read == - Status.APR_EOF) {
+        	pollIn = false;
+        	log.info("apr.read(): EOF" + socket);
+        	inClosed = true;
             factory.rawData(this, true, null, 0, read, true);
-        } else if (read == 0) {
-            // keep read interest unchanged
-            return 0;
+        	return -1;
+        } 
+        if (read < 0){
+        	pollIn = false;
+        	String msg = socket + " apr.read(): " + read + " " +
+        			Error.strerror((int)-read);
+        	log.info(msg);
+        	if (secure) {
+        		log.info("SSL: " + " " + SSL.getLastError());
+        	}
+        	error(msg);
+        	return read;
         }
-        factory.rawData(this, true, data, off, read, 
-                false);
+        if (factory.debug) log.info(socket + " apr.read(): " + read);
+        factory.rawData(this, true, null, 0, read, false);
+        
         return read;
     }
     
@@ -691,6 +699,9 @@ public class AprSocket {
     
     protected void handshakeDone() throws IOException {
         getPeerInfo();
+        if (socket == 0) {
+        	throw new IOException("Socket closed");
+        }
         peerInfo.sessDer = SSLExt.getSessionData(socket);
 
         // TODO: if the ticket changed - save the session again

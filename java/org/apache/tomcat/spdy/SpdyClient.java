@@ -4,11 +4,13 @@ package org.apache.tomcat.spdy;
 
 import java.io.IOException;
 import java.net.Socket;
+import java.nio.charset.Charset;
+import java.util.HashMap;
 
 /**
  * Client side implementation of SPDY protocol.
  * 
- * The base class supports the 'intranet' variant - no SSL, no compression.
+ * The base class supports the internal variant - no SSL, no compression.
  * 
  * Use SpdyClientApr for the external protocol - requires installing the 
  * jni library.
@@ -16,7 +18,7 @@ import java.net.Socket;
  * This class represents a single persistent SPDY connection. The connection
  * will be re-established as needed, and kept alive.
  */
-public class SpdyClient implements Runnable {
+public class SpdyClient {
     protected SpdyContext spdyCtx = new SpdyContext();
     protected SpdyFramer spdy;
     
@@ -27,23 +29,15 @@ public class SpdyClient implements Runnable {
     
     
     public SpdyClient() {
+    	init();
     }
-    
+    	
     public void init() {
-        spdy = new SpdyFramerJioSocket(spdyCtx, host, port);
-        new Thread(this).start();
+    	spdy = new SpdyFramerJioSocket(spdyCtx, host, port);
     }
     
-    public void run() {
-        try {
-            ((SpdyFramerJioSocket) spdy).connect();
-        } catch (IOException ex) {
-            // Channel closed, no longer running
-        }
-    }
-    
-    public SimpleSpdyStream get(String url) throws IOException {
-        SimpleSpdyStream sch = new SimpleSpdyStream(spdy);
+    public ClientSpdyStream get(String url) throws IOException {
+        ClientSpdyStream sch = new ClientSpdyStream(spdy);
         sch.addHeader("host", host);
         sch.addHeader("url", url);
         
@@ -62,7 +56,6 @@ public class SpdyClient implements Runnable {
         String url = args[2];
         
         SpdyClient client = new SpdyClient();
-        client.init();
         client.setTarget(host, port);
         
         client.get(url);
@@ -75,30 +68,57 @@ public class SpdyClient implements Runnable {
         this.port = port;
     }
 
+    boolean connecting;
+    boolean connected;
+
+    
     /** 
      * Default implementation.
      */
-    public static class SpdyFramerJioSocket extends SpdyFramer {
+    public class SpdyFramerJioSocket extends SpdyFramer {
         Socket socket;
-        private String host;
-        private int port;
+        Runnable inputThread = new Runnable() {
+			@Override
+			public void run() {
+                onBlockingSocket();
+                try {
+					socket.close();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+        };
 
         public SpdyFramerJioSocket(SpdyContext spdyContext, 
                 String host, int port) {
             super(spdyContext);
-            this.host = host;
-            this.port = port;
         } 
         
-        public void connect() throws IOException {
-            Socket sock = new Socket(host, port);
-            
-            sock.getInputStream();
-            
-            socket = sock;
-            onData();
+        protected boolean checkConnection(SpdyFrame oframe) throws IOException {
+        	if (connected) {
+        		return true;
+        	}
+            if (connecting) {
+                return false;
+            }
+            connecting = true;
+            try {
+                Socket sock = new Socket(host, port);
+                
+                sock.getInputStream();
+                connected = true;
+                
+                socket = sock;
+                
+                spdyCtx.getExecutor().execute(inputThread);
 
-            sock.close();
+                return true;
+            } catch (IOException ex) {
+            	ex.printStackTrace();
+                connecting = false;
+            }
+            
+            return true;
         }
 
         @Override
@@ -113,5 +133,64 @@ public class SpdyClient implements Runnable {
         }
     }
     
+
+    public static class ClientSpdyStream extends SpdyStream {
+        public static final Charset UTF8 = Charset.forName("UTF-8");
+        HashMap<String, String> resHeaders = new HashMap<String, String>();
+        
+        public ClientSpdyStream(SpdyFramer spdy) {
+            this.spdy = spdy;
+            reqFrame = spdy.getFrame(SpdyFramer.TYPE_SYN_STREAM);
+        }
+
+        @Override
+        public void onCtlFrame(SpdyFrame frame) throws IOException {
+            // TODO: handle RST
+            resFrame = frame;
+            processHeaders(resFrame);
+            if (resFrame.isHalfClose()) {
+                finRcvd = true;
+            }
+        }
+        
+        public void processHeaders(SpdyFrame f) {
+            int nvCount = f.nvCount;
+            for (int i = 0; i < nvCount; i++) {
+                int len = f.read16();
+                String n = new String(f.data, f.off, len, UTF8);
+                f.advance(len);
+                len = f.read16();
+                String v = new String(f.data, f.off, len, UTF8);
+                f.advance(len);
+                resHeaders.put(n,  v);
+            }
+        }
+        
+        public void addHeader(String name, String value) {
+            byte[] nameB = name.getBytes();
+            reqFrame.headerName(nameB, 0, nameB.length);
+            nameB = value.getBytes();
+            reqFrame.headerValue(nameB, 0, nameB.length);
+        }
+        
+        
+        public void send() throws IOException {
+        	send("http", "GET");
+        }
+        
+        public void send(String scheme, String method) throws IOException {
+        	if ("GET".equalsIgnoreCase(method)) {
+                // TODO: add the others
+                reqFrame.halfClose();        		
+        	}
+            addHeader("scheme", "http"); // todo
+            addHeader("method", method);
+            addHeader("version", "HTTP/1.1");
+            if (reqFrame.isHalfClose()) {
+                finSent = true;
+            }
+            spdy.sendFrameBlocking(reqFrame, this);
+        }
+    }    
     
 }

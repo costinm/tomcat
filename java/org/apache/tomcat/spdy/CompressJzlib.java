@@ -97,9 +97,9 @@ public class CompressJzlib implements CompressSupport {
         cStream.deflateSetDictionary(dict, dict.length);
     }
     
-    
+    // TODO: use per thread compressor.
     @Override
-    public void compress(SpdyFrame frame, int start) throws IOException {
+    public synchronized void compress(SpdyFrame frame, int start) throws IOException {
         // TODO: only the last one needs flush
         // TODO: size missmatches ?
         init();
@@ -137,7 +137,7 @@ public class CompressJzlib implements CompressSupport {
     }
     
     @Override
-    public void decompress(SpdyFrame frame, int start) throws IOException {
+    public synchronized void decompress(SpdyFrame frame, int start) throws IOException {
         // stream id ( 4 ) + unused ( 2 ) 
         // nvCount is compressed in impl - spec is different
         init();

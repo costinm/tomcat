@@ -9,8 +9,8 @@ import org.apache.tomcat.jni.AprSocketContext;
 import org.apache.tomcat.jni.Status;
 
 public class SpdyClientApr extends SpdyClient {
+	
     AprSocketContext con = new AprSocketContext();
-
  
     @Override
     public void init() {
@@ -21,33 +21,19 @@ public class SpdyClientApr extends SpdyClient {
         return con;
     }
     
-    public void connect() {
-        if (insecureCerts) {
-            con.customVerification();
-        }
-        con.setNpn("spdy/2");
-
-        new Thread(this).start();
-    }
-
-    public void run() {
-        try {
-            AprSocket ch = con.channel();
-            ch.setTarget(host, port);
-            ch.blockingStartTLS();
-            
-            ((SpdyFramerAprSocket) spdy).setSocket(ch);
-            spdy.onData();
-
-            ch.close();
-        } catch (IOException ex) {
-            // Channel closed, no longer running
-        }
-    }
-    
-    
-    public static class SpdyFramerAprSocket extends SpdyFramer {
+    public class SpdyFramerAprSocket extends SpdyFramer {
         AprSocket socket;
+        Runnable inputThread = new Runnable() {
+			@Override
+			public void run() {
+                onBlockingSocket();
+                try {
+					socket.close();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+        };
 
         public SpdyFramerAprSocket(SpdyContext spdyContext) {
             super(spdyContext);
@@ -57,22 +43,46 @@ public class SpdyClientApr extends SpdyClient {
         public void setSocket(AprSocket ch) {
             this.socket = ch;        
         }
+
         
+        protected boolean checkConnection(SpdyFrame oframe) throws IOException {
+        	if (connected) {
+        		return true;
+        	}
+        	if (connecting) {
+        		return false;
+        	}
+        	connecting = true;
+        	
+            if (insecureCerts) {
+                con.customVerification();
+            }
+            con.setNpn("spdy/2");
+
+            AprSocket ch = con.channel();
+            ch.setTarget(host, port);
+            ch.blockingStartTLS();
+            
+            ((SpdyFramerAprSocket) spdy).setSocket(ch);
+            
+            ch.connect();
+            
+            spdyCtx.getExecutor().execute(inputThread);
+            connected = true;
+            
+            return true;
+        }
+
         @Override
         public int write(byte[] data, int off, int len) throws IOException {
             if (socket == null) {
                 return -1;
             }
-            while (len > 0) {
-                int sent = socket.write(data, off, len);
-                   // org.apache.tomcat.jni.Socket.send(socket, data, off, len);
-                if (sent < 0) {
-                    return -1;
-                }
-                len -= sent;
-                off += sent;
+            int sent = socket.write(data, off, len);
+            if (sent < 0) {
+            	return -1;
             }
-            return len;
+            return sent;
         }
 
         /**

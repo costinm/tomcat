@@ -18,27 +18,33 @@ package org.apache.tomcat.spdy;
 
 import java.io.IOException;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.Map;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import org.apache.tomcat.util.net.LightProcessor;
-
 /**
- * Handle SPDY protocol.
+ * Main class implementing SPDY protocol. Works with both blocking and non-blocking
+ * sockets. To simplify integration in various endpoints there is no 'socket' 
+ * layer/abstraction, but read/write abstract methods. 
+ * 
+ * Because SPDY is multiplexing, a blocking socket needs a second thread to handle
+ * writes ( the read thread may be blocked while a servlet is writing ). The intended
+ * use of SPDY with blocking sockets is for frontend(load-balancer) to tomcat, where
+ * each tomcat will have a few spdy connections.
  *
- * Because we need to auto-detect SPDY and fallback to HTTP ( based on SSL
- * next proto ) this is implemented in a special way: 
- * AbstractHttp11Processor.process() will delegate to Spdy.process if spdy 
- * is needed.
  * 
  * 
  */
-public abstract class SpdyFramer implements LightProcessor {
+public abstract class SpdyFramer { // implements Runnable {
 
     // TODO: this can be pooled, to avoid allocation on idle connections
     // TODO: override socket timeout
     
-    protected SpdyFrame inFrame;
+    protected volatile SpdyFrame inFrame;
     
     protected CompressSupport compressSupport;
     
@@ -99,27 +105,35 @@ public abstract class SpdyFramer implements LightProcessor {
     };
     
     
-    protected SpdyFrame currentOutFrame = new SpdyFrame();
+    //protected SpdyFrame currentOutFrame = new SpdyFrame();
 
-    private SpdyContext spdyContext;
+    SpdyContext spdyContext;
 
+    boolean inClosed;
+    
     int lastChannel;
+    int outStreamId = 1;
+    
+    // TODO: finer handling of priorities
+    LinkedList<SpdyFrame> prioriyQueue = new LinkedList<SpdyFrame>();
+    LinkedList<SpdyFrame> outQueue = new LinkedList<SpdyFrame>();
+    
+    Lock framerLock = new ReentrantLock();
+    
     // -------------- 
     
     public static byte[] NPN = "spdy/2".getBytes();
+
+    private Condition outCondition;
     
     
     public SpdyFramer(SpdyContext spdyContext) {
-        this.spdyContext = spdyContext;        
+        this.spdyContext = spdyContext;
+        outCondition = framerLock.newCondition();
     }
     
     /** 
-     * Write. The current implementation is blocking - write is typically
-     * invoked from user code running in the thread pool, so it should be 
-     * ok to block.
-     *  
-     * TODO: add a separate non-blocking write, with a callback 
-     * and flow control to support output in the IO thread. 
+     * Write. 
      */
     public abstract int write(byte[] data, int off, int len) throws IOException;
     
@@ -145,61 +159,212 @@ public abstract class SpdyFramer implements LightProcessor {
         return frame;
     }
 
-    int outStreamId = 1;
+    /* 
+      Output requirements:
+       - common case: sendFrame called from a thread ( like servlets ), wants to be 
+       blocked anyways
+       
+       - but also need to support 'non-blocking' mode ( ping )
+       
+       - we need to queue frames when write would block, so we can prioritize.
+       
+       - for fully non-blocking write: there will be a drain callback.     
+     */
     
-    // TODO: this is a basic test impl - needs to be fixed
-    // We need it to be non-blocking, queue the frames - and handle
-    // priorities and flow control.
-    public void sendFrame(SpdyFrame oframe) throws IOException {
-        sendFrame(oframe, null);
+    /**
+     *  Handles the out queue for blocking sockets.
+     */
+    SpdyFrame out;
+    boolean draining = false;
+    
+    /**
+     * Non blocking if the socket is not blocking.
+     */
+    private boolean drain() {
+    	while (true) {
+            framerLock.lock();
+            
+            try {
+            	if (out == null) {
+            		out = prioriyQueue.poll();
+            		if (out == null) {
+            			out = outQueue.poll();
+            		}
+            		if (out == null) {
+            			return false;
+            		}        	
+            		SpdyFrame oframe = out;
+            		try {
+            			if (oframe.type == TYPE_SYN_STREAM) {
+            				oframe.fixNV(18);
+            				if (compressSupport != null) {
+            					compressSupport.compress(oframe, 18);
+            				}            
+            			} else if(oframe.type == TYPE_SYN_REPLY ||
+            					oframe.type == TYPE_HEADERS) {
+            				oframe.fixNV(14);
+            				if (compressSupport != null) {
+            					compressSupport.compress(oframe, 14);
+            				}
+            			}
+            		} catch (IOException ex) {
+            			abort("Compress error");
+            			return false;
+            		}
+                    if (oframe.type == TYPE_SYN_STREAM) {
+                        oframe.streamId = outStreamId;
+                        outStreamId += 2;
+                        channels.put(oframe.streamId, oframe.stream);
+                    }
+                        
+                    oframe.serializeHead();
+                    
+
+            	}
+        		if (out.endData == out.off) {
+        			out = null;
+        			continue;
+        		}
+            } finally {
+                framerLock.unlock();
+            }
+
+            if (spdyContext.debug) {
+            	trace("> " + out);
+            }
+            
+    		try {
+                if (!checkConnection(out)) {
+                	return true;
+                }
+                int toWrite = out.endData - out.off;
+    			int wr = write(out.data, out.off, toWrite);
+    			if (wr < 0) {
+    				return false;
+    			}
+    			if (wr < toWrite) {
+    				out.off += wr;
+    				return true; // non blocking connection
+    			}
+    			out.off += wr;
+    			// Frame was sent
+    	        framerLock.lock();
+    	        try {
+    	            outCondition.signalAll();
+    	        } finally {
+    	            framerLock.unlock();
+    	        }
+    			out = null;
+    		} catch (IOException e) {
+    			// connection closed - abort all streams
+    			e.printStackTrace();
+    			onClose();
+    			return false;
+    		}
+    	}
     }
-    
-    public void startStream(SpdyFrame oframe,
+
+    /** 
+     * Blocking call for sendFrame: must be called from a thread pool.
+     * 
+     * Will wait until the actual frame is sent.
+     */
+    public void sendFrameBlocking(SpdyFrame oframe,
             SpdyStream proc) throws IOException {
-        sendFrame(oframe, proc);
+        queueFrame(oframe, proc, oframe.pri == 0 ? outQueue : prioriyQueue);
+
+        nonBlockingDrain();
+
+        while (!inClosed) {
+	        framerLock.lock();
+	        try {
+	        	if (oframe.off == oframe.endData) {
+	        		return; // was sent
+	        	}
+	            outCondition.await();
+	        } catch (InterruptedException e) {
+	        } finally {
+	            framerLock.unlock();
+	        }
+        }
+    }
+
+    /**
+     *  Send as much as possible without blocking.
+     *  
+     *  With a nb transport it should call drain directly.
+     */
+    public void nonBlockingDrain() {
+    	// TODO: if (nonBlocking()) { drain() }
+        spdyContext.getExecutor().execute(nbDrain);            	
     }
     
-    private void sendFrame(SpdyFrame oframe,
-                SpdyStream proc) throws IOException {
+    static int drainCnt = 0;
+    
+    Runnable nbDrain = new Runnable() {
+    	public void run() {
+    		int i = drainCnt++;
+    		long t0 = System.currentTimeMillis();
+    		synchronized (nbDrain) {
+    			if (draining) {
+    				return;
+    			}
+    			draining = true;
+			}
+
+    		drain();
+    		synchronized (nbDrain) {
+    			draining = false;
+			}
+    	}
+    };
+    
+    public void sendFrameNonBlocking(SpdyFrame oframe,
+            SpdyStream proc) throws IOException {
+        queueFrame(oframe, proc, oframe.pri == 0 ? outQueue : prioriyQueue);
+        nonBlockingDrain();
+    }
+    
+    private void queueFrame(SpdyFrame oframe,
+            SpdyStream proc, LinkedList<SpdyFrame> outQueue) throws IOException {
+        
         oframe.endData = oframe.off;
         oframe.off = 0;
-        if (oframe.type == TYPE_SYN_STREAM) {
-            oframe.fixNV(18);
-            if (compressSupport != null) {
-                compressSupport.compress(oframe, 18);
-            }            
-        } else if(oframe.type == TYPE_SYN_REPLY ||
-                oframe.type == TYPE_HEADERS) {
-            oframe.fixNV(14);
-            if (compressSupport != null) {
-                compressSupport.compress(oframe, 14);
-            }
-        }
-        if (oframe.type == TYPE_SYN_STREAM) {
-            oframe.streamId = outStreamId;
-            outStreamId += 2;
-            channels.put(oframe.streamId, proc);
-        }
-            
-        oframe.serializeHead();
+        // We can't assing a stream ID until it is sent - priorities
+        // we can't compress either - it's stateful.
+        oframe.stream = proc; 
         
-        System.err.println("> " + oframe);
-        write(oframe.data, 0, oframe.endData);        
+        framerLock.lock();
+        try {
+            outQueue.add(oframe);
+            outCondition.signalAll();
+        } finally {
+            framerLock.unlock();
+        }
     }
     
+
+    /**
+     *  Server side: write will fail ( but we could fail fast ).
+     *  
+     *  Client side: will connect if needed ( syn_stream ) or report
+     *  an error if disconnected.
+     *  
+     *  Should be non-blocking if the socket is non blocking.
+     *  
+     *  @return true if connected, false if connection is in progress
+     * @throws IOException 
+     */
+    protected boolean checkConnection(SpdyFrame oframe) throws IOException {
+        return true;
+    }
 
     public void onClose() {
         // TODO: abort
     }
     
     private void trace(String s) {
-        System.err.println(s);
-    }
-    
-    public SpdyFrame popInFrame() {
-        SpdyFrame res = inFrame;
-        inFrame = null;
-        return res;
+    	System.err.println(s);
     }
     
     public SpdyFrame inFrame() {
@@ -207,28 +372,35 @@ public abstract class SpdyFramer implements LightProcessor {
     }
     
     /** 
-     * Process a SPDY connection. Called in a separate thread.
-     * @throws IOException 
+     * Process a SPDY connection using a blocking socket.
      */
-    @Override
-    public int onData() {
+    public int onBlockingSocket() {
         try {
-            trace("< onData() " + lastChannel);
+            if (spdyContext.debug) {
+            	trace("< onConnection() " + lastChannel);
+            }
+            int rc = processInput();
             
-            
-            int rc = handleLiteChannel();
-            trace("< onData() " + rc + " " + lastChannel);            
+            if (spdyContext.debug) {
+            	trace("< onConnection() " + rc + " " + lastChannel);
+            }
             return rc;
         } catch (Throwable t) {
             t.printStackTrace();
-            trace("< onData-ERROR() " + lastChannel);            
+            trace("< onData-ERROR() " + lastChannel);  
+            abort("Error processing socket" + t);
             return CLOSE;
         }
     }
+    public static final int LONG = 1;
+    public static final int CLOSE = -1;
 
     private SpdyFrame nextFrame;
     
-    private int handleLiteChannel() throws IOException {
+    /**
+     * Non-blocking method, read as much as possible and return.
+     */
+    public int processInput() throws IOException {
         while (true) {
             if (inFrame == null) {
                 inFrame = spdyContext.getFrame();
@@ -240,6 +412,7 @@ public abstract class SpdyFramer implements LightProcessor {
             // we might already have data from previous frame
             if (inFrame.endData < 8 || // we don't have the header
                     inFrame.endData < inFrame.endFrame) { // size != 0 - we parsed the header
+            	
                 int rd = read(inFrame.data, inFrame.endData, 
                         inFrame.data.length - inFrame.endData);
                 if (rd < 0) {
@@ -247,7 +420,7 @@ public abstract class SpdyFramer implements LightProcessor {
                     return CLOSE;
                 }
                 if (rd == 0) {
-                    return OPEN; 
+                    return LONG; 
                     // Non-blocking channel - will resume reading at off
                 }
                 inFrame.endData += rd;
@@ -298,7 +471,7 @@ public abstract class SpdyFramer implements LightProcessor {
                 inFrame.streamId = inFrame.readInt(); // 4
                 lastChannel = inFrame.streamId;
                 inFrame.associated = inFrame.readInt(); // 8
-                inFrame.read16(); // 10 pri and unused
+                inFrame.pri = inFrame.read16(); // 10 pri and unused
                 if (compressSupport != null) {
                     compressSupport.decompress(inFrame, 18);
                 }
@@ -314,7 +487,9 @@ public abstract class SpdyFramer implements LightProcessor {
                 inFrame.nvCount = inFrame.read16();                
             }
 
-            System.err.println("< " + inFrame);
+            if (spdyContext.debug) {
+            	trace("< " + inFrame);
+            }
             
             try {
                 int state = handleFrame();
@@ -345,10 +520,11 @@ public abstract class SpdyFramer implements LightProcessor {
     }
     
     // Framing error or shutdown- close all streams.
-    public void abort(String msg) throws IOException {
+    public void abort(String msg) {
         System.err.println(msg);
-        
+        inClosed = true;
         // TODO: close all streams
+        
     }
     
     /** 
@@ -373,7 +549,7 @@ public abstract class SpdyFramer implements LightProcessor {
                 int lastStream = inFrame.readInt();
                 log.info("GOAWAY last=" + lastStream);
                 abort("GOAWAY");
-                return LightProcessor.CLOSE;
+                return CLOSE;
             } 
             case TYPE_RST_STREAM: {
                 inFrame.streamId = inFrame.read32();
@@ -383,9 +559,10 @@ public abstract class SpdyFramer implements LightProcessor {
                 SpdyStream sch = channels.get(inFrame.streamId);
                 if (sch == null) {
                     abort("Missing channel " + inFrame.streamId);
-                    return LightProcessor.CLOSE;
+                    return CLOSE;
                 }
-                sch.onCtlFrame();
+                sch.onCtlFrame(inFrame);
+                inFrame = null;
                 break;
             }
             case TYPE_SYN_STREAM: {
@@ -397,11 +574,12 @@ public abstract class SpdyFramer implements LightProcessor {
                 }
 
                 try {
-                    ch.onCtlFrame();        
+                    ch.onCtlFrame(inFrame);
+                    inFrame = null;
                 } catch (Throwable t) {
-                    log.info("Error parsing head SYN_STREAM" + t);
+                    log.log(Level.SEVERE, "Error parsing head SYN_STREAM", t);
                     abort("Error reading headers " + t);
-                    return LightProcessor.CLOSE;
+                    return CLOSE;
                 }
                 break;
             } 
@@ -409,29 +587,28 @@ public abstract class SpdyFramer implements LightProcessor {
                 SpdyStream sch = channels.get(inFrame.streamId);
                 if (sch == null) {
                     abort("Missing channel");
-                    return LightProcessor.CLOSE;
+                    return CLOSE;
                 }
                 try {
-                    sch.onCtlFrame();        
+                    sch.onCtlFrame(inFrame);
+                    inFrame = null;
                 } catch (Throwable t) {
                     log.info("Error parsing head SYN_STREAM" + t);
                     abort("Error reading headers " + t);
-                    return LightProcessor.CLOSE;
+                    return CLOSE;
                 }
                 break;
             }   
             case TYPE_PING: {
 
-                SpdyFrame oframe = currentOutFrame;
+                SpdyFrame oframe = spdyContext.getFrame();
                 oframe.type = TYPE_PING;
                 oframe.c = true;
-                oframe.flags = 0;
 
-                oframe.off = 0;
-                oframe.data = inFrame.data;
-                oframe.endData = inFrame.endData;
-
-                sendFrame(oframe);
+                oframe.append32(inFrame.read32());
+                oframe.pri = 0x80;
+                
+                sendFrameNonBlocking(oframe, null);
                 break;
             } 
             }
@@ -440,11 +617,12 @@ public abstract class SpdyFramer implements LightProcessor {
             SpdyStream sch = channels.get(inFrame.streamId);
             if (sch == null) {
                 abort("Missing channel");
-                return LightProcessor.CLOSE;
+                return CLOSE;
             }
-            sch.onDataFrame();
+            sch.onDataFrame(inFrame);
+            inFrame = null;
         }
-        return LightProcessor.OPEN;
+        return LONG;
     }
     
     /**

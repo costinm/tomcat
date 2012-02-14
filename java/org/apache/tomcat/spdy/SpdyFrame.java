@@ -20,19 +20,26 @@ public class SpdyFrame {
 
     int version;
 
-    int flags;
+    private int flags;
 
     int type;
 
     // For control frames
     int streamId; 
 
+    public int pri;
+    
     public int associated;
     
     public int nvCount;
+	public SpdyStream stream;
     
-    public SpdyFrame() {
-        
+    public SpdyFrame(int size) {
+        data = new byte[size];
+    }
+    
+    public int getDataSize() {
+        return endData - 8;
     }
     
     public void recyle() {
@@ -77,7 +84,7 @@ public class SpdyFrame {
                 // nvcount is added before
                 append32(data, 8, streamId);
                 append32(data, 12, associated);
-                data[16] = 0;
+                data[16] = 0; // TODO: priority
                 data[17] = 0;
                 return 18;
             } else if (type == SpdyFramer.TYPE_SYN_REPLY) {
@@ -108,7 +115,6 @@ public class SpdyFrame {
         if (b0 < 128) {
             // data frame 
             c = false;
-            streamId = b0;
             streamId = read32(data, 0);
             version = 2;
         } else {
@@ -137,6 +143,10 @@ public class SpdyFrame {
     
     boolean isHalfClose() {
         return (flags & SpdyFramer.FLAG_HALF_CLOSE) != 0;
+    }
+
+    void halfClose() {
+        flags = SpdyFramer.FLAG_HALF_CLOSE;
     }
 
     public boolean closed() {
@@ -215,8 +225,11 @@ public class SpdyFrame {
             data = new byte[len];
             return;
         }
-        if (data.length - off < len) {
-            byte[] tmp = new byte[data.length + len - off];
+        int newEnd = off + len;
+        
+        if (data.length < newEnd) {
+            byte[] tmp = new byte[newEnd];
+            System.err.println("cp " + off + " " + data.length + " " + len+ " " + tmp.length);
             System.arraycopy(data, 0, tmp, 0, off);
             data = tmp;
         }
@@ -224,14 +237,14 @@ public class SpdyFrame {
     }
 
     public int read16() {
-        int res = data[off++];
-        return res << 8 | data[off++];
+        int res = data[off++] & 0xFF;
+        return res << 8 | (data[off++] & 0xFF);
     }
 
     int readInt() {
         int res = 0;
         for (int i = 0; i < 4; i++) {
-            int b0 = data[off++];
+            int b0 = data[off++] & 0xFF;
             res = res << 8 | b0;
         }
         return res;
@@ -240,7 +253,7 @@ public class SpdyFrame {
     int read24() {
         int res = 0;
         for (int i = 0; i < 3; i++) {
-            int b0 = data[off++];
+            int b0 = data[off++] & 0xFF;
             res = res << 8 | b0;
         }
         return res;
@@ -249,7 +262,7 @@ public class SpdyFrame {
     int read32(byte[] data, int off) {
         int res = 0;
         for (int i = 0; i < 4; i++) {
-            int b0 = data[off++];
+            int b0 = data[off++] & 0xFF;
             res = res << 8 | b0;
         }
         return res;
@@ -258,14 +271,14 @@ public class SpdyFrame {
     int read32() {
         int res = 0;
         for (int i = 0; i < 4; i++) {
-            int b0 = data[off++];
+            int b0 = data[off++] & 0xFF;
             res = res << 8 | b0;
         }
         return res;
     }
 
-    public byte readByte() {
-        return data[off++];
+    public int readByte() {
+        return data[off++] & 0xFF;
     }
     
     public int remaining() {
