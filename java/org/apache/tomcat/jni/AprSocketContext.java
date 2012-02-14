@@ -204,7 +204,7 @@ public class AprSocketContext {
     byte[] ticketKey;
     // For resolving DNS ( i.e. connect ), callbacks
     private ExecutorService threadPool;
-    public boolean debug = true;
+    public boolean debug = false;
 
     protected boolean serverMode;
 
