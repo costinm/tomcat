@@ -153,18 +153,19 @@ public class Poll {
     public static native int pollset(long pollset, long [] descriptors);
 
     /**
-     * Make poll() return. 
-     * 
-     * @param pollset
-     * @return
+     * Make poll() return.
+     *
+     * @param   pollset
+     * @return  Negative APR error code
      */
     public static native int interrupt(long pollset);
-    
+
     /**
      * Check if interrupt() is allowed.
-     * 
+     *
      * @param pollset
-     * @return
+     * @return  <code>true</true> if {@link #interrupt(long)} is allowed, else
+     *          <code>false</code>
      */
     public static native boolean wakeable(long pollset);
 }

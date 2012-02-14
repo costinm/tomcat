@@ -16,7 +16,7 @@ import org.apache.tomcat.util.net.SocketWrapper;
 public class SpdyTomcatJioProtocol implements LightProtocol {
 
     private SpdyContext spdyContext;
-    
+
     @SuppressWarnings(value = { "rawtypes", "unchecked" })
     public LightProcessor getProcessor(SocketWrapper socket) {
         return new SpdyFramerJio(spdyContext, (SocketWrapper<Socket>) socket);
@@ -35,13 +35,15 @@ public class SpdyTomcatJioProtocol implements LightProtocol {
             }
         };
     }
-    
-    public static class SpdyFramerJio extends SpdyFramer 
-            implements LightProcessor {
+
+    public static class SpdyFramerJio extends SpdyFramer implements
+            LightProcessor {
         Socket socket;
-		private SocketWrapper<Socket> socketW;
-        
-        public SpdyFramerJio(SpdyContext spdyContext, SocketWrapper<Socket> socketW) {
+
+        private SocketWrapper<Socket> socketW;
+
+        public SpdyFramerJio(SpdyContext spdyContext,
+                SocketWrapper<Socket> socketW) {
             super(spdyContext);
             this.socketW = socketW;
             this.socket = socketW.getSocket();
@@ -71,10 +73,10 @@ public class SpdyTomcatJioProtocol implements LightProtocol {
             return SocketState.CLOSED;
         }
 
-		@Override
-	    @SuppressWarnings(value = { "rawtypes"})
-		public SocketWrapper getSocket() {
-			return socketW;
-		}
-    }    
+        @Override
+        @SuppressWarnings(value = { "rawtypes" })
+        public SocketWrapper getSocket() {
+            return socketW;
+        }
+    }
 }

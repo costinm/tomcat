@@ -8,11 +8,13 @@ public class SpdyFrame {
     // cost an extra copy - or even more complexity for dealing with slices
     // if we want to save the copy.
     public byte[] data;
+
     public int off = 8; // used when reading - current offset
-    
-    public int endFrame; // end of frame ==  size + 8 
+
+    public int endFrame; // end of frame == size + 8
+
     // On write it is incremented.
-    
+
     public int endData; // end of data in the buffer (may be past frame end)
 
     // Processed data from the frame
@@ -25,23 +27,24 @@ public class SpdyFrame {
     int type;
 
     // For control frames
-    int streamId; 
+    int streamId;
 
     public int pri;
-    
+
     public int associated;
-    
+
     public int nvCount;
-	public SpdyStream stream;
-    
+
+    public SpdyStream stream;
+
     public SpdyFrame(int size) {
         data = new byte[size];
     }
-    
+
     public int getDataSize() {
         return endData - 8;
     }
-    
+
     public void recyle() {
         type = 0;
         c = false;
@@ -51,27 +54,21 @@ public class SpdyFrame {
         nvCount = 0;
         endData = 0;
     }
-    
+
     public String toString() {
         if (c) {
             if (type == 6) {
                 return "C PING " + read32(data, 0);
             }
-            return "C" + 
-                " S=" + streamId +   
-                (flags != 0 ? " F=" + flags: "") +
-                (version != 2 ? "  v" + version: "") + 
-                " t=" + type + 
-                " L=" + endFrame +
-                "/" + off;
+            return "C" + " S=" + streamId + (flags != 0 ? " F=" + flags : "")
+                    + (version != 2 ? "  v" + version : "") + " t=" + type
+                    + " L=" + endFrame + "/" + off;
         } else {
-            return "D" + 
-                    " S=" + streamId +
-                    (flags != 0 ? " F=" + flags: "") +
-                    " L=" + endFrame + "/" + off;
+            return "D" + " S=" + streamId + (flags != 0 ? " F=" + flags : "")
+                    + " L=" + endFrame + "/" + off;
         }
-     }
-    
+    }
+
     public int serializeHead() {
         if (c) {
             data[0] = (byte) 0x80;
@@ -79,7 +76,7 @@ public class SpdyFrame {
             data[2] = 0;
             data[3] = (byte) type;
             data[4] = (byte) flags;
-            append24(data, 5, endData - 8);                
+            append24(data, 5, endData - 8);
             if (type == SpdyFramer.TYPE_SYN_STREAM) {
                 // nvcount is added before
                 append32(data, 8, streamId);
@@ -101,7 +98,7 @@ public class SpdyFrame {
         } else {
             append32(data, 0, streamId);
             data[4] = (byte) flags;
-            append24(data, 5, endData - 8);            
+            append24(data, 5, endData - 8);
         }
         return 8;
     }
@@ -110,10 +107,10 @@ public class SpdyFrame {
         endFrame = 0;
         streamId = 0;
         nvCount = 0;
-        
+
         int b0 = data[0] & 0xFF;
         if (b0 < 128) {
-            // data frame 
+            // data frame
             c = false;
             streamId = read32(data, 0);
             version = 2;
@@ -133,14 +130,14 @@ public class SpdyFrame {
             b0 = data[i] & 0xFF;
             endFrame = endFrame << 8 | b0;
         }
-        
-        // size will represent the end of the data ( header is held in same 
+
+        // size will represent the end of the data ( header is held in same
         // buffer)
         endFrame += 8;
-        
+
         return true;
     }
-    
+
     boolean isHalfClose() {
         return (flags & SpdyFramer.FLAG_HALF_CLOSE) != 0;
     }
@@ -152,20 +149,20 @@ public class SpdyFrame {
     public boolean closed() {
         return (flags & SpdyFramer.FLAG_HALF_CLOSE) != 0;
     }
-    
+
     static void append24(byte[] buff, int off, int v) {
         buff[off++] = (byte) ((v & 0xFF0000) >> 16);
         buff[off++] = (byte) ((v & 0xFF00) >> 8);
         buff[off++] = (byte) ((v & 0xFF));
     }
-    
+
     static void append32(byte[] buff, int off, int v) {
         buff[off++] = (byte) ((v & 0xFF000000) >> 24);
         buff[off++] = (byte) ((v & 0xFF0000) >> 16);
         buff[off++] = (byte) ((v & 0xFF00) >> 8);
         buff[off++] = (byte) ((v & 0xFF));
     }
-    
+
     public void append32(int v) {
         makeSpace(4);
         data[off++] = (byte) ((v & 0xFF000000) >> 24);
@@ -179,10 +176,10 @@ public class SpdyFrame {
         data[off++] = (byte) ((v & 0xFF00) >> 8);
         data[off++] = (byte) ((v & 0xFF));
     }
-    
+
     void fixNV(int nvPos) {
         data[nvPos++] = (byte) ((nvCount & 0xFF00) >> 8);
-        data[nvPos] = (byte) ((nvCount & 0xFF));        
+        data[nvPos] = (byte) ((nvCount & 0xFF));
     }
 
     public void append(byte[] buf, int soff, int len) {
@@ -197,17 +194,17 @@ public class SpdyFrame {
         System.arraycopy(buf, soff, data, off, len);
         off += len;
     }
-    
+
     public void headerName(byte[] buf, int soff, int len) {
         // if it's the first header, leave space for extra params and NV count.
         // they'll be filled in by send.
         if (off == 8) {
             if (type == SpdyFramer.TYPE_SYN_REPLY) {
                 off = 16;
-            } else if (type == SpdyFramer.TYPE_SYN_STREAM) { 
+            } else if (type == SpdyFramer.TYPE_SYN_STREAM) {
                 off = 20;
-            } else if(type != SpdyFramer.TYPE_HEADERS) {
-                off = 16;                
+            } else if (type != SpdyFramer.TYPE_HEADERS) {
+                off = 16;
             } else {
                 throw new RuntimeException("Wrong frame type");
             }
@@ -215,7 +212,7 @@ public class SpdyFrame {
         nvCount++;
         headerValue(buf, soff, len);
     }
-    
+
     // TODO: instead of that, use byte[][]
     void makeSpace(int len) {
         if (len < 256) {
@@ -226,14 +223,15 @@ public class SpdyFrame {
             return;
         }
         int newEnd = off + len;
-        
+
         if (data.length < newEnd) {
             byte[] tmp = new byte[newEnd];
-            System.err.println("cp " + off + " " + data.length + " " + len+ " " + tmp.length);
+            System.err.println("cp " + off + " " + data.length + " " + len
+                    + " " + tmp.length);
             System.arraycopy(data, 0, tmp, 0, off);
             data = tmp;
         }
-            
+
     }
 
     public int read16() {
@@ -280,11 +278,11 @@ public class SpdyFrame {
     public int readByte() {
         return data[off++] & 0xFF;
     }
-    
+
     public int remaining() {
         return endFrame - off;
     }
-    
+
     public void advance(int cnt) {
         off += cnt;
     }

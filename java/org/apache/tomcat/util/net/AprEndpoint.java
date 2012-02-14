@@ -93,7 +93,7 @@ public class AprEndpoint extends AbstractEndpoint {
      */
     protected long sslContext = 0;
 
-    // Async, set for SocketStatus.LONG
+
     protected ConcurrentLinkedQueue<SocketWrapper<Long>> waitingRequests =
         new ConcurrentLinkedQueue<SocketWrapper<Long>>();
 
@@ -323,6 +323,7 @@ public class AprEndpoint extends AbstractEndpoint {
     protected boolean SSLInsecureRenegotiation = false;
     public void setSSLInsecureRenegotiation(boolean SSLInsecureRenegotiation) { this.SSLInsecureRenegotiation = SSLInsecureRenegotiation; }
     public boolean getSSLInsecureRenegotiation() { return SSLInsecureRenegotiation; }
+
 
     /**
      * Port in use.
@@ -579,7 +580,6 @@ public class AprEndpoint extends AbstractEndpoint {
                 value = SSL.SSL_CVERIFY_OPTIONAL_NO_CA;
             }
             SSLContext.setVerify(sslContext, value, SSLVerifyDepth);
-            
             // For now, sendfile is not supported with SSL
             useSendfile = false;
         }
@@ -1821,16 +1821,16 @@ public class AprEndpoint extends AbstractEndpoint {
                     
                     // Process the request from this socket
                     Handler.SocketState state = handler.process(socket,
-                    		SocketStatus.OPEN);
+                            SocketStatus.OPEN);
                     if (state == Handler.SocketState.CLOSED) {
-                    	// Close socket and pool
-                    	destroySocket(socket.getSocket().longValue());
-                    	socket = null;
+                        // Close socket and pool
+                        destroySocket(socket.getSocket().longValue());
+                        socket = null;
                     } else if (state == Handler.SocketState.LONG) {
-                    	socket.access();
-                    	if (socket.async) {
-                    		waitingRequests.add(socket);
-                    	}
+                        socket.access();
+                        if (socket.async) {
+                            waitingRequests.add(socket);
+                        }
                     }
                 }
             }
@@ -1909,29 +1909,29 @@ public class AprEndpoint extends AbstractEndpoint {
     }
     
     private boolean processLightProcessor(SocketWrapper<Long> socket) {
-    	if (lightProcessors == null) {
-    		return false;
-    	}
-    	synchronized (lightProcessors) {
-    		LightProcessor wrapper = 
-    				lightProcessors.get(socket.getSocket().longValue());
-    		if (wrapper == null) {
-    			return false;
-    		}
-    		SocketState state = wrapper.onData();
-    		handleLightProcessorResult(state, wrapper, socket.getSocket());
-    		return true;
+        if (lightProcessors == null) {
+            return false;
+        }
+        synchronized (lightProcessors) {
+            LightProcessor wrapper = 
+                    lightProcessors.get(socket.getSocket().longValue());
+            if (wrapper == null) {
+                return false;
+            }
+            SocketState state = wrapper.onData();
+            handleLightProcessorResult(state, wrapper, socket.getSocket());
+            return true;
         }
     }
-    
+
     private void handleLightProcessorResult(SocketState state, 
-    		LightProcessor proto, long socket) {
-    	if (state == Handler.SocketState.CLOSED) {
+            LightProcessor proto, long socket) {
+        if (state == Handler.SocketState.CLOSED) {
             // Close socket and pool
-        	destroySocket(socket);
+            destroySocket(socket);
         } else if (state == Handler.SocketState.LONG) {
-        	// For normal protocol - called by longPoll(), which is called 
-        	// if the AbstractProcessor returns LONG or UPGRADE
+            // For normal protocol - called by longPoll(), which is called 
+            // if the AbstractProcessor returns LONG or UPGRADE
             getCometPoller().add(socket , false);
         }
     }
@@ -1957,9 +1957,9 @@ public class AprEndpoint extends AbstractEndpoint {
         @Override
         public void run() {
             synchronized (socket) {
-            	if (processLightProcessor(socket)) {
-            		return;
-            	}
+                if (processLightProcessor(socket)) {
+                    return;
+                }
                 Handler.SocketState state = handler.process(socket, status);
                 if (state == Handler.SocketState.CLOSED) {
                     // Close socket and pool

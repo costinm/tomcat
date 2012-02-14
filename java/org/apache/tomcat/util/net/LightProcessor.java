@@ -18,16 +18,17 @@ package org.apache.tomcat.util.net;
 
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 
+// TODO: improve SocketWrapper: add read/write methods, use specific classes for Apr
+// and jio - like nio does.
 
 /** 
  * An instance of this class will be associated with the socket and process
- * 'data' events. 
+ * 'data' events.
  * 
  * A light processor should not block - the onData() method may be called in the 
  * IO thread, depending on the endpoint ( and conditions ). 
  * 
- * 
- * Light protocol for cases we don't want to preserve a request
+ * Light protocol is used for cases we don't want to preserve a request
  * context  - for example upgraded protocols ( websockets, SPDY ) or 
  * other not-http protocols.
  * 
@@ -50,14 +51,12 @@ public interface LightProcessor {
      * read returns 0 and doesn't block ).
      * 
      * It should return CLOSE on error or if it wants the socket closed.
-     * Returning OPEN means further onData() callbacks will be made.
+     * Returning LONG means further onData() callbacks will be made.
      * 
-     * The associated socket may be blocking - in which case read() will block. The processor
-     * should not assume otherwise - blocking read is a a particular case, same as non-blocking
-     * when all input is available.
+     * The associated socket may be blocking - in which case read() will block. 
      * 
      * It's up to the endpoint to decide when to give us a blocking socket, what timeout to
-     * use on the socket - or to run it in a IO/thread (for fully non-blocking reads) or in a 
+     * use on the socket - and to run it in a IO/thread (for fully non-blocking reads) or in a 
      * thread pool.  
      */
     public SocketState onData();

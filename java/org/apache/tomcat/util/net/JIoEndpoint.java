@@ -303,11 +303,12 @@ public class JIoEndpoint extends AbstractEndpoint {
                     }
 
                     if ((state != SocketState.CLOSED)) {
+                        LightProcessor lightProc = null;
                         if (lightProtocol != null) {
-                            // Fully blocking mode.
-                            LightProcessor proto = 
-                                    lightProtocol.getProcessor(socket); 
-                            state = proto.onData();
+                            lightProc = lightProtocol.getProcessor(socket);
+                        }
+                        if (lightProc != null) {
+                            state = lightProc.onData();
                         } else {
                             if (status == null) {
                                 state = handler.process(socket, SocketStatus.OPEN);
@@ -403,7 +404,9 @@ public class JIoEndpoint extends AbstractEndpoint {
             }
         }
 
-        lightProtocol.init(this, 0);
+        if (lightProtocol != null) {
+            lightProtocol.init(this, 0);
+        }
     }
 
     @Override
