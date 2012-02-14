@@ -93,15 +93,14 @@ public class AprEndpoint extends AbstractEndpoint {
      */
     protected long sslContext = 0;
 
-    protected LightProtocol lightProtocol;
-
+    // Async, set for SocketStatus.LONG
     protected ConcurrentLinkedQueue<SocketWrapper<Long>> waitingRequests =
         new ConcurrentLinkedQueue<SocketWrapper<Long>>();
 
 
     // apr normally creates a new object on each poll.
     // For 'upgraded' protocols we need to remember it's handled differently.
-    Map<Long, LightProcessor> upgraded = 
+    Map<Long, LightProcessor> lightProcessors = 
             new HashMap<Long, LightProcessor>();
     
     // ------------------------------------------------------------ Constructor
@@ -581,12 +580,11 @@ public class AprEndpoint extends AbstractEndpoint {
             }
             SSLContext.setVerify(sslContext, value, SSLVerifyDepth);
             
-            if (lightProtocol != null) {
-                lightProtocol.init(sslContext, this);
-            }
-            
             // For now, sendfile is not supported with SSL
             useSendfile = false;
+        }
+        if (lightProtocol != null) {
+            lightProtocol.init(this, sslContext);
         }
     }
 
@@ -958,9 +956,9 @@ public class AprEndpoint extends AbstractEndpoint {
 
     private void destroySocket(long socket)
     {
-        if (upgraded != null) {
-            synchronized (upgraded) {
-                LightProcessor wrapper = upgraded.remove(socket);
+        if (lightProcessors != null) {
+            synchronized (lightProcessors) {
+                LightProcessor wrapper = lightProcessors.remove(socket);
                 if (wrapper != null) {
                     wrapper.onClose();
                 }
@@ -1362,10 +1360,10 @@ public class AprEndpoint extends AbstractEndpoint {
                 keepAliveCount -= rv;
                 for (int n = 0; n < rv; n++) {
                     // Check for failed sockets and hand this socket off to a worker
-                    if (upgraded != null) {
-                        synchronized (upgraded) {
+                    if (lightProcessors != null) {
+                        synchronized (lightProcessors) {
                             long socket = desc[n*2+1];
-                            LightProcessor proto = upgraded.get(socket);
+                            LightProcessor proto = lightProcessors.get(socket);
                             if (proto != null) {
                                 processSocket(socket, proto);
                                 continue;
@@ -1779,6 +1777,8 @@ public class AprEndpoint extends AbstractEndpoint {
      * This class is the equivalent of the Worker, but will simply use in an
      * external Executor thread pool. This will also set the socket options
      * and do the handshake.
+     * 
+     * This is called after an accept().
      */
     protected class SocketWithOptionsProcessor implements Runnable {
 
@@ -1811,29 +1811,28 @@ public class AprEndpoint extends AbstractEndpoint {
                     }
                     LightProcessor proto = null;
                     if (lightProtocol != null) {
-                        proto = lightProtocol.getProcessor(socket.getSocket().longValue());
+                        proto = lightProtocol.getProcessor(socket);
                     }
                     
                     // Process the request from this socket
                     Handler.SocketState state = null;
                     if (proto != null) {
-                        upgraded.put(socket.getSocket(), proto);
-                        int rc = proto.onData();
-                        state = (LightProcessor.OPEN == rc) ? 
-                                SocketState.OPEN: SocketState.CLOSED;
+                        lightProcessors.put(socket.getSocket(), proto);
+                        state = proto.onData();
+                        handleLightProcessorResult(state, proto, socket.getSocket());
                     } else {
-                        state = handler.process(socket,
-                                SocketStatus.OPEN);
-                    }
-                    if (state == Handler.SocketState.CLOSED) {
-                        // Close socket and pool
-                        destroySocket(socket.getSocket().longValue());
-                        socket = null;
-                    } else if (state == Handler.SocketState.LONG) {
-                        socket.access();
-                        if (socket.async) {
-                            waitingRequests.add(socket);
-                        }
+                    	state = handler.process(socket,
+                    			SocketStatus.OPEN);
+                    	if (state == Handler.SocketState.CLOSED) {
+                    		// Close socket and pool
+                    		destroySocket(socket.getSocket().longValue());
+                    		socket = null;
+                    	} else if (state == Handler.SocketState.LONG) {
+                    		socket.access();
+                    		if (socket.async) {
+                    			waitingRequests.add(socket);
+                    		}
+                    	}
                     }
                 }
             }
@@ -1888,8 +1887,7 @@ public class AprEndpoint extends AbstractEndpoint {
     }
 
     /**
-     * This class is the equivalent of the Worker, but will simply use in an
-     * external Executor thread pool.
+     * Call light protocol onData after a poll event.
      */
     protected class LightBlockingProcessor implements Runnable {
 
@@ -1906,18 +1904,23 @@ public class AprEndpoint extends AbstractEndpoint {
         public void run() {
             synchronized (proto) {
                 // Process the request from this socket
-                int rc = proto.onData();
-                if (rc == LightProcessor.CLOSE) {
-                    // Close socket and pool
-                    destroySocket(socket);
-                    proto = null;
-                } else {
-                    // TODO: poll
-                }
+                SocketState state = proto.onData();
+                handleLightProcessorResult(state, proto, socket);
             }
         }
     }
     
+    private void handleLightProcessorResult(SocketState state, 
+    		LightProcessor proto, long socket) {
+    	if (state == Handler.SocketState.CLOSED) {
+            // Close socket and pool
+        	destroySocket(socket);
+        } else if (state == Handler.SocketState.OPEN) {
+        	// For normal protocol - called by longPoll(), which is called 
+        	// if the AbstractProcessor returns LONG or UPGRADE
+            getCometPoller().add(socket , false);
+        }
+    }
 
     // --------------------------------------- SocketEventProcessor Inner Class
 
@@ -1941,6 +1944,18 @@ public class AprEndpoint extends AbstractEndpoint {
         public void run() {
             synchronized (socket) {
                 // Process the request from this socket
+                if (lightProcessors != null) {
+                    synchronized (lightProcessors) {
+                        LightProcessor wrapper = 
+                        		lightProcessors.get(socket.getSocket().longValue());
+                        if (wrapper != null) {
+                            SocketState state = wrapper.onData();
+                            handleLightProcessorResult(state, wrapper, socket.getSocket());
+                            return;
+                        }
+                    }
+                }
+
                 Handler.SocketState state = handler.process(socket, status);
                 if (state == Handler.SocketState.CLOSED) {
                     // Close socket and pool

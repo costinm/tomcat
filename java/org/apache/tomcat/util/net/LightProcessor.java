@@ -16,21 +16,26 @@
  */
 package org.apache.tomcat.util.net;
 
+import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
+
 
 /** 
+ * An instance of this class will be associated with the socket and process
+ * 'data' events. 
+ * 
+ * A light processor should not block - the onData() method may be called in the 
+ * IO thread, depending on the endpoint ( and conditions ). 
+ * 
+ * 
  * Light protocol for cases we don't want to preserve a request
  * context  - for example upgraded protocols ( websockets, SPDY ) or 
  * other not-http protocols.
- *
- * The current implementation is blocking, but it is possible to add hooks 
- * into NIO and APR endpoints. 
  * 
  * Unlike Handler, ProtocolHandler, this class is associated with and handles a 
  * single socket.
+ * 
  */
 public interface LightProcessor {
-    public static final int OPEN = 1;
-    public static final int CLOSE = -1;
     
     /**
      * Called before destroying the socket.
@@ -38,13 +43,28 @@ public interface LightProcessor {
     public void onClose();
         
     /**
-     * Called when data is received. This is NOT called in the poll thread,
-     * but in a thread pool. 
+     * Will be called by the endpoint when data can be processed on the associated 
+     * socket.
      * 
-     * The protocol can either block, or consume all input until read() returns
-     * 0 and return OPEN, in which case the caller will have to poll. 
+     * This call should NOT block - and be able to process incomplete data (i.e. socket
+     * read returns 0 and doesn't block ).
      * 
-     * JIO will never retun 0 on read(), so the code will be all blocking.
+     * It should return CLOSE on error or if it wants the socket closed.
+     * Returning OPEN means further onData() callbacks will be made.
+     * 
+     * The associated socket may be blocking - in which case read() will block. The processor
+     * should not assume otherwise - blocking read is a a particular case, same as non-blocking
+     * when all input is available.
+     * 
+     * It's up to the endpoint to decide when to give us a blocking socket, what timeout to
+     * use on the socket - or to run it in a IO/thread (for fully non-blocking reads) or in a 
+     * thread pool.  
      */
-    public int onData();
+    public SocketState onData();
+    
+    /**
+     * Return the associated SocketWrapper
+     */
+    @SuppressWarnings(value = { "rawtypes"})
+    public SocketWrapper getSocket();
 }
