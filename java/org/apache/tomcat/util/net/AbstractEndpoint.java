@@ -68,7 +68,12 @@ public abstract class AbstractEndpoint {
             ASYNC_END, 
             SENDFILE,
             UPGRADING, 
-            UPGRADED
+            UPGRADED,
+            /** 
+             * Status specific to SSL negotiated protocols indicating the light handler
+             * is not interested in the current socket.
+             */
+            LIGHT_HANDLER_SKIP
         }
 
 
@@ -191,16 +196,16 @@ public abstract class AbstractEndpoint {
     }
     public Executor getExecutor() { return executor; }
 
-    protected LightProtocol lightProtocol;
-    public String getLightProtocol() { 
-        return lightProtocol == null ? null : lightProtocol.toString(); 
+    protected LightHandler lightHandler;
+    public String getLightHandler() { 
+        return lightHandler == null ? null : lightHandler.toString(); 
     }
-    public void setLightProtocol(String impl) {
+    public void setLightHandler(String impl) {
         try {
             Class c = Class.forName(impl);
-            lightProtocol = (LightProtocol) c.newInstance();
+            lightHandler = (LightHandler) c.newInstance();
         } catch (Exception ex) {
-            getLog().warn("Failed to init light protocol " + impl, ex);
+            getLog().warn("Failed to init light handler " + impl, ex);
         }
     }
 

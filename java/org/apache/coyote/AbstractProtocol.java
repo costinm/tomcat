@@ -210,9 +210,9 @@ public abstract class AbstractProtocol implements ProtocolHandler,
         endpoint.setPort(port);
     }
 
-    public String getLightProtocol() { return endpoint.getLightProtocol(); }
-    public void setLightProtocol(String proto) {
-        endpoint.setLightProtocol(proto);
+    public String getLightHandler() { return endpoint.getLightHandler(); }
+    public void setLightHandler(String proto) {
+        endpoint.setLightHandler(proto);
     }
 
 

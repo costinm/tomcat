@@ -303,19 +303,16 @@ public class JIoEndpoint extends AbstractEndpoint {
                     }
 
                     if ((state != SocketState.CLOSED)) {
-                        LightProcessor lightProc = null;
-                        if (lightProtocol != null) {
-                            lightProc = lightProtocol.getProcessor(socket);
-                        }
-                        if (lightProc != null) {
-                            state = lightProc.onData();
+                        if (lightHandler != null) {
+                            state = lightHandler.process(socket, status == null ? 
+                                    SocketStatus.OPEN : status);
                         } else {
                             if (status == null) {
                                 state = handler.process(socket, SocketStatus.OPEN);
                             } else {
                                 state = handler.process(socket,status);
                             }
-                        }   
+                        }
                     }
                     if (state == SocketState.CLOSED) {
                         // Close socket
@@ -404,8 +401,8 @@ public class JIoEndpoint extends AbstractEndpoint {
             }
         }
 
-        if (lightProtocol != null) {
-            lightProtocol.init(this, 0);
+        if (lightHandler != null) {
+            lightHandler.init(this, 0);
         }
     }
 

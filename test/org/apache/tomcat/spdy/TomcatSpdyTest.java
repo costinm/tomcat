@@ -23,14 +23,18 @@ public class TomcatSpdyTest extends TomcatBaseTest {
 
     protected void extraConnectorSetup(Connector connector, String protocol) {
         if ("org.apache.coyote.http11.Http11Protocol".equals(protocol)) {
-            connector.setProperty("lightProtocol",
-                    "org.apache.tomcat.spdy.SpdyTomcatJioProtocol");
+//            connector.setProperty("lightProtocol",
+//                    "org.apache.tomcat.spdy.SpdyTomcatJioProtocol");
+            connector.setProperty("lightHandler",
+                    "org.apache.tomcat.spdy.TomcatJioHandler");
             client = new SpdyClient();
 
         } else if ("org.apache.coyote.http11.Http11AprProtocol"
                 .equals(protocol)) {
-            connector.setProperty("lightProtocol",
-                    "org.apache.tomcat.spdy.SpdyTomcatAprProtocol");
+            connector.setProperty("lightHandler",
+                    "org.apache.tomcat.spdy.TomcatAprHandler");
+//            connector.setProperty("lightProtocol",
+//                    "org.apache.tomcat.spdy.SpdyTomcatAprProtocol");
             client = new SpdyClientApr();
             realSpdy = true;
             Tomcat tomcat = getTomcatInstance();

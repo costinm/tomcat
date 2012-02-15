@@ -43,7 +43,7 @@ import org.apache.tomcat.util.http.HttpMessages;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.net.AbstractEndpoint;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
-import org.apache.tomcat.util.net.LightProcessor;
+import org.apache.tomcat.util.net.LightHandler;
 import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketStatus;
 import org.apache.tomcat.util.net.SocketWrapper;
@@ -59,7 +59,7 @@ import org.apache.tomcat.util.net.SocketWrapper;
  * needed.
  * 
  */
-public class SpdyTomcatProcessor extends AbstractProcessor<LightProcessor>
+public class SpdyTomcatProcessor extends AbstractProcessor<LightHandler>
         implements Runnable {
 
     // TODO: handle input
@@ -468,7 +468,7 @@ public class SpdyTomcatProcessor extends AbstractProcessor<LightProcessor>
     }
 
     @Override
-    public SocketState process(SocketWrapper<LightProcessor> socket)
+    public SocketState process(SocketWrapper socket)
             throws IOException {
         throw new IOException("Unimplemented");
     }

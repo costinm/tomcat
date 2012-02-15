@@ -9,18 +9,13 @@ import java.util.concurrent.Executor;
 
 import org.apache.tomcat.util.net.AbstractEndpoint;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
-import org.apache.tomcat.util.net.LightProcessor;
-import org.apache.tomcat.util.net.LightProtocol;
+import org.apache.tomcat.util.net.LightHandler;
+import org.apache.tomcat.util.net.SocketStatus;
 import org.apache.tomcat.util.net.SocketWrapper;
 
-public class SpdyTomcatJioProtocol implements LightProtocol {
+public class TomcatJioHandler implements LightHandler {
 
     private SpdyContext spdyContext;
-
-    @SuppressWarnings(value = { "rawtypes", "unchecked" })
-    public LightProcessor getProcessor(SocketWrapper socket) {
-        return new SpdyFramerJio(spdyContext, (SocketWrapper<Socket>) socket);
-    }
 
     @Override
     public void init(final AbstractEndpoint ep, long unused) {
@@ -37,7 +32,7 @@ public class SpdyTomcatJioProtocol implements LightProtocol {
     }
 
     public static class SpdyFramerJio extends SpdyFramer implements
-            LightProcessor {
+            LightHandler {
         Socket socket;
 
         private SocketWrapper<Socket> socketW;
@@ -61,8 +56,27 @@ public class SpdyTomcatJioProtocol implements LightProtocol {
             return socket.getInputStream().read(data, off, len);
         }
 
+//        @Override
+//        @SuppressWarnings(value = { "rawtypes" })
+//        public SocketWrapper getSocket() {
+//            return socketW;
+//        }
+
         @Override
-        public SocketState onData() {
+        public Object getGlobal() {
+            return null;
+        }
+
+        @Override
+        public void recycle() {
+        }
+
+        @Override
+        public void init(AbstractEndpoint ep, long aprSspContext) {
+        }
+
+        @Override
+        public SocketState process(SocketWrapper socketW, SocketStatus status) {
             try {
                 socket.setSoTimeout(60000);
             } catch (SocketException e) {
@@ -74,9 +88,27 @@ public class SpdyTomcatJioProtocol implements LightProtocol {
         }
 
         @Override
-        @SuppressWarnings(value = { "rawtypes" })
-        public SocketWrapper getSocket() {
-            return socketW;
+        public void onClose(SocketWrapper<Long> socketWrapper) {
         }
+    }
+
+    @Override
+    public Object getGlobal() {
+        return null;
+    }
+
+    @Override
+    public void recycle() {
+    }
+
+    @Override
+    @SuppressWarnings(value = { "rawtypes", "unchecked" })
+    public SocketState process(SocketWrapper socket, SocketStatus status) {
+        SpdyFramerJio ch = new SpdyFramerJio(spdyContext, (SocketWrapper<Socket>) socket);
+        return ch.process(socket, status);
+    }
+
+    @Override
+    public void onClose(SocketWrapper<Long> socketWrapper) {
     }
 }
