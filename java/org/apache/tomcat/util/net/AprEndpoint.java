@@ -868,7 +868,6 @@ public class AprEndpoint extends AbstractEndpoint {
      */
     protected boolean processSocket(long socket, SocketStatus status) {
         try {
-            System.err.println("PROCESS SOCKET IN POLLER " + status);
             SocketWrapper<Long> wrapper =
                     new SocketWrapper<Long>(Long.valueOf(socket));
             getExecutor().execute(new SocketEventProcessor(wrapper, status));
