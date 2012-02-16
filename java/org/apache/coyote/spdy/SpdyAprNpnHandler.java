@@ -170,24 +170,55 @@ public class SpdyAprNpnHandler implements Http11AprProtocol.NpnHandler {
     @Override
     public SocketState process(SocketWrapper<Long> socketO, SocketStatus status,
             Http11AprProtocol proto, AbstractEndpoint endpoint) {
-        // STOP, ERROR, DISCONNECT, TIMEOUT -> onClose
-        log.info("Status: " + status);
-        if (status == SocketStatus.TIMEOUT) {
-            // Called from maintain - we're removed from the poll
-            ((AprEndpoint) endpoint).getCometPoller().add(
-                    socketO.getSocket().longValue(), false); 
-            return SocketState.LONG;
+        
+        SocketWrapper<Long> socketW = socketO;
+        long socket = ((Long) socketW.getSocket()).longValue();
+
+        SpdyFramerApr lh = lightProcessors.get(socket);
+        // Are we getting an HTTP request ? 
+        if (lh == null && status != SocketStatus.OPEN) {
+            return null;
         }
-        if (status == SocketStatus.STOP || status == SocketStatus.DISCONNECT ||
-                status == SocketStatus.ERROR) {
-            onClose(socketO);
-            return SocketState.CLOSED;
+
+        log.info("Status: " + status);
+
+        SocketState ss = null;
+        if (lh != null) {
+            // STOP, ERROR, DISCONNECT, TIMEOUT -> onClose
+            if (status == SocketStatus.TIMEOUT) {
+                // Called from maintain - we're removed from the poll
+                ((AprEndpoint) endpoint).getCometPoller().add(
+                        socketO.getSocket().longValue(), false); 
+                return SocketState.LONG;
+            }
+            if (status == SocketStatus.STOP || status == SocketStatus.DISCONNECT ||
+                    status == SocketStatus.ERROR) {
+                SpdyFramerApr wrapper = lightProcessors.remove(socket);
+                if (wrapper != null) {
+                    wrapper.onClose();
+                }
+                return SocketState.CLOSED;
+            }
+            ss = lh.process(socketO, status);
+        } else {
+            // OPEN, no existing socket
+            if (!ssl || SSLExt.checkNPN(socket, SpdyContext.SPDY_NPN)) {
+                // NPN negotiated or not ssl
+                SpdyFramerApr ch = new SpdyFramerApr(socketW, spdyContext, ssl);
+                
+                ss = ch.process(socketO, status);
+                if (ss == SocketState.LONG) {
+                    lightProcessors.put(socketO.getSocket().longValue(), ch);
+                }
+            } else {
+                return null;
+            }
         }
         
         // OPEN is used for both 'first time' and 'new connection'
         // In theory we shouldn't get another open while this is in 
         // progress ( only after we add back to the poller )
-        SocketState ss = processCon(socketO, status, proto, endpoint);
+
         if (ss == SocketState.LONG) {
             log.info("Long poll: " + status);
             ((AprEndpoint) endpoint).getCometPoller().add(
@@ -196,35 +227,7 @@ public class SpdyAprNpnHandler implements Http11AprProtocol.NpnHandler {
         return ss;
     }
     
-    public SocketState processCon(SocketWrapper<Long> socketO, SocketStatus status,
-                Http11AprProtocol proto, AbstractEndpoint endpoint) {
-        
-        SocketWrapper<Long> socketW = socketO;
-        long socket = ((Long) socketW.getSocket()).longValue();
-        
-        SpdyFramerApr lh = lightProcessors.get(socket);
-        if (lh != null) {
-            return lh.process(socketO, status);
-        }
-        
-        if (!ssl || SSLExt.checkNPN(socket, SpdyContext.SPDY_NPN)) {
-            // NPN negotiated or not ssl
-            SpdyFramerApr ch = new SpdyFramerApr(socketW, spdyContext, ssl);
-            SocketState ss = ch.process(socketO, status);
-            if (ss == SocketState.LONG) {
-                lightProcessors.put(socketO.getSocket().longValue(), ch);
-            }
-            return ss;
-        } else {
-            return null;
-        }
-    }
-
     public void onClose(SocketWrapper<Long> socketWrapper) {
-        SpdyFramerApr wrapper = lightProcessors.remove(socketWrapper);
-        if (wrapper != null) {
-            wrapper.onClose(socketWrapper);
-        }
     }
 
     

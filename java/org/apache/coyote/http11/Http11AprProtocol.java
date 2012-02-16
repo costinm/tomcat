@@ -262,12 +262,20 @@ public class Http11AprProtocol extends AbstractHttp11Protocol {
         public SocketState process(SocketWrapper<Long> socket,
                 SocketStatus status) {
             if (proto.npnHandler != null) {
-                SocketState socketState = proto.npnHandler.process(socket, status,
-                        proto, proto.endpoint);
-                // handled by npn protocol.
-                if (socketState == SocketState.CLOSED ||
-                        socketState == SocketState.LONG) {
-                    return socketState;
+                Processor<Long> processor = null;
+                if (status == SocketStatus.OPEN) {
+                    processor = connections.get(socket.getSocket());
+                   
+                }
+                if (processor == null) {
+                    // if not null - this is a former comet request, handled by http11
+                    SocketState socketState = proto.npnHandler.process(socket, status,
+                            proto, proto.endpoint);
+                    // handled by npn protocol.
+                    if (socketState == SocketState.CLOSED ||
+                            socketState == SocketState.LONG) {
+                        return socketState;
+                    }
                 }
             }
             return super.process(socket, status);

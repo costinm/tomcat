@@ -22,7 +22,6 @@ import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
-import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.RejectedExecutionException;
 
@@ -839,6 +838,7 @@ public class AprEndpoint extends AbstractEndpoint {
         }
         return true;
     }
+
 
     /**
      * Process given socket. Called in non-comet mode, typically keep alive
@@ -1769,7 +1769,7 @@ public class AprEndpoint extends AbstractEndpoint {
                     }
                     // Process the request from this socket
                     Handler.SocketState state = handler.process(socket,
-                                SocketStatus.OPEN);
+                            SocketStatus.OPEN);
                     if (state == Handler.SocketState.CLOSED) {
                         // Close socket and pool
                         destroySocket(socket.getSocket().longValue());
@@ -1832,6 +1832,7 @@ public class AprEndpoint extends AbstractEndpoint {
         }
     }
 
+
     // --------------------------------------- SocketEventProcessor Inner Class
 
 
@@ -1853,7 +1854,8 @@ public class AprEndpoint extends AbstractEndpoint {
         @Override
         public void run() {
             synchronized (socket) {
-                SocketState state = handler.process(socket, status);
+                // Process the request from this socket
+                Handler.SocketState state = handler.process(socket, status);
                 if (state == Handler.SocketState.CLOSED) {
                     // Close socket and pool
                     destroySocket(socket.getSocket().longValue());

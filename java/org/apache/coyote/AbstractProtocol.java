@@ -210,7 +210,7 @@ public abstract class AbstractProtocol implements ProtocolHandler,
         endpoint.setPort(port);
     }
 
-    
+
     public int getLocalPort() { return endpoint.getLocalPort(); }
 
     /*
