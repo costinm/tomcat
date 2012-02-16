@@ -21,9 +21,9 @@ import java.util.concurrent.TimeUnit;
  * call is done the frame will be reused.
  */
 public abstract class SpdyStream {
-    SpdyFramer spdy;
+    protected SpdyFramer spdy;
 
-    SpdyFrame reqFrame;
+    public SpdyFrame reqFrame;
 
     SpdyFrame resFrame;
 
@@ -33,7 +33,7 @@ public abstract class SpdyStream {
 
     boolean finSent;
 
-    boolean finRcvd;
+    protected boolean finRcvd;
 
     /**
      * Non-blocking, called when a data frame is received.

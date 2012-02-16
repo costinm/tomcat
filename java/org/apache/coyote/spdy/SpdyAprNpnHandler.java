@@ -1,24 +1,32 @@
 /*
  */
-package org.apache.tomcat.spdy;
+package org.apache.coyote.spdy;
 
 import java.io.IOException;
+
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Executor;
 
+import org.apache.coyote.Adapter;
+import org.apache.coyote.http11.Http11AprProtocol;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.jni.Error;
 import org.apache.tomcat.jni.SSLExt;
 import org.apache.tomcat.jni.Status;
+import org.apache.tomcat.spdy.CompressJzlib;
+import org.apache.tomcat.spdy.SpdyContext;
+import org.apache.tomcat.spdy.SpdyFramer;
+import org.apache.tomcat.spdy.SpdyStream;
 import org.apache.tomcat.util.net.AbstractEndpoint;
+import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.AprEndpoint;
-import org.apache.tomcat.util.net.LightHandler;
 import org.apache.tomcat.util.net.SocketStatus;
 import org.apache.tomcat.util.net.SocketWrapper;
 
-public class TomcatAprHandler implements LightHandler {
+public class SpdyAprNpnHandler implements Http11AprProtocol.NpnHandler {
+
     private static final Log log = LogFactory.getLog(AprEndpoint.class);
 
     private SpdyContext spdyContext;
@@ -26,14 +34,17 @@ public class TomcatAprHandler implements LightHandler {
     boolean ssl = true;
 
     @Override
-    public void init(final AbstractEndpoint ep, long sslContext) {
+    public void init(final AbstractEndpoint ep, long sslContext, 
+            final Adapter adapter) {
         if (sslContext == 0) {
             // Apr endpoint without SSL.
             ssl = false;
             spdyContext = new SpdyContext() {
                 @Override
                 public SpdyStream getStream(SpdyFramer framer) {
-                    return new SpdyTomcatProcessor(framer, ep).getStream();
+                    SpdyProcessor sp = new SpdyProcessor(framer, ep);
+                    sp.setAdapter(adapter);
+                    return sp.getStream();
                 }
 
                 public Executor getExecutor() {
@@ -46,7 +57,9 @@ public class TomcatAprHandler implements LightHandler {
             spdyContext = new SpdyContext() {
                 @Override
                 public SpdyStream getStream(SpdyFramer framer) {
-                    return new SpdyTomcatProcessor(framer, ep).getStream();
+                    SpdyProcessor sp = new SpdyProcessor(framer, ep);
+                    sp.setAdapter(adapter);
+                    return sp.getStream();
                 }
 
                 public Executor getExecutor() {
@@ -58,8 +71,7 @@ public class TomcatAprHandler implements LightHandler {
         }
     }
 
-    public static class SpdyFramerApr extends SpdyFramer implements
-            LightHandler {
+    public static class SpdyFramerApr extends SpdyFramer {
         volatile long socket;
 
         SocketWrapper<Long> socketW;
@@ -140,52 +152,57 @@ public class TomcatAprHandler implements LightHandler {
 //            return socketW;
 //        }
 
-        @Override
-        public Object getGlobal() {
-            return null;
-        }
-
-        @Override
-        public void recycle() {
-        }
-
-        @Override
-        public void init(AbstractEndpoint ep, long aprSspContext) {
-        }
-
-        @Override
         public SocketState process(SocketWrapper socket, SocketStatus status) {
             int rc = onBlockingSocket();
             return (rc == SpdyFramer.LONG) ? SocketState.LONG
                     : SocketState.CLOSED;
         }
 
-        @Override
         public void onClose(SocketWrapper<Long> socketWrapper) {
         }
-
     }
     
-    @Override
-    public Object getGlobal() {
-        return null;
-    }
-
-    @Override
-    public void recycle() {
-    }
-    
- // apr normally creates a new object on each poll.
+    // apr normally creates a new object on each poll.
     // For 'upgraded' protocols we need to remember it's handled differently.
-    Map<Long, LightHandler> lightProcessors = 
-            new HashMap<Long, LightHandler>();
+    Map<Long, SpdyFramerApr> lightProcessors = 
+            new HashMap<Long, SpdyFramerApr>();
 
     @Override
-    public SocketState process(SocketWrapper socketO, SocketStatus status) {
+    public SocketState process(SocketWrapper<Long> socketO, SocketStatus status,
+            Http11AprProtocol proto, AbstractEndpoint endpoint) {
+        // STOP, ERROR, DISCONNECT, TIMEOUT -> onClose
+        log.info("Status: " + status);
+        if (status == SocketStatus.TIMEOUT) {
+            // Called from maintain - we're removed from the poll
+            ((AprEndpoint) endpoint).getCometPoller().add(
+                    socketO.getSocket().longValue(), false); 
+            return SocketState.LONG;
+        }
+        if (status == SocketStatus.STOP || status == SocketStatus.DISCONNECT ||
+                status == SocketStatus.ERROR) {
+            onClose(socketO);
+            return SocketState.CLOSED;
+        }
+        
+        // OPEN is used for both 'first time' and 'new connection'
+        // In theory we shouldn't get another open while this is in 
+        // progress ( only after we add back to the poller )
+        SocketState ss = processCon(socketO, status, proto, endpoint);
+        if (ss == SocketState.LONG) {
+            log.info("Long poll: " + status);
+            ((AprEndpoint) endpoint).getCometPoller().add(
+                    socketO.getSocket().longValue(), false); 
+        }
+        return ss;
+    }
+    
+    public SocketState processCon(SocketWrapper<Long> socketO, SocketStatus status,
+                Http11AprProtocol proto, AbstractEndpoint endpoint) {
+        
         SocketWrapper<Long> socketW = socketO;
         long socket = ((Long) socketW.getSocket()).longValue();
         
-        LightHandler lh = lightProcessors.get(socket);
+        SpdyFramerApr lh = lightProcessors.get(socket);
         if (lh != null) {
             return lh.process(socketO, status);
         }
@@ -193,15 +210,18 @@ public class TomcatAprHandler implements LightHandler {
         if (!ssl || SSLExt.checkNPN(socket, SpdyContext.SPDY_NPN)) {
             // NPN negotiated or not ssl
             SpdyFramerApr ch = new SpdyFramerApr(socketW, spdyContext, ssl);
-            return ch.process(socketO, status);
+            SocketState ss = ch.process(socketO, status);
+            if (ss == SocketState.LONG) {
+                lightProcessors.put(socketO.getSocket().longValue(), ch);
+            }
+            return ss;
         } else {
             return null;
         }
     }
 
-    @Override
     public void onClose(SocketWrapper<Long> socketWrapper) {
-        LightHandler wrapper = lightProcessors.remove(socketWrapper);
+        SpdyFramerApr wrapper = lightProcessors.remove(socketWrapper);
         if (wrapper != null) {
             wrapper.onClose(socketWrapper);
         }

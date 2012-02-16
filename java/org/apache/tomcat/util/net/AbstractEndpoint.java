@@ -69,11 +69,6 @@ public abstract class AbstractEndpoint {
             SENDFILE,
             UPGRADING, 
             UPGRADED,
-            /** 
-             * Status specific to SSL negotiated protocols indicating the light handler
-             * is not interested in the current socket.
-             */
-            LIGHT_HANDLER_SKIP
         }
 
 
@@ -195,19 +190,6 @@ public abstract class AbstractEndpoint {
         this.internalExecutor = (executor==null);
     }
     public Executor getExecutor() { return executor; }
-
-    protected LightHandler lightHandler;
-    public String getLightHandler() { 
-        return lightHandler == null ? null : lightHandler.toString(); 
-    }
-    public void setLightHandler(String impl) {
-        try {
-            Class c = Class.forName(impl);
-            lightHandler = (LightHandler) c.newInstance();
-        } catch (Exception ex) {
-            getLog().warn("Failed to init light handler " + impl, ex);
-        }
-    }
 
     /**
      * Server socket port.
@@ -884,19 +866,5 @@ public abstract class AbstractEndpoint {
                     new String[sslEnabledProtocols.size()]);
         }
     }
-    
-    protected Object protocol; // AbstractProtocol
-    /**
-     * Let endpoint know about protocol. Object is used to avoid
-     * adding a dep between util.net and coyote.
-     * 
-     * Endpoints are typically configured with a Handler that is specific 
-     * to the transport implementation. 
-     */
-    public void setProtocol(Object protocol) {
-        this.protocol = protocol;
-    }
-    public Object getProtocol() { return protocol; }
-
 }
 

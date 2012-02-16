@@ -14,19 +14,15 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
-package org.apache.tomcat.spdy;
+package org.apache.coyote.spdy;
 
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.net.InetAddress;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executor;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.coyote.AbstractProcessor;
-import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.ActionCode;
 import org.apache.coyote.AsyncContextCallback;
 import org.apache.coyote.InputBuffer;
@@ -35,6 +31,9 @@ import org.apache.coyote.Request;
 import org.apache.coyote.RequestInfo;
 import org.apache.coyote.Response;
 import org.apache.coyote.http11.upgrade.UpgradeInbound;
+import org.apache.tomcat.spdy.SpdyFrame;
+import org.apache.tomcat.spdy.SpdyFramer;
+import org.apache.tomcat.spdy.SpdyStream;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.buf.Ascii;
 import org.apache.tomcat.util.buf.ByteChunk;
@@ -43,7 +42,6 @@ import org.apache.tomcat.util.http.HttpMessages;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.net.AbstractEndpoint;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
-import org.apache.tomcat.util.net.LightHandler;
 import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketStatus;
 import org.apache.tomcat.util.net.SocketWrapper;
@@ -59,7 +57,7 @@ import org.apache.tomcat.util.net.SocketWrapper;
  * needed.
  * 
  */
-public class SpdyTomcatProcessor extends AbstractProcessor<LightHandler>
+public class SpdyProcessor extends AbstractProcessor<Object>
         implements Runnable {
 
     // TODO: handle input
@@ -85,7 +83,7 @@ public class SpdyTomcatProcessor extends AbstractProcessor<LightHandler>
 
     boolean outCommit = false;
 
-    public SpdyTomcatProcessor(SpdyFramer spdy, AbstractEndpoint endpoint) {
+    public SpdyProcessor(SpdyFramer spdy, AbstractEndpoint endpoint) {
         super(endpoint);
 
         this.spdy = spdy;
@@ -160,9 +158,6 @@ public class SpdyTomcatProcessor extends AbstractProcessor<LightHandler>
     @Override
     public void run() {
         RequestInfo rp = request.getRequestProcessor();
-        //
-        AbstractProtocol proto = (AbstractProtocol) endpoint.getProtocol();
-        adapter = proto.getAdapter();
         try {
             rp.setStage(org.apache.coyote.Constants.STAGE_SERVICE);
             adapter.service(request, response);
@@ -235,7 +230,7 @@ public class SpdyTomcatProcessor extends AbstractProcessor<LightHandler>
 
     @Override
     public void action(ActionCode actionCode, Object param) {
-        if (spdy.spdyContext.debug) {
+        if (spdy.getSpdyContext().debug) {
             // System.err.println(actionCode);
         }
 
@@ -543,7 +538,7 @@ public class SpdyTomcatProcessor extends AbstractProcessor<LightHandler>
                     }
                     request.requestURI().setBytes(frame.data, frame.off,
                             valueLen);
-                    if (spdy.spdyContext.debug) {
+                    if (spdy.getSpdyContext().debug) {
                         System.err.println("URL= " + request.requestURI());
                     }
                     frame.advance(valueLen);

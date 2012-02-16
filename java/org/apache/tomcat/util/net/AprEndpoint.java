@@ -577,11 +577,11 @@ public class AprEndpoint extends AbstractEndpoint {
             // For now, sendfile is not supported with SSL
             useSendfile = false;
         }
-        if (lightHandler != null) {
-            lightHandler.init(this, sslContext);
-        }
     }
 
+    public long getJniSslContext() {
+        return sslContext;
+    }
 
     /**
      * Start the APR endpoint, creating acceptor, poller and sendfile threads.
@@ -868,6 +868,7 @@ public class AprEndpoint extends AbstractEndpoint {
      */
     protected boolean processSocket(long socket, SocketStatus status) {
         try {
+            System.err.println("PROCESS SOCKET IN POLLER " + status);
             SocketWrapper<Long> wrapper =
                     new SocketWrapper<Long>(Long.valueOf(socket));
             getExecutor().execute(new SocketEventProcessor(wrapper, status));
@@ -931,10 +932,6 @@ public class AprEndpoint extends AbstractEndpoint {
 
     private void destroySocket(long socket)
     {
-        if (lightHandler != null) {
-            lightHandler.onClose(new SocketWrapper<Long>(Long.valueOf(socket)));
-        }
-
         if (running && socket != 0) {
             // If not running the socket will be destroyed by
             // parent pool or acceptor socket.
@@ -1217,6 +1214,7 @@ public class AprEndpoint extends AbstractEndpoint {
                 addSocket[addCount] = socket;
                 addSocketKeepAlive[addCount] = keepAlive;
                 addCount++;
+                // TODO: interrupt poll ?
                 this.notify();
             }
         }
@@ -1769,15 +1767,9 @@ public class AprEndpoint extends AbstractEndpoint {
                         socket = null;
                         return;
                     }
-                    Handler.SocketState state = SocketState.LIGHT_HANDLER_SKIP;
-                    if (lightHandler != null) {
-                        state = lightHandler.process(socket, SocketStatus.OPEN);
-                    }
-                    if (state == SocketState.LIGHT_HANDLER_SKIP) {
-                        // Process the request from this socket
-                        state = handler.process(socket,
+                    // Process the request from this socket
+                    Handler.SocketState state = handler.process(socket,
                                 SocketStatus.OPEN);
-                    }
                     if (state == Handler.SocketState.CLOSED) {
                         // Close socket and pool
                         destroySocket(socket.getSocket().longValue());
@@ -1816,17 +1808,11 @@ public class AprEndpoint extends AbstractEndpoint {
         public void run() {
             synchronized (socket) {
                 // Process the request from this socket
-                Handler.SocketState state = SocketState.LIGHT_HANDLER_SKIP;
-                if (lightHandler != null) {
-                    state = lightHandler.process(socket, status);
-                }
-                if (state == SocketState.LIGHT_HANDLER_SKIP) {
-                    state = SocketState.OPEN;
-                    if (status == null) {
-                        state = handler.process(socket,SocketStatus.OPEN);
-                    } else {
-                        state = handler.process(socket, status);
-                    }
+                SocketState state = SocketState.OPEN;
+                if (status == null) {
+                    state = handler.process(socket,SocketStatus.OPEN);
+                } else {
+                    state = handler.process(socket, status);
                 }
                 if (state == Handler.SocketState.CLOSED) {
                     // Close socket and pool
@@ -1867,13 +1853,7 @@ public class AprEndpoint extends AbstractEndpoint {
         @Override
         public void run() {
             synchronized (socket) {
-                Handler.SocketState state = SocketState.LIGHT_HANDLER_SKIP;
-                if (lightHandler != null) {
-                    state = lightHandler.process(socket, status);
-                }
-                if (state == SocketState.LIGHT_HANDLER_SKIP) {
-                    state = handler.process(socket, status);
-                }
+                SocketState state = handler.process(socket, status);
                 if (state == Handler.SocketState.CLOSED) {
                     // Close socket and pool
                     destroySocket(socket.getSocket().longValue());

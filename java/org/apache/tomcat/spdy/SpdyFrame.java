@@ -24,10 +24,10 @@ public class SpdyFrame {
 
     private int flags;
 
-    int type;
+    public int type;
 
     // For control frames
-    int streamId;
+    public int streamId;
 
     public int pri;
 
@@ -138,11 +138,11 @@ public class SpdyFrame {
         return true;
     }
 
-    boolean isHalfClose() {
+    public boolean isHalfClose() {
         return (flags & SpdyFramer.FLAG_HALF_CLOSE) != 0;
     }
 
-    void halfClose() {
+    public void halfClose() {
         flags = SpdyFramer.FLAG_HALF_CLOSE;
     }
 

@@ -303,15 +303,10 @@ public class JIoEndpoint extends AbstractEndpoint {
                     }
 
                     if ((state != SocketState.CLOSED)) {
-                        if (lightHandler != null) {
-                            state = lightHandler.process(socket, status == null ? 
-                                    SocketStatus.OPEN : status);
+                        if (status == null) {
+                            state = handler.process(socket, SocketStatus.OPEN);
                         } else {
-                            if (status == null) {
-                                state = handler.process(socket, SocketStatus.OPEN);
-                            } else {
-                                state = handler.process(socket,status);
-                            }
+                            state = handler.process(socket,status);
                         }
                     }
                     if (state == SocketState.CLOSED) {
@@ -399,10 +394,6 @@ public class JIoEndpoint extends AbstractEndpoint {
                 be.initCause(orig);
                 throw be;
             }
-        }
-
-        if (lightHandler != null) {
-            lightHandler.init(this, 0);
         }
     }
 

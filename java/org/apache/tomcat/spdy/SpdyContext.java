@@ -34,7 +34,7 @@ public class SpdyContext {
 
     int defaultFrameSize = 8196;
 
-    static boolean debug = true;
+    public static boolean debug = true;
 
     /**
      * Get a frame - frames are heavy buffers, may be reused.

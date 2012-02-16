@@ -55,21 +55,21 @@ public abstract class SpdyFramer { // implements Runnable {
     protected static final Logger log = Logger.getLogger(SpdyFramer.class
             .getName());
 
-    static final int TYPE_SYN_STREAM = 1;
+    public static final int TYPE_SYN_STREAM = 1;
 
-    static final int TYPE_SYN_REPLY = 2;
+    public static final int TYPE_SYN_REPLY = 2;
 
-    static final int TYPE_RST_STREAM = 3;
+    public static final int TYPE_RST_STREAM = 3;
 
-    static final int TYPE_SETTINGS = 4;
+    public static final int TYPE_SETTINGS = 4;
 
-    static final int TYPE_PING = 6;
+    public static final int TYPE_PING = 6;
 
-    static final int TYPE_GOAWAY = 7;
+    public static final int TYPE_GOAWAY = 7;
 
-    static final int TYPE_HEADERS = 8;
+    public static final int TYPE_HEADERS = 8;
 
-    static final int TYPE_WINDOW = 8;
+    public static final int TYPE_WINDOW = 8;
 
     public static String[] TYPES = { "SYN_STREAM", "SYN_REPLY", "RST_STREAM",
             "SETTINGS", "5", "PING", "GOAWAY", "HEADERS", "WINDOW_UPDATE" };
@@ -105,7 +105,7 @@ public abstract class SpdyFramer { // implements Runnable {
 
     // protected SpdyFrame currentOutFrame = new SpdyFrame();
 
-    SpdyContext spdyContext;
+    private SpdyContext spdyContext;
 
     boolean inClosed;
 
@@ -127,7 +127,7 @@ public abstract class SpdyFramer { // implements Runnable {
     private Condition outCondition;
 
     public SpdyFramer(SpdyContext spdyContext) {
-        this.spdyContext = spdyContext;
+        this.setSpdyContext(spdyContext);
         outCondition = framerLock.newCondition();
     }
 
@@ -147,14 +147,14 @@ public abstract class SpdyFramer { // implements Runnable {
     }
 
     public SpdyFrame getFrame(int type) {
-        SpdyFrame frame = spdyContext.getFrame();
+        SpdyFrame frame = getSpdyContext().getFrame();
         frame.c = true;
         frame.type = type;
         return frame;
     }
 
     public SpdyFrame getDataFrame() throws IOException {
-        SpdyFrame frame = spdyContext.getFrame();
+        SpdyFrame frame = getSpdyContext().getFrame();
         return frame;
     }
 
@@ -227,7 +227,7 @@ public abstract class SpdyFramer { // implements Runnable {
                 framerLock.unlock();
             }
 
-            if (spdyContext.debug) {
+            if (getSpdyContext().debug) {
                 trace("> " + out);
             }
 
@@ -294,7 +294,7 @@ public abstract class SpdyFramer { // implements Runnable {
      */
     public void nonBlockingDrain() {
         // TODO: if (nonBlocking()) { drain() }
-        spdyContext.getExecutor().execute(nbDrain);
+        getSpdyContext().getExecutor().execute(nbDrain);
     }
 
     static int drainCnt = 0;
@@ -373,12 +373,12 @@ public abstract class SpdyFramer { // implements Runnable {
      */
     public int onBlockingSocket() {
         try {
-            if (spdyContext.debug) {
+            if (getSpdyContext().debug) {
                 trace("< onConnection() " + lastChannel);
             }
             int rc = processInput();
 
-            if (spdyContext.debug) {
+            if (getSpdyContext().debug) {
                 trace("< onConnection() " + rc + " " + lastChannel);
             }
             return rc;
@@ -402,7 +402,7 @@ public abstract class SpdyFramer { // implements Runnable {
     public int processInput() throws IOException {
         while (true) {
             if (inFrame == null) {
-                inFrame = spdyContext.getFrame();
+                inFrame = getSpdyContext().getFrame();
             }
 
             if (inFrame.data == null) {
@@ -458,7 +458,7 @@ public abstract class SpdyFramer { // implements Runnable {
                 // and a bit more - to keep things simple for now we
                 // copy them to next frame, at least we saved reads.
                 // it is possible to avoid copy - but later.
-                nextFrame = spdyContext.getFrame();
+                nextFrame = getSpdyContext().getFrame();
                 nextFrame.makeSpace(extra);
                 System.arraycopy(inFrame.data, inFrame.endFrame,
                         nextFrame.data, 0, extra);
@@ -487,7 +487,7 @@ public abstract class SpdyFramer { // implements Runnable {
                 inFrame.nvCount = inFrame.read16();
             }
 
-            if (spdyContext.debug) {
+            if (getSpdyContext().debug) {
                 trace("< " + inFrame);
             }
 
@@ -505,7 +505,7 @@ public abstract class SpdyFramer { // implements Runnable {
             if (inFrame != null) {
                 inFrame.recyle();
                 if (nextFrame != null) {
-                    spdyContext.releaseFrame(inFrame);
+                    getSpdyContext().releaseFrame(inFrame);
                     inFrame = nextFrame;
                     nextFrame = null;
                 }
@@ -513,7 +513,7 @@ public abstract class SpdyFramer { // implements Runnable {
                 inFrame = nextFrame;
                 nextFrame = null;
                 if (inFrame == null) {
-                    inFrame = spdyContext.getFrame();
+                    inFrame = getSpdyContext().getFrame();
                 }
             }
         }
@@ -571,7 +571,7 @@ public abstract class SpdyFramer { // implements Runnable {
             }
             case TYPE_SYN_STREAM: {
 
-                SpdyStream ch = spdyContext.getStream(this);
+                SpdyStream ch = getSpdyContext().getStream(this);
 
                 synchronized (channels) {
                     channels.put(inFrame.streamId, ch);
@@ -605,7 +605,7 @@ public abstract class SpdyFramer { // implements Runnable {
             }
             case TYPE_PING: {
 
-                SpdyFrame oframe = spdyContext.getFrame();
+                SpdyFrame oframe = getSpdyContext().getFrame();
                 oframe.type = TYPE_PING;
                 oframe.c = true;
 
@@ -641,6 +641,14 @@ public abstract class SpdyFramer { // implements Runnable {
     }
 
     public SpdyContext getContext() {
+        return getSpdyContext();
+    }
+
+    public SpdyContext getSpdyContext() {
         return spdyContext;
+    }
+
+    public void setSpdyContext(SpdyContext spdyContext) {
+        this.spdyContext = spdyContext;
     }
 }
