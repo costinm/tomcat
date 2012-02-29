@@ -22,8 +22,6 @@ import java.io.OutputStream;
 
 /**
  * Allows data to be written to the upgraded connection.
- *
- * TODO: Override more methods for efficiency.
  */
 public class UpgradeOutbound extends OutputStream {
 
@@ -41,5 +39,10 @@ public class UpgradeOutbound extends OutputStream {
     @Override
     public void write(int b) throws IOException {
         processor.write(b);
+    }
+
+    @Override
+    public void write(byte[] b, int off, int len) throws IOException {
+        processor.write(b, off, len);
     }
 }

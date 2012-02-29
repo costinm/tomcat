@@ -20,129 +20,131 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.nio.charset.MalformedInputException;
+import java.nio.charset.UnmappableCharacterException;
 
-import org.apache.catalina.util.Conversions;
 import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.coyote.http11.upgrade.UpgradeOutbound;
 import org.apache.coyote.http11.upgrade.UpgradeProcessor;
-import org.apache.tomcat.util.buf.B2CConverter;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 
+/**
+ * Base implementation of the class used to process WebSocket connections based
+ * on streams. Applications should extend this class to provide application
+ * specific functionality. Applications that wish to operate on a message basis
+ * rather than a stream basis should use {@link MessageInbound}.
+ */
 public abstract class StreamInbound implements UpgradeInbound {
-
-    // These attributes apply to the current frame being processed
-    private boolean fin = true;
-    private boolean rsv1 = false;
-    private boolean rsv2 = false;
-    private boolean rsv3 = false;
-    private int opCode = -1;
-    private long payloadLength = -1;
-
-    // These attributes apply to the message that may be spread over multiple
-    // frames
-    // TODO
 
     private UpgradeProcessor<?> processor = null;
     private WsOutbound outbound;
 
     @Override
-    public void setUpgradeOutbound(UpgradeOutbound upgradeOutbound) {
+    public final void setUpgradeOutbound(UpgradeOutbound upgradeOutbound) {
         outbound = new WsOutbound(upgradeOutbound);
     }
 
 
     @Override
-    public void setUpgradeProcessor(UpgradeProcessor<?> processor) {
+    public final void setUpgradeProcessor(UpgradeProcessor<?> processor) {
         this.processor = processor;
     }
 
-    public WsOutbound getStreamOutbound() {
+
+    /**
+     * Obtain the outbound side of this WebSocket connection used for writing
+     * data to the client.
+     */
+    public final WsOutbound getWsOutbound() {
         return outbound;
     }
 
+
     @Override
-    public SocketState onData() throws IOException {
-        // Must be start the start of a frame
+    public final SocketState onData() throws IOException {
+        // Must be start the start of a message (which may consist of multiple
+        // frames)
 
-        // Read the first byte
-        int i = processor.read();
+        // TODO - change this test to check if there is data to read
+        while (true) {
+            try {
+                // New WsInputStream for each message (not each frame)
+                WsInputStream wsIs =
+                        new WsInputStream(processor, getWsOutbound());
+                WsFrame frame = wsIs.getFrame();
 
-        fin = (i & 0x80) > 0;
+                // TODO User defined extensions may define values for rsv
+                if (frame.getRsv() > 0) {
+                    getWsOutbound().close(1002, null);
+                    return SocketState.CLOSED;
+                }
 
-        rsv1 = (i & 0x40) > 0;
-        rsv2 = (i & 0x20) > 0;
-        rsv3 = (i & 0x10) > 0;
+                byte opCode = frame.getOpCode();
 
-        if (rsv1 || rsv2 || rsv3) {
-            // TODO: Not supported.
-        }
-
-        opCode = (i & 0x0F);
-        validateOpCode(opCode);
-
-        // Read the next byte
-        i = processor.read();
-
-        // Client data must be masked and this isn't
-        if ((i & 0x80) == 0) {
-            // TODO: Better message
-            throw new IOException();
-        }
-
-        payloadLength = i & 0x7F;
-        if (payloadLength == 126) {
-            byte[] extended = new byte[2];
-            processor.read(extended);
-            payloadLength = Conversions.byteArrayToLong(extended);
-        } else if (payloadLength == 127) {
-            byte[] extended = new byte[8];
-            processor.read(extended);
-            payloadLength = Conversions.byteArrayToLong(extended);
-        }
-
-        byte[] mask = new byte[4];
-        processor.read(mask);
-
-        if (opCode == 1 || opCode == 2) {
-            WsInputStream wsIs = new WsInputStream(processor, mask,
-                    payloadLength);
-            if (opCode == 2) {
-                onBinaryData(wsIs);
-            } else {
-                InputStreamReader r =
-                        new InputStreamReader(wsIs, B2CConverter.UTF_8);
-                onTextData(r);
+                if (opCode == Constants.OPCODE_BINARY) {
+                    onBinaryData(wsIs);
+                } else if (opCode == Constants.OPCODE_TEXT) {
+                    InputStreamReader r =
+                            new InputStreamReader(wsIs, new Utf8Decoder());
+                    onTextData(r);
+                } else if (opCode == Constants.OPCODE_CLOSE){
+                    getWsOutbound().close(frame);
+                    return SocketState.CLOSED;
+                } else if (opCode == Constants.OPCODE_PING) {
+                    getWsOutbound().pong(frame.getPayLoad());
+                } else if (opCode == Constants.OPCODE_PONG) {
+                    // NO-OP
+                } else {
+                    // Unknown OpCode
+                    getWsOutbound().close(1002, null);
+                    return SocketState.CLOSED;
+                }
+            } catch (MalformedInputException mie) {
+                // Invalid UTF-8
+                getWsOutbound().close(1007, null);
+                return SocketState.CLOSED;
+            } catch (UnmappableCharacterException uce) {
+                // Invalid UTF-8
+                getWsOutbound().close(1007, null);
+                return SocketState.CLOSED;
+            } catch (IOException ioe) {
+                // Given something must have gone to reach this point, this might
+                // not work but try it anyway.
+                getWsOutbound().close(1002, null);
+                return SocketState.CLOSED;
             }
         }
-
-        // TODO: Doesn't currently handle multi-frame messages. That will need
-        //       some refactoring.
-
-        // TODO: Per frame extension handling is not currently supported.
-
-        // TODO: Handle other control frames.
-
-        // TODO: Handle control frames appearing in the middle of a multi-frame
-        //       message
-
-        return SocketState.UPGRADED;
+        // TODO Required once while loop is fixed
+        // return SocketState.UPGRADED;
     }
 
+
+    /**
+     * This method is called when there is a binary WebSocket message available
+     * to process. The message is presented via a stream and may be formed from
+     * one or more frames. The number of frames used to transmit the message is
+     * not made visible to the application.
+     *
+     * @param is    The WebSocket message
+     *
+     * @throws IOException  If a problem occurs processing the message. Any
+     *                      exception will trigger the closing of the WebSocket
+     *                      connection.
+     */
     protected abstract void onBinaryData(InputStream is) throws IOException;
-    protected abstract void onTextData(Reader r) throws IOException;
 
-    private void validateOpCode(int opCode) throws IOException {
-        switch (opCode) {
-        case 0:
-        case 1:
-        case 2:
-        case 8:
-        case 9:
-        case 10:
-            break;
-        default:
-            // TODO: Message
-            throw new IOException();
-        }
-    }
+
+    /**
+     * This method is called when there is a textual WebSocket message available
+     * to process. The message is presented via a reader and may be formed from
+     * one or more frames. The number of frames used to transmit the message is
+     * not made visible to the application.
+     *
+     * @param r     The WebSocket message
+     *
+     * @throws IOException  If a problem occurs processing the message. Any
+     *                      exception will trigger the closing of the WebSocket
+     *                      connection.
+     */
+    protected abstract void onTextData(Reader r) throws IOException;
 }

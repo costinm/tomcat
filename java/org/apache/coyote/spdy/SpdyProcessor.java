@@ -49,9 +49,9 @@ import org.apache.tomcat.util.net.SocketWrapper;
 /**
  * A spdy stream ( multiplexed over a spdy tcp connection ) processed by a
  * tomcat servlet.
- * 
+ *
  * Based on the AJP processor.
- * 
+ *
  */
 public class SpdyProcessor extends AbstractProcessor<Object> implements
         Runnable {

@@ -19,32 +19,55 @@ package org.apache.catalina.websocket;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
+import java.nio.charset.CharsetEncoder;
+import java.nio.charset.CoderResult;
 
 import org.apache.coyote.http11.upgrade.UpgradeOutbound;
 import org.apache.tomcat.util.buf.B2CConverter;
+import org.apache.tomcat.util.res.StringManager;
 
+/**
+ * Provides the means to write WebSocket messages to the client.
+ */
 public class WsOutbound {
 
-    private static final int DEFAULT_BUFFER_SIZE = 2048;
+    private static final StringManager sm =
+            StringManager.getManager(Constants.Package);
+    private static final int DEFAULT_BUFFER_SIZE = 8192;
 
     private UpgradeOutbound upgradeOutbound;
     private ByteBuffer bb;
     private CharBuffer cb;
-    protected Boolean text = null;
-    protected boolean firstFrame = true;
+    private boolean closed = false;
+    private Boolean text = null;
+    private boolean firstFrame = true;
 
 
     public WsOutbound(UpgradeOutbound upgradeOutbound) {
         this.upgradeOutbound = upgradeOutbound;
         // TODO: Make buffer size configurable
-        // Byte buffer needs to be 4* char buffer to be sure that char buffer
-        // can always we written into Byte buffer
-        this.bb = ByteBuffer.allocate(DEFAULT_BUFFER_SIZE * 4);
+        this.bb = ByteBuffer.allocate(DEFAULT_BUFFER_SIZE);
         this.cb = CharBuffer.allocate(DEFAULT_BUFFER_SIZE);
     }
 
 
+    /**
+     * Adds the data to the buffer for binary data. If a textual message is
+     * currently in progress that message will be completed and a new binary
+     * message started. If the buffer for binary data is full, the buffer will
+     * be flushed and a new binary continuation fragment started.
+     *
+     * @param b The byte (only the least significant byte is used) of data to
+     *          send to the client.
+     *
+     * @throws IOException  If a flush is required and an error occurs writing
+     *                      the WebSocket frame to the client
+     */
     public void writeBinaryData(int b) throws IOException {
+        if (closed) {
+            throw new IOException(sm.getString("outbound.closed"));
+        }
+
         if (bb.position() == bb.capacity()) {
             doFlush(false);
         }
@@ -59,7 +82,22 @@ public class WsOutbound {
     }
 
 
+    /**
+     * Adds the data to the buffer for textual data. If a binary message is
+     * currently in progress that message will be completed and a new textual
+     * message started. If the buffer for textual data is full, the buffer will
+     * be flushed and a new textual continuation fragment started.
+     *
+     * @param b The character to send to the client.
+     *
+     * @throws IOException  If a flush is required and an error occurs writing
+     *                      the WebSocket frame to the client
+     */
     public void writeTextData(char c) throws IOException {
+        if (closed) {
+            throw new IOException(sm.getString("outbound.closed"));
+        }
+
         if (cb.position() == cb.capacity()) {
             doFlush(false);
         }
@@ -75,17 +113,43 @@ public class WsOutbound {
     }
 
 
+    /**
+     * Flush any message (binary or textual) that may be buffered and then send
+     * a WebSocket binary message as a single frame with the provided buffer as
+     * the payload of the message.
+     *
+     * @param msgBb The buffer containing the payload
+     *
+     * @throws IOException  If an error occurs writing to the client
+     */
     public void writeBinaryMessage(ByteBuffer msgBb) throws IOException {
+        if (closed) {
+            throw new IOException(sm.getString("outbound.closed"));
+        }
+
         if (text != null) {
             // Empty the buffer
             flush();
         }
         text = Boolean.FALSE;
-        doWriteBinary(msgBb, true);
+        doWriteBytes(msgBb, true);
     }
 
 
+    /**
+     * Flush any message (binary or textual) that may be buffered and then send
+     * a WebSocket text message as a single frame with the provided buffer as
+     * the payload of the message.
+     *
+     * @param msgBb The buffer containing the payload
+     *
+     * @throws IOException  If an error occurs writing to the client
+     */
     public void writeTextMessage(CharBuffer msgCb) throws IOException {
+        if (closed) {
+            throw new IOException(sm.getString("outbound.closed"));
+        }
+
         if (text != null) {
             // Empty the buffer
             flush();
@@ -95,9 +159,18 @@ public class WsOutbound {
     }
 
 
+    /**
+     * Flush any message (binary or textual) that may be buffered.
+     *
+     * @throws IOException  If an error occurs writing to the client
+     */
     public void flush() throws IOException {
+        if (closed) {
+            throw new IOException(sm.getString("outbound.closed"));
+        }
         doFlush(true);
     }
+
 
     private void doFlush(boolean finalFragment) throws IOException {
         if (text == null) {
@@ -105,28 +178,146 @@ public class WsOutbound {
             return;
         }
         if (text.booleanValue()) {
+            cb.flip();
             doWriteText(cb, finalFragment);
         } else {
-            doWriteBinary(bb, finalFragment);
+            bb.flip();
+            doWriteBytes(bb, finalFragment);
         }
     }
 
 
-    public void close() throws IOException {
-        doFlush(true);
+    /**
+     * Respond to a client close by sending a close that echoes the status code
+     * and message.
+     *
+     * @param frame The close frame received from a client
+     *
+     * @throws IOException  If an error occurs writing to the client
+     */
+    protected void close(WsFrame frame) throws IOException {
+        if (frame.getPayLoadLength() > 0) {
+            // Must be status (2 bytes) plus optional message
+            if (frame.getPayLoadLength() == 1) {
+                throw new IOException();
+            }
+            int status = (frame.getPayLoad().get() & 0xFF) << 8;
+            status += frame.getPayLoad().get() & 0xFF;
 
-        // TODO: Send a close message
+            if (validateCloseStatus(status)) {
+                // Echo the status back to the client
+                close(status, frame.getPayLoad());
+            } else {
+                // Invalid close code
+                close(1002, null);
+            }
+        } else {
+            // No status
+            close(0, null);
+        }
+    }
+
+
+    private boolean validateCloseStatus(int status) {
+
+        if (status == 1000 || status == 1001 || status == 1002 ||
+                status == 1003 || status == 1007 || status == 1008 ||
+                status == 1009 || status == 1010 || status == 1011 ||
+                (status > 2999 && status < 5000)) {
+            // Other 1xxx reserved / not permitted
+            // 2xxx reserved
+            // 3xxx framework defined
+            // 4xxx application defined
+            return true;
+        }
+        // <1000 unused
+        // >4999 undefined
+        return false;
+    }
+
+
+    /**
+     * Send a close message to the client
+     *
+     * @param status    Must be a valid status code or zero to send no code
+     * @param data      Optional message. If message is defined, a valid status
+     *                  code must be provided.
+     *
+     * @throws IOException  If an error occurs writing to the client
+     */
+    public void close(int status, ByteBuffer data) throws IOException {
+        // TODO Think about threading requirements for writing. This is not
+        // currently thread safe and writing almost certainly needs to be.
+        if (closed) {
+            return;
+        }
+        closed = true;
+
+        upgradeOutbound.write(0x88);
+        if (status == 0) {
+            upgradeOutbound.write(0);
+        } else if (data == null || data.position() == data.limit()) {
+            upgradeOutbound.write(2);
+            upgradeOutbound.write(status >>> 8);
+            upgradeOutbound.write(status);
+        } else {
+            upgradeOutbound.write(2 + data.limit() - data.position());
+            upgradeOutbound.write(status >>> 8);
+            upgradeOutbound.write(status);
+            upgradeOutbound.write(data.array(), data.position(),
+                    data.limit() - data.position());
+        }
+        upgradeOutbound.flush();
+
         bb = null;
         cb = null;
         upgradeOutbound = null;
     }
 
 
-    protected void doWriteBinary(ByteBuffer buffer, boolean finalFragment)
+    /**
+     * Send a pong message to the client
+     *
+     * @param data      Optional message.
+     *
+     * @throws IOException  If an error occurs writing to the client
+     */
+    public void pong(ByteBuffer data) throws IOException {
+        // TODO Think about threading requirements for writing. This is not
+        // currently thread safe and writing almost certainly needs to be.
+        if (closed) {
+            throw new IOException(sm.getString("outbound.closed"));
+        }
+
+        doFlush(true);
+
+        upgradeOutbound.write(0x8A);
+        if (data == null) {
+            upgradeOutbound.write(0);
+        } else {
+            upgradeOutbound.write(data.limit() - data.position());
+            upgradeOutbound.write(data.array(), data.position(),
+                    data.limit() - data.position());
+        }
+
+        upgradeOutbound.flush();
+    }
+
+
+    /**
+     * Writes the provided bytes as the payload in a new WebSocket frame.
+     *
+     * @param buffer        The bytes to include in the payload.
+     * @param finalFragment Do these bytes represent the final fragment of a
+     *                      WebSocket message?
+     * @throws IOException
+     */
+    private void doWriteBytes(ByteBuffer buffer, boolean finalFragment)
             throws IOException {
 
-        // Prepare to write
-        buffer.flip();
+        if (closed) {
+            throw new IOException("Closed");
+        }
 
         // Work out the first byte
         int first = 0x00;
@@ -143,13 +334,24 @@ public class WsOutbound {
         // Continuation frame is OpCode 0
         upgradeOutbound.write(first);
 
-        // Note: buffer will never be more than 2^16 in length
         if (buffer.limit() < 126) {
             upgradeOutbound.write(buffer.limit());
-        } else {
+        } else if (buffer.limit() < 65536) {
             upgradeOutbound.write(126);
             upgradeOutbound.write(buffer.limit() >>> 8);
             upgradeOutbound.write(buffer.limit() & 0xFF);
+        } else {
+            // Will never be more than 2^31-1
+            upgradeOutbound.write(127);
+            upgradeOutbound.write(0);
+            upgradeOutbound.write(0);
+            upgradeOutbound.write(0);
+            upgradeOutbound.write(0);
+            upgradeOutbound.write(buffer.limit() >>> 24);
+            upgradeOutbound.write(buffer.limit() >>> 16);
+            upgradeOutbound.write(buffer.limit() >>> 8);
+            upgradeOutbound.write(buffer.limit() & 0xFF);
+
         }
 
         // Write the content
@@ -167,12 +369,26 @@ public class WsOutbound {
     }
 
 
-    protected void doWriteText(CharBuffer buffer, boolean finalFragment)
+    /*
+     * Convert the textual message to bytes and then output it.
+     */
+    private void doWriteText(CharBuffer buffer, boolean finalFragment)
             throws IOException {
-        buffer.flip();
-        B2CConverter.UTF_8.newEncoder().encode(buffer, bb, true);
-        doWriteBinary(bb, finalFragment);
-        // Reset
+        CharsetEncoder encoder = B2CConverter.UTF_8.newEncoder();
+        do {
+            CoderResult cr = encoder.encode(buffer, bb, true);
+            if (cr.isError()) {
+                cr.throwException();
+            }
+            bb.flip();
+            if (buffer.hasRemaining()) {
+                doWriteBytes(bb, false);
+            } else {
+                doWriteBytes(bb, finalFragment);
+            }
+        } while (buffer.hasRemaining());
+
+        // Reset - bb will be cleared in doWriteBytes()
         cb.clear();
     }
 }

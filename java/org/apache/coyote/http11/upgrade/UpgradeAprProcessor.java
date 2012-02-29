@@ -55,19 +55,29 @@ public class UpgradeAprProcessor extends UpgradeProcessor<Long> {
     }
 
 
+    @Override
+    public void write(byte[]b, int off, int len) throws IOException {
+        Socket.send(socket, b, off, len);
+    }
+
+
     /*
      * Input methods
      */
     @Override
     public int read() throws IOException {
         byte[] bytes = new byte[1];
-        Socket.recv(socket, bytes, 0, 1);
-        return bytes[0];
+        int result = Socket.recv(socket, bytes, 0, 1);
+        if (result == -1) {
+            return -1;
+        } else {
+            return bytes[0] & 0xFF;
+        }
     }
 
 
     @Override
-    public int read(byte[] bytes) throws IOException {
-        return Socket.recv(socket, bytes, 0, bytes.length);
+    public int read(byte[] bytes, int off, int len) throws IOException {
+        return Socket.recv(socket, bytes, off, len);
     }
 }

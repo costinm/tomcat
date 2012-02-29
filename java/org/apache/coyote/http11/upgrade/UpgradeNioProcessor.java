@@ -35,6 +35,8 @@ public class UpgradeNioProcessor extends UpgradeProcessor<NioChannel> {
 
     private final NioChannel nioChannel;
     private final NioSelectorPool pool;
+    private final int maxRead;
+    private final int maxWrite;
 
     public UpgradeNioProcessor(SocketWrapper<NioChannel> wrapper,
             UpgradeInbound upgradeInbound, NioSelectorPool pool) {
@@ -42,6 +44,8 @@ public class UpgradeNioProcessor extends UpgradeProcessor<NioChannel> {
 
         this.nioChannel = wrapper.getSocket();
         this.pool = pool;
+        this.maxRead = nioChannel.getBufHandler().getReadBuffer().capacity();
+        this.maxWrite = nioChannel.getBufHandler().getWriteBuffer().capacity();
     }
 
 
@@ -77,7 +81,16 @@ public class UpgradeNioProcessor extends UpgradeProcessor<NioChannel> {
 
     @Override
     public void write(int b) throws IOException {
-        writeToSocket(new byte[] {(byte) b});
+        writeToSocket(new byte[] {(byte) b}, 0, 1);
+    }
+
+    @Override
+    public void write(byte[]b, int off, int len) throws IOException {
+        int written = 0;
+        while (len - written > maxWrite) {
+            written += writeToSocket(b, off + written, maxWrite);
+        }
+        writeToSocket(b, off + written, len - written);
     }
 
     /*
@@ -86,13 +99,21 @@ public class UpgradeNioProcessor extends UpgradeProcessor<NioChannel> {
     @Override
     public int read() throws IOException {
         byte[] bytes = new byte[1];
-        readSocket(true, bytes, 0, 1);
-        return bytes[0];
-    }
+        int result = readSocket(true, bytes, 0, 1);
+        if (result == -1) {
+            return -1;
+        } else {
+            return bytes[0] & 0xFF;
+        }    }
 
     @Override
-    public int read(byte[] bytes) throws IOException {
-        return readSocket(true, bytes, 0, bytes.length);
+    public int read(byte[] bytes, int off, int len) throws IOException {
+        if (len > maxRead) {
+            return readSocket(true, bytes, off, maxRead);
+        } else {
+            return readSocket(true, bytes, off, len);
+        }
+
     }
 
 
@@ -147,10 +168,11 @@ public class UpgradeNioProcessor extends UpgradeProcessor<NioChannel> {
     /*
      * Adapted from the NioOutputBuffer
      */
-    private synchronized int writeToSocket(byte[] bytes) throws IOException {
+    private synchronized int writeToSocket(byte[] bytes, int off, int len)
+            throws IOException {
 
         nioChannel.getBufHandler().getWriteBuffer().clear();
-        nioChannel.getBufHandler().getWriteBuffer().put(bytes);
+        nioChannel.getBufHandler().getWriteBuffer().put(bytes, off, len);
         nioChannel.getBufHandler().getWriteBuffer().flip();
 
         int written = 0;

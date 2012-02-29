@@ -30,6 +30,7 @@ import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 
 import org.apache.coyote.http11.upgrade.UpgradeInbound;
+import org.apache.coyote.http11.upgrade.UpgradeProcessor;
 import org.apache.juli.logging.Log;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.modeler.Registry;
@@ -562,7 +563,17 @@ public abstract class AbstractProtocol implements ProtocolHandler,
                     if (state != SocketState.CLOSED && processor.isAsync()) {
                         state = processor.asyncPostProcess();
                     }
-                } while (state == SocketState.ASYNC_END);
+
+                    if (state == SocketState.UPGRADING) {
+                        // Get the UpgradeInbound handler
+                        UpgradeInbound inbound = processor.getUpgradeInbound();
+                        // Release the Http11 processor to be re-used
+                        release(socket, processor, false, false);
+                        // Create the light-weight upgrade processor
+                        processor = createUpgradeProcessor(socket, inbound);
+                    }
+                } while (state == SocketState.ASYNC_END ||
+                        state == SocketState.UPGRADING);
 
                 if (state == SocketState.LONG) {
                     // In the middle of processing a request/response. Keep the
@@ -581,18 +592,11 @@ public abstract class AbstractProtocol implements ProtocolHandler,
                 } else if (state == SocketState.UPGRADED) {
                     // Need to keep the connection associated with the processor
                     upgradePoll(socket, processor);
-                } else if (state == SocketState.UPGRADING) {
-                    // Get the UpgradeInbound handler
-                    UpgradeInbound inbound = processor.getUpgradeInbound();
-                    // Release the Http11 processor to be re-used
-                    release(socket, processor, false, false);
-                    // Create the light-weight upgrade processor
-                    processor = createUpgradeProcessor(socket, inbound);
-                    // Need to keep the connection associated with the processor
-                    upgradePoll(socket, processor);
                 } else {
                     // Connection closed. OK to recycle the processor.
-                    release(socket, processor, true, false);
+                    if (!(processor instanceof UpgradeProcessor)) {
+                        release(socket, processor, true, false);
+                    }
                 }
                 return state;
             } catch(java.net.SocketException e) {
@@ -614,7 +618,10 @@ public abstract class AbstractProtocol implements ProtocolHandler,
                 // less-than-verbose logs.
                 getLog().error(sm.getString("ajpprotocol.proto.error"), e);
             }
-            release(socket, processor, true, false);
+            // Don't try to add upgrade processors back into the pool
+            if (!(processor instanceof UpgradeProcessor)) {
+                release(socket, processor, true, false);
+            }
             return SocketState.CLOSED;
         }
 
