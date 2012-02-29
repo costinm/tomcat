@@ -2,15 +2,15 @@
  */
 package org.apache.tomcat.spdy;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
 
 import java.io.IOException;
+import java.util.HashMap;
 
 import org.apache.catalina.Context;
 import org.apache.catalina.connector.Connector;
 import org.apache.catalina.startup.Tomcat;
 import org.apache.catalina.startup.TomcatBaseTest;
-import org.apache.tomcat.spdy.SpdyClient.ClientSpdyStream;
 import org.apache.tomcat.util.net.TesterSupport;
 import org.junit.Before;
 import org.junit.Test;
@@ -19,29 +19,37 @@ public class TomcatSpdyTest extends TomcatBaseTest {
 
     boolean realSpdy = false;
 
-    SpdyClient client;
-
+    SpdyContext spdyCtx;
+    SpdyConnection client;
+    String host = "localhost";
+    
     protected void extraConnectorSetup(Connector connector, String protocol) {
-        if ("org.apache.coyote.http11.Http11Protocol".equals(protocol)) {
-//            connector.setProperty("lightProtocol",
-//                    "org.apache.tomcat.spdy.SpdyTomcatJioProtocol");
-            connector.setProperty("lightHandler",
-                    "org.apache.tomcat.spdy.TomcatJioHandler");
-            client = new SpdyClient();
-
+        if ("org.apache.coyote.spdy.SpdyProxyProtocol".equals(protocol)) {
+            spdyCtx = new SpdyContextProxy();
         } else if ("org.apache.coyote.http11.Http11AprProtocol"
                 .equals(protocol)) {
-            connector.setProperty("lightHandler",
-                    "org.apache.tomcat.spdy.TomcatAprHandler");
-//            connector.setProperty("lightProtocol",
-//                    "org.apache.tomcat.spdy.SpdyTomcatAprProtocol");
-            client = new SpdyClientApr();
+            connector.setProperty("npnHandler", 
+                    "org.apache.coyote.spdy.SpdyAprNpnHandler");
+            
+            spdyCtx = new SpdyContextJni();
+            ((SpdyContextJni) spdyCtx).getAprContext().addListener(new HexDumpListener());
             realSpdy = true;
             Tomcat tomcat = getTomcatInstance();
             TesterSupport.initSsl(tomcat);
         }
+        
     }
+    
+    protected String getProtocol() {
+        String protocol = System.getProperty("tomcat.test.protocol");
 
+        // Use BIO by default
+        if (protocol == null) {
+            protocol = "org.apache.coyote.spdy.SpdyProxyProtocol";
+        }
+        return protocol;
+    }
+    
     @Before
     @Override
     public void setUp() throws Exception {
@@ -53,7 +61,7 @@ public class TomcatSpdyTest extends TomcatBaseTest {
         root.addServletMapping("/hello", "hello");
 
         tomcat.start();
-        client.setTarget("localhost", getPort());
+        client = spdyCtx.getConnection(host, getPort());
     }
 
     @Test
@@ -62,24 +70,26 @@ public class TomcatSpdyTest extends TomcatBaseTest {
     }
 
     public void get() throws IOException {
-        SpdyClient.ClientSpdyStream stream = client.get("/hello");
+        SpdyStream stream = client.get(host, "/hello");
         SpdyFrame f;
         int dataLen = 0;
         while ((f = stream.getIn(to)) != null) {
             dataLen += f.getDataSize();
         }
-        assertEquals(stream.resHeaders.get("status"), "200 OK");
+        HashMap<String, String> resHeaders = new HashMap<String, String>();
+        stream.getHeaders(resHeaders);        
+        assertEquals(resHeaders.get("status"), "200 OK");
         assertEquals(dataLen,
-                Integer.parseInt(stream.resHeaders.get("content-length")));
+                Integer.parseInt(resHeaders.get("content-length")));
 
     }
 
     int to = 20000;
 
     public void getNParallel(int n) throws IOException {
-        ClientSpdyStream[] streams = new ClientSpdyStream[n];
+        SpdyStream[] streams = new SpdyStream[n];
         for (int i = 0; i < n; i++) {
-            streams[i] = client.get("/hello");
+            streams[i] = client.get(host, "/hello");
         }
         for (int i = 0; i < n; i++) {
             SpdyFrame f;
@@ -87,8 +97,10 @@ public class TomcatSpdyTest extends TomcatBaseTest {
             while ((f = streams[i].getIn(to)) != null) {
                 dataLen += f.getDataSize();
             }
-            assertEquals(streams[i].resHeaders.get("status"), "200 OK");
-            assertEquals(dataLen, Integer.parseInt(streams[i].resHeaders
+            HashMap<String, String> resHeaders = new HashMap<String, String>();
+            streams[i].getHeaders(resHeaders);
+            assertEquals(resHeaders.get("status"), "200 OK");
+            assertEquals(dataLen, Integer.parseInt(resHeaders
                     .get("content-length")));
         }
 

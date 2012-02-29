@@ -17,8 +17,10 @@
 package org.apache.tomcat.spdy;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
@@ -36,10 +38,8 @@ import java.util.logging.Logger;
  * The intended use of SPDY with blocking sockets is for frontend(load-balancer)
  * to tomcat, where each tomcat will have a few spdy connections.
  * 
- * 
- * 
  */
-public abstract class SpdyFramer { // implements Runnable {
+public abstract class SpdyConnection { // implements Runnable {
 
     // TODO: this can be pooled, to avoid allocation on idle connections
     // TODO: override socket timeout
@@ -52,7 +52,7 @@ public abstract class SpdyFramer { // implements Runnable {
     Map<Integer, SpdyStream> channels = new HashMap<Integer, SpdyStream>();
 
     // --------------
-    protected static final Logger log = Logger.getLogger(SpdyFramer.class
+    protected static final Logger log = Logger.getLogger(SpdyConnection.class
             .getName());
 
     public static final int TYPE_SYN_STREAM = 1;
@@ -105,9 +105,9 @@ public abstract class SpdyFramer { // implements Runnable {
 
     // protected SpdyFrame currentOutFrame = new SpdyFrame();
 
-    private SpdyContext spdyContext;
+    protected SpdyContext spdyContext;
 
-    boolean inClosed;
+    protected boolean inClosed;
 
     int lastChannel;
 
@@ -126,8 +126,23 @@ public abstract class SpdyFramer { // implements Runnable {
 
     private Condition outCondition;
 
-    public SpdyFramer(SpdyContext spdyContext) {
-        this.setSpdyContext(spdyContext);
+    public static final int LONG = 1;
+
+    public static final int CLOSE = -1;
+
+    private SpdyFrame nextFrame;
+
+    /**
+     * Handles the out queue for blocking sockets.
+     */
+    SpdyFrame out;
+
+    boolean draining = false;
+
+    private int goAway = Integer.MAX_VALUE;
+
+    public SpdyConnection(SpdyContext spdyContext) {
+        this.spdyContext = spdyContext;
         outCondition = framerLock.newCondition();
     }
 
@@ -170,13 +185,6 @@ public abstract class SpdyFramer { // implements Runnable {
      */
 
     /**
-     * Handles the out queue for blocking sockets.
-     */
-    SpdyFrame out;
-
-    boolean draining = false;
-
-    /**
      * Non blocking if the socket is not blocking.
      */
     private boolean drain() {
@@ -192,8 +200,12 @@ public abstract class SpdyFramer { // implements Runnable {
                     if (out == null) {
                         return false;
                     }
+                    if (goAway < out.streamId) {
+                        
+                    }
                     SpdyFrame oframe = out;
                     try {
+                        
                         if (oframe.type == TYPE_SYN_STREAM) {
                             oframe.fixNV(18);
                             if (compressSupport != null) {
@@ -232,9 +244,6 @@ public abstract class SpdyFramer { // implements Runnable {
             }
 
             try {
-                if (!checkConnection(out)) {
-                    return true;
-                }
                 int toWrite = out.endData - out.off;
                 int wr = write(out.data, out.off, toWrite);
                 if (wr < 0) {
@@ -341,21 +350,6 @@ public abstract class SpdyFramer { // implements Runnable {
         }
     }
 
-    /**
-     * Server side: write will fail ( but we could fail fast ).
-     * 
-     * Client side: will connect if needed ( syn_stream ) or report an error if
-     * disconnected.
-     * 
-     * Should be non-blocking if the socket is non blocking.
-     * 
-     * @return true if connected, false if connection is in progress
-     * @throws IOException
-     */
-    protected boolean checkConnection(SpdyFrame oframe) throws IOException {
-        return true;
-    }
-
     public void onClose() {
         // TODO: abort
     }
@@ -390,12 +384,6 @@ public abstract class SpdyFramer { // implements Runnable {
         }
     }
 
-    public static final int LONG = 1;
-
-    public static final int CLOSE = -1;
-
-    private SpdyFrame nextFrame;
-
     /**
      * Non-blocking method, read as much as possible and return.
      */
@@ -409,12 +397,11 @@ public abstract class SpdyFramer { // implements Runnable {
                 inFrame.data = new byte[16 * 1024];
             }
             // we might already have data from previous frame
-            if (inFrame.endData < 8 || // we don't have the header
-                    inFrame.endData < inFrame.endFrame) { // size != 0 - we
-                                                          // parsed the header
+            if (inFrame.endReadData < 8 || // we don't have the header
+                    inFrame.endReadData < inFrame.endData) {
 
-                int rd = read(inFrame.data, inFrame.endData,
-                        inFrame.data.length - inFrame.endData);
+                int rd = read(inFrame.data, inFrame.endReadData,
+                        inFrame.data.length - inFrame.endReadData);
                 if (rd < 0) {
                     abort("Closed");
                     return CLOSE;
@@ -423,47 +410,48 @@ public abstract class SpdyFramer { // implements Runnable {
                     return LONG;
                     // Non-blocking channel - will resume reading at off
                 }
-                inFrame.endData += rd;
+                inFrame.endReadData += rd;
             }
-            if (inFrame.endData < 8) {
+            if (inFrame.endReadData < 8) {
                 continue; // keep reading
             }
-            // We got the frame head
-            if (inFrame.endFrame == 0) {
+            if (inFrame.endData == 0) {
                 inFrame.parse();
                 if (inFrame.version != 2) {
                     abort("Wrong version");
                     return CLOSE;
                 }
 
-                // MAx_FRAME_SIZE
-                if (inFrame.endFrame < 0 || inFrame.endFrame > 32000) {
-                    abort("Framing error, size = " + inFrame.endFrame);
+                // MAX_FRAME_SIZE
+                if (inFrame.endData < 0 || inFrame.endData > 32000) {
+                    abort("Framing error, size = " + inFrame.endData);
                     return CLOSE;
                 }
 
-                // grow the buffer if needed. no need to copy the head, parsed
-                // ( maybe for debugging ).
-                if (inFrame.data.length < inFrame.endFrame) {
-                    inFrame.data = new byte[inFrame.endFrame];
+                // TODO: if data, split it in 2 frames
+                // grow the buffer if needed. 
+                if (inFrame.data.length < inFrame.endData) {
+                    byte[] tmp = new byte[inFrame.endData];
+                    System.arraycopy(inFrame.data, 0, tmp, 0, inFrame.endReadData);
+                    inFrame.data = tmp;
                 }
             }
 
-            if (inFrame.endData < inFrame.endFrame) {
+            if (inFrame.endReadData < inFrame.endData) {
                 continue; // keep reading to fill current frame
             }
             // else: we have at least the current frame
-            int extra = inFrame.endData - inFrame.endFrame;
+            int extra = inFrame.endReadData - inFrame.endData;
             if (extra > 0) {
                 // and a bit more - to keep things simple for now we
                 // copy them to next frame, at least we saved reads.
                 // it is possible to avoid copy - but later.
                 nextFrame = getSpdyContext().getFrame();
                 nextFrame.makeSpace(extra);
-                System.arraycopy(inFrame.data, inFrame.endFrame,
+                System.arraycopy(inFrame.data, inFrame.endData,
                         nextFrame.data, 0, extra);
-                nextFrame.endData = extra;
-                inFrame.endData = inFrame.endFrame;
+                nextFrame.endReadData = extra;
+                inFrame.endReadData = inFrame.endData;
             }
 
             // decompress
@@ -523,8 +511,29 @@ public abstract class SpdyFramer { // implements Runnable {
     public void abort(String msg) {
         System.err.println(msg);
         inClosed = true;
-        // TODO: close all streams
 
+        List<Integer> ch = new ArrayList<Integer>(channels.keySet());
+        for (Integer i: ch) {
+            SpdyStream stream = channels.remove(i);
+            if (stream != null) {
+                stream.onReset();
+            }
+        }
+    }
+
+    public void abort(String msg, int last) {
+        System.err.println(msg);
+        inClosed = true;
+
+        List<Integer> ch = new ArrayList<Integer>(channels.keySet());
+        for (Integer i: ch) {
+            if (i > last) {
+                SpdyStream stream = channels.remove(i);
+                if (stream != null) {
+                    stream.onReset();
+                }
+            }
+        }
     }
 
     /**
@@ -533,7 +542,7 @@ public abstract class SpdyFramer { // implements Runnable {
      * @return
      * @throws IOException
      */
-    public int handleFrame() throws IOException {
+    protected int handleFrame() throws IOException {
         if (inFrame.c) {
             switch (inFrame.type) {
             case TYPE_SETTINGS: {
@@ -549,7 +558,11 @@ public abstract class SpdyFramer { // implements Runnable {
             case TYPE_GOAWAY: {
                 int lastStream = inFrame.readInt();
                 log.info("GOAWAY last=" + lastStream);
-                abort("GOAWAY");
+                
+                // Server will shut down - but will keep processing the current requests,
+                // up to lastStream. If we sent any new ones - they need to be canceled.
+                abort("GO_AWAY", lastStream);
+                goAway  = lastStream;
                 return CLOSE;
             }
             case TYPE_RST_STREAM: {
@@ -585,6 +598,7 @@ public abstract class SpdyFramer { // implements Runnable {
                     abort("Error reading headers " + t);
                     return CLOSE;
                 }
+                spdyContext.onSynStream(this, ch);
                 break;
             }
             case TYPE_SYN_REPLY: {
@@ -629,6 +643,20 @@ public abstract class SpdyFramer { // implements Runnable {
         return LONG;
     }
 
+    public SpdyContext getSpdyContext() {
+        return spdyContext;
+    }
+
+    public SpdyStream get(String host, String url) throws IOException {
+        SpdyStream sch = new SpdyStream(this);
+        sch.addHeader("host", host);
+        sch.addHeader("url", url);
+
+        sch.send();
+
+        return sch;
+    }
+
     /**
      * Abstract compression support. When using spdy on intranet ( between load
      * balancer and tomcat) there is no need for the compression overhead. There
@@ -638,17 +666,5 @@ public abstract class SpdyFramer { // implements Runnable {
         public void compress(SpdyFrame frame, int start) throws IOException;
 
         public void decompress(SpdyFrame frame, int start) throws IOException;
-    }
-
-    public SpdyContext getContext() {
-        return getSpdyContext();
-    }
-
-    public SpdyContext getSpdyContext() {
-        return spdyContext;
-    }
-
-    public void setSpdyContext(SpdyContext spdyContext) {
-        this.spdyContext = spdyContext;
     }
 }

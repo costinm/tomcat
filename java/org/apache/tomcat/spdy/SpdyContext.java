@@ -1,7 +1,22 @@
 /*
+ *  Licensed to the Apache Software Foundation (ASF) under one or more
+ *  contributor license agreements.  See the NOTICE file distributed with
+ *  this work for additional information regarding copyright ownership.
+ *  The ASF licenses this file to You under the Apache License, Version 2.0
+ *  (the "License"); you may not use this file except in compliance with
+ *  the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 package org.apache.tomcat.spdy;
 
+import java.io.IOException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
@@ -32,7 +47,7 @@ public class SpdyContext {
 
     private Executor executor;
 
-    int defaultFrameSize = 8196;
+    int defaultFrameSize = 8192;
 
     public static boolean debug = true;
 
@@ -46,14 +61,31 @@ public class SpdyContext {
     public void releaseFrame(SpdyFrame done) {
     }
 
-    public SpdyStream getStream(SpdyFramer framer) {
-        return null;
+    /**
+     * Set the max frame size.
+     * 
+     * Larger data packets will be split in multiple frames.
+     * 
+     * ( the code is currently accepting larger control frames - it's not 
+     * clear if we should just reject them, many servers limit header size -
+     * the http connector also has a 8k limit - getMaxHttpHeaderSize )
+     */
+    public void setFrameSize(int frameSize) { 
+        defaultFrameSize = frameSize;
+    }
+    
+    /** 
+     * Override for server side to return a custom stream.
+     */
+    public SpdyStream getStream(SpdyConnection framer) {
+        SpdyStream spdyStream = new SpdyStream(framer);
+        return spdyStream;
     }
 
     public void setExecutor(Executor executor) {
         this.executor = executor;
     }
-
+    
     /**
      * SPDY is a multiplexed protocol - the SpdyProcessors will be executed on
      * this executor.
@@ -68,4 +100,21 @@ public class SpdyContext {
         return executor;
     }
 
+    /** 
+     * Override for servers.
+     * @throws IOException 
+     */
+    protected void onSynStream(SpdyConnection spdyCon, SpdyStream ch) throws IOException {
+    }
+
+    /**
+     * Client mode: return a connection for host/port. 
+     * @throws IOException 
+     */
+    public SpdyConnection getConnection(String host, int port) throws IOException {
+        return null;
+    }
+
+    public void releaseConnection(SpdyConnection con) {
+    }
 }

@@ -4,24 +4,40 @@ package org.apache.tomcat.spdy;
 
 import java.io.IOException;
 
-import org.apache.tomcat.jni.AprSocket;
-import org.apache.tomcat.jni.AprSocketContext;
 import org.apache.tomcat.jni.Status;
+import org.apache.tomcat.jni.socket.AprSocket;
+import org.apache.tomcat.jni.socket.AprSocketContext;
 
-public class SpdyClientApr extends SpdyClient {
+public class SpdyContextJni extends SpdyContext {
+    AprSocketContext con;
 
-    AprSocketContext con = new AprSocketContext();
-
+    public SpdyContextJni() {
+        con = new AprSocketContext();
+        //if (insecureCerts) {
+        con.customVerification();
+        //}
+        con.setNpn("spdy/2");
+    }
+    
     @Override
-    public void init() {
-        spdy = new SpdyFramerAprSocket(spdyCtx);
+    public SpdyConnection getConnection(String host, int port) throws IOException {
+        SpdyConnectionAprSocket spdy = new SpdyConnectionAprSocket(this);
+        
+        AprSocket ch = con.socket(host, port, true);
+
+        spdy.setSocket(ch);
+
+        ch.connect();
+
+        getExecutor().execute(spdy.inputThread);
+        return spdy;
     }
 
-    public AprSocketContext getSocketContext() {
+    public AprSocketContext getAprContext() {
         return con;
-    }
+    }    
 
-    public class SpdyFramerAprSocket extends SpdyFramer {
+    public static class SpdyConnectionAprSocket extends SpdyConnection {
         AprSocket socket;
 
         Runnable inputThread = new Runnable() {
@@ -29,48 +45,21 @@ public class SpdyClientApr extends SpdyClient {
             public void run() {
                 onBlockingSocket();
                 try {
-                    socket.close();
+                    socket.writeEnd();
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
             }
         };
 
-        public SpdyFramerAprSocket(SpdyContext spdyContext) {
+        public SpdyConnectionAprSocket(SpdyContext spdyContext) {
             super(spdyContext);
-            setCompressSupport(new CompressJzlib());
+            //setCompressSupport(new CompressJzlib());
+            setCompressSupport(new CompressDeflater6());
         }
 
         public void setSocket(AprSocket ch) {
             this.socket = ch;
-        }
-
-        protected boolean checkConnection(SpdyFrame oframe) throws IOException {
-            if (connected) {
-                return true;
-            }
-            if (connecting) {
-                return false;
-            }
-            connecting = true;
-
-            if (insecureCerts) {
-                con.customVerification();
-            }
-            con.setNpn("spdy/2");
-
-            AprSocket ch = con.channel();
-            ch.setTarget(host, port);
-            ch.blockingStartTLS();
-
-            ((SpdyFramerAprSocket) spdy).setSocket(ch);
-
-            ch.connect();
-
-            spdyCtx.getExecutor().execute(inputThread);
-            connected = true;
-
-            return true;
         }
 
         @Override

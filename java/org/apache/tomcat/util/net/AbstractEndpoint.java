@@ -55,20 +55,7 @@ public abstract class AbstractEndpoint {
         public enum SocketState {
             // TODO Add a new state to the AsyncStateMachine and remove
             //      ASYNC_END (if possible)
-            /** Socket should remain open and be notified on io events.
-              * Used for keepalive 
-              */
-            OPEN,
-            /** Socket should be closed by the endpoint */
-            CLOSED, 
-            /** Used for async and comet requests, socket should remain open 
-             * and notified of timeouts. 
-             */
-            LONG, 
-            ASYNC_END, 
-            SENDFILE,
-            UPGRADING, 
-            UPGRADED,
+            OPEN, CLOSED, LONG, ASYNC_END, SENDFILE, UPGRADING, UPGRADED
         }
 
 

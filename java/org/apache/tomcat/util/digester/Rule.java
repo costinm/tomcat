@@ -195,7 +195,7 @@ public abstract class Rule {
     /**
      * This method is called when the end of a matching XML element
      * is encountered. The default implementation delegates to the deprecated
-     * method {@link #endData end} without the
+     * method {@link #end end} without the
      * <code>namespace</code> and <code>name</code> parameters, to retain
      * backwards compatibility.
      *

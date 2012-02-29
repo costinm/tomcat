@@ -1,4 +1,18 @@
 /*
+ *  Licensed to the Apache Software Foundation (ASF) under one or more
+ *  contributor license agreements.  See the NOTICE file distributed with
+ *  this work for additional information regarding copyright ownership.
+ *  The ASF licenses this file to You under the Apache License, Version 2.0
+ *  (the "License"); you may not use this file except in compliance with
+ *  the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 package org.apache.tomcat.spdy;
 
@@ -11,18 +25,21 @@ public class SpdyFrame {
 
     public int off = 8; // used when reading - current offset
 
-    public int endFrame; // end of frame == size + 8
+    int endReadData; // how much has been read ( may be more or less than a frame )
 
     // On write it is incremented.
 
-    public int endData; // end of data in the buffer (may be past frame end)
-
+    /**
+     *  end of data in the buffer.
+     */
+    public int endData; 
+    
     // Processed data from the frame
     boolean c; // for control
 
     int version;
 
-    private int flags;
+    int flags;
 
     public int type;
 
@@ -48,7 +65,7 @@ public class SpdyFrame {
     public void recyle() {
         type = 0;
         c = false;
-        endFrame = 0;
+        endReadData = 0;
         off = 8;
         streamId = 0;
         nvCount = 0;
@@ -62,10 +79,10 @@ public class SpdyFrame {
             }
             return "C" + " S=" + streamId + (flags != 0 ? " F=" + flags : "")
                     + (version != 2 ? "  v" + version : "") + " t=" + type
-                    + " L=" + endFrame + "/" + off;
+                    + " L=" + endData + "/" + off;
         } else {
             return "D" + " S=" + streamId + (flags != 0 ? " F=" + flags : "")
-                    + " L=" + endFrame + "/" + off;
+                    + " L=" + endData + "/" + off;
         }
     }
 
@@ -77,19 +94,19 @@ public class SpdyFrame {
             data[3] = (byte) type;
             data[4] = (byte) flags;
             append24(data, 5, endData - 8);
-            if (type == SpdyFramer.TYPE_SYN_STREAM) {
+            if (type == SpdyConnection.TYPE_SYN_STREAM) {
                 // nvcount is added before
                 append32(data, 8, streamId);
                 append32(data, 12, associated);
                 data[16] = 0; // TODO: priority
                 data[17] = 0;
                 return 18;
-            } else if (type == SpdyFramer.TYPE_SYN_REPLY) {
+            } else if (type == SpdyConnection.TYPE_SYN_REPLY) {
                 append32(data, 8, streamId);
                 data[12] = 0;
                 data[13] = 0;
                 return 14;
-            } else if (type == SpdyFramer.TYPE_HEADERS) {
+            } else if (type == SpdyConnection.TYPE_HEADERS) {
                 append32(data, 8, streamId);
                 data[12] = 0;
                 data[13] = 0;
@@ -104,7 +121,7 @@ public class SpdyFrame {
     }
 
     public boolean parse() {
-        endFrame = 0;
+        endData = 0;
         streamId = 0;
         nvCount = 0;
 
@@ -128,26 +145,26 @@ public class SpdyFrame {
         flags = data[4] & 0xFF;
         for (int i = 5; i < 8; i++) {
             b0 = data[i] & 0xFF;
-            endFrame = endFrame << 8 | b0;
+            endData = endData << 8 | b0;
         }
 
         // size will represent the end of the data ( header is held in same
         // buffer)
-        endFrame += 8;
+        endData += 8;
 
         return true;
     }
 
     public boolean isHalfClose() {
-        return (flags & SpdyFramer.FLAG_HALF_CLOSE) != 0;
+        return (flags & SpdyConnection.FLAG_HALF_CLOSE) != 0;
     }
 
     public void halfClose() {
-        flags = SpdyFramer.FLAG_HALF_CLOSE;
+        flags = SpdyConnection.FLAG_HALF_CLOSE;
     }
 
     public boolean closed() {
-        return (flags & SpdyFramer.FLAG_HALF_CLOSE) != 0;
+        return (flags & SpdyConnection.FLAG_HALF_CLOSE) != 0;
     }
 
     static void append24(byte[] buff, int off, int v) {
@@ -199,11 +216,11 @@ public class SpdyFrame {
         // if it's the first header, leave space for extra params and NV count.
         // they'll be filled in by send.
         if (off == 8) {
-            if (type == SpdyFramer.TYPE_SYN_REPLY) {
+            if (type == SpdyConnection.TYPE_SYN_REPLY) {
                 off = 16;
-            } else if (type == SpdyFramer.TYPE_SYN_STREAM) {
+            } else if (type == SpdyConnection.TYPE_SYN_STREAM) {
                 off = 20;
-            } else if (type != SpdyFramer.TYPE_HEADERS) {
+            } else if (type != SpdyConnection.TYPE_HEADERS) {
                 off = 16;
             } else {
                 throw new RuntimeException("Wrong frame type");
@@ -280,7 +297,7 @@ public class SpdyFrame {
     }
 
     public int remaining() {
-        return endFrame - off;
+        return endData - off;
     }
 
     public void advance(int cnt) {

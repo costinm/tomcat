@@ -1,10 +1,24 @@
 /*
+ *  Licensed to the Apache Software Foundation (ASF) under one or more
+ *  contributor license agreements.  See the NOTICE file distributed with
+ *  this work for additional information regarding copyright ownership.
+ *  The ASF licenses this file to You under the Apache License, Version 2.0
+ *  (the "License"); you may not use this file except in compliance with
+ *  the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 package org.apache.tomcat.spdy;
 
 import java.io.IOException;
 
-import org.apache.tomcat.spdy.SpdyFramer.CompressSupport;
+import org.apache.tomcat.spdy.SpdyConnection.CompressSupport;
 
 import com.jcraft.jzlib.JZlib;
 import com.jcraft.jzlib.ZStream;
@@ -62,7 +76,7 @@ public class CompressJzlib implements CompressSupport {
     byte[] decompressBuffer;
 
     byte[] compressBuffer;
-
+    
     public CompressJzlib() {
         setDictionary(SPDY_DICT, DICT_ID);
     }
@@ -113,8 +127,8 @@ public class CompressJzlib implements CompressSupport {
         cStream.avail_in = frame.endData - start;
 
         if (compressBuffer == null
-                || compressBuffer.length < frame.endData + 256) {
-            compressBuffer = new byte[frame.endData + 256];
+                || compressBuffer.length < frame.data.length) {
+            compressBuffer = new byte[frame.data.length];
         }
         int outOff = start; // same position
         while (true) {
@@ -126,18 +140,15 @@ public class CompressJzlib implements CompressSupport {
             check(err, cStream);
             outOff = cStream.next_out_index;
 
-            byte[] tmp = frame.data;
-            frame.data = compressBuffer;
-            compressBuffer = tmp;
             if (cStream.avail_out > 0 || cStream.avail_in == 0) {
                 break;
             }
         }
-        frame.endData = outOff;
+        byte[] tmp = frame.data;
+        frame.data = compressBuffer;
+        compressBuffer = tmp;
 
-        // if (last) {
-        // compressEnd(out);
-        // }
+        frame.endData = outOff;
     }
 
     @Override
@@ -150,9 +161,9 @@ public class CompressJzlib implements CompressSupport {
         dStream.next_in = frame.data;
         dStream.next_in_index = start;
         dStream.avail_in = frame.endData - start;
-        if (decompressBuffer == null
-                || decompressBuffer.length < frame.endData * 2) {
-            decompressBuffer = new byte[frame.endData * 2];
+        if (decompressBuffer == null) {
+            //|| decompressBuffer.length < frame.data.length) {
+            decompressBuffer = new byte[frame.data.length];
         }
         int tmpOff = start;
 
@@ -174,15 +185,22 @@ public class CompressJzlib implements CompressSupport {
                 // move in back, not consummed
                 return;
             }
+            if (err == JZlib.Z_BUF_ERROR) {
+                // That happens if the internal inflate buffer is empty, it's ok.
+                break;
+            }
             check(err, dStream);
-
+            if (dStream.avail_out == 0) {
+                // We need to grow the buffer
+                byte[] b = new byte[decompressBuffer.length * 2];
+                System.arraycopy(decompressBuffer, 0, b, 0, tmpOff);
+                decompressBuffer = b;
+                continue; // inflate again
+            }
             if (dStream.avail_in == 0) {
                 break;
             }
-            // We need to grow the buffer
-            byte[] b = new byte[decompressBuffer.length * 2];
-            System.arraycopy(decompressBuffer, 0, b, 0, tmpOff);
-            decompressBuffer = b;
+
         }
 
         // Done: replace frame.data[] ( swap actually to avoid allocs )
@@ -190,7 +208,7 @@ public class CompressJzlib implements CompressSupport {
         frame.data = decompressBuffer;
         decompressBuffer = tmp;
         frame.off = start;
-        frame.endFrame = tmpOff;
+        frame.endData = tmpOff;
     }
 
     private void check(int err, ZStream stream) throws IOException {

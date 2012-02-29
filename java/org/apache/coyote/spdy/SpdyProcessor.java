@@ -32,7 +32,7 @@ import org.apache.coyote.RequestInfo;
 import org.apache.coyote.Response;
 import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.tomcat.spdy.SpdyFrame;
-import org.apache.tomcat.spdy.SpdyFramer;
+import org.apache.tomcat.spdy.SpdyConnection;
 import org.apache.tomcat.spdy.SpdyStream;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.buf.Ascii;
@@ -47,18 +47,14 @@ import org.apache.tomcat.util.net.SocketStatus;
 import org.apache.tomcat.util.net.SocketWrapper;
 
 /**
- * A spdy stream processed by a tomcat servlet
+ * A spdy stream ( multiplexed over a spdy tcp connection ) processed by a
+ * tomcat servlet.
  * 
  * Based on the AJP processor.
  * 
- * Because we need to auto-detect SPDY and fallback to HTTP ( based on SSL next
- * proto ) this is implemented in tomcat a special way:
- * AbstractHttp11Processor.process() will delegate to Spdy.process if spdy is
- * needed.
- * 
  */
-public class SpdyProcessor extends AbstractProcessor<Object>
-        implements Runnable {
+public class SpdyProcessor extends AbstractProcessor<Object> implements
+        Runnable {
 
     // TODO: handle input
     // TODO: recycle
@@ -66,10 +62,10 @@ public class SpdyProcessor extends AbstractProcessor<Object>
     // TODO: find a way to inject an OutputBuffer, or interecept close() -
     // so we can send FIN in the last data packet.
 
-    private SpdyFramer spdy;
+    private SpdyConnection spdy;
 
     // Associated spdy stream
-    TomcatSpdyStream spdyStream;
+    SpdyStream spdyStream;
 
     ByteChunk keyBuffer = new ByteChunk();
 
@@ -83,19 +79,13 @@ public class SpdyProcessor extends AbstractProcessor<Object>
 
     boolean outCommit = false;
 
-    public SpdyProcessor(SpdyFramer spdy, AbstractEndpoint endpoint) {
+    public SpdyProcessor(SpdyConnection spdy, AbstractEndpoint endpoint) {
         super(endpoint);
 
         this.spdy = spdy;
-        spdyStream = new TomcatSpdyStream(spdy);
-
         request.setInputBuffer(new LiteInputBuffer());
         response.setOutputBuffer(new LiteOutputBuffer());
 
-    }
-
-    public SpdyStream getStream() {
-        return spdyStream;
     }
 
     class LiteInputBuffer implements InputBuffer {
@@ -114,7 +104,7 @@ public class SpdyProcessor extends AbstractProcessor<Object>
                     bchunk.getStart(), rd);
             inFrame.advance(rd);
             if (inFrame.off == inFrame.endData) {
-                spdy.getContext().releaseFrame(inFrame);
+                spdy.getSpdyContext().releaseFrame(inFrame);
             }
             bchunk.setEnd(bchunk.getEnd() + rd);
             return rd;
@@ -148,7 +138,7 @@ public class SpdyProcessor extends AbstractProcessor<Object>
     }
 
     void onRequest() {
-        Executor exec = spdy.getContext().getExecutor();
+        Executor exec = spdy.getSpdyContext().getExecutor();
         exec.execute(this);
     }
 
@@ -326,11 +316,40 @@ public class SpdyProcessor extends AbstractProcessor<Object>
                     // Ignore
                 }
             }
+        } else if (actionCode == ActionCode.REQ_LOCALPORT_ATTRIBUTE) {
+            String configured = (String) endpoint.getAttribute("proxyPort");
+            int localPort = 0;
+            if (configured != null) {
+                localPort = Integer.parseInt(configured);
+            } else {
+                localPort = endpoint.getPort();
+            }
+            request.setLocalPort(localPort);
 
         } else if (actionCode == ActionCode.REQ_LOCAL_ADDR_ATTRIBUTE) {
+            InetAddress localAddress = endpoint.getAddress();
+            String localIp = localAddress == null ? null : localAddress
+                    .getHostAddress();
+            if (localIp == null) {
+                localIp = (String) endpoint.getAttribute("proxyIP");
+            }
+            if (localIp == null) {
+                localIp = "127.0.0.1";
+            }
+            request.localAddr().setString(localIp);
 
-            // Copy from local name for now, which should simply be an address
-            request.localAddr().setString(request.localName().toString());
+        } else if (actionCode == ActionCode.REQ_HOST_ADDR_ATTRIBUTE) {
+            InetAddress localAddress = endpoint.getAddress();
+            String localH = localAddress == null ? null : localAddress
+                    .getCanonicalHostName();
+            if (localH == null) {
+                localH = (String) endpoint.getAttribute("proxyName");
+            }
+            if (localH == null) {
+                localH = "localhost";
+            }
+
+            request.localAddr().setString(localH);
 
         } else if (actionCode == ActionCode.REQ_SET_BODY_REPLAY) {
 
@@ -363,6 +382,7 @@ public class SpdyProcessor extends AbstractProcessor<Object>
         } else if (actionCode == ActionCode.ASYNC_IS_TIMINGOUT) {
             ((AtomicBoolean) param).set(asyncStateMachine.isAsyncTimingOut());
         } else {
+            // TODO:
             // actionInternal(actionCode, param);
         }
 
@@ -403,7 +423,7 @@ public class SpdyProcessor extends AbstractProcessor<Object>
     }
 
     private void sendResponseHead() throws IOException {
-        SpdyFrame rframe = spdy.getFrame(SpdyFramer.TYPE_SYN_REPLY);
+        SpdyFrame rframe = spdy.getFrame(SpdyConnection.TYPE_SYN_REPLY);
         // TODO: is closed ?
         rframe.streamId = spdyStream.reqFrame.streamId;
         rframe.associated = 0;
@@ -463,8 +483,7 @@ public class SpdyProcessor extends AbstractProcessor<Object>
     }
 
     @Override
-    public SocketState process(SocketWrapper socket)
-            throws IOException {
+    public SocketState process(SocketWrapper socket) throws IOException {
         throw new IOException("Unimplemented");
     }
 
@@ -490,103 +509,65 @@ public class SpdyProcessor extends AbstractProcessor<Object>
         return null;
     }
 
-    class TomcatSpdyStream extends SpdyStream {
+    public void onSynStream(SpdyStream str) throws IOException {
+        this.spdyStream = str;
+        SpdyFrame frame = str.reqFrame;
+        // We need to make a copy - the frame buffer will be reused.
+        // We use the 'wrap' methods of MimeHeaders - which should be
+        // lighter on mem in some cases.
+        RequestInfo rp = request.getRequestProcessor();
+        rp.setStage(org.apache.coyote.Constants.STAGE_PREPARE);
 
-        public TomcatSpdyStream(SpdyFramer spdy) {
-            this.spdy = spdy;
-        }
+        // Request received.
+        MimeHeaders mimeHeaders = request.getMimeHeaders();
 
-        @Override
-        public void onCtlFrame(SpdyFrame frame) throws IOException {
-            // We need to make a copy - the frame buffer will be reused.
-            // We use the 'wrap' methods of MimeHeaders - which should be
-            // lighter on mem in some cases.
-            if (frame.type != SpdyFramer.TYPE_SYN_STREAM) {
-                // TODO: handle RST, etc.
-                return;
+        for (int i = 0; i < frame.nvCount; i++) {
+            int nameLen = frame.read16();
+            if (nameLen > frame.remaining()) {
+                throw new IOException("Name too long");
             }
-            reqFrame = frame;
-            if (frame.isHalfClose()) {
-                finRcvd = true;
-            }
-            RequestInfo rp = request.getRequestProcessor();
-            rp.setStage(org.apache.coyote.Constants.STAGE_PREPARE);
 
-            // Request received.
-            MimeHeaders mimeHeaders = request.getMimeHeaders();
-
-            for (int i = 0; i < frame.nvCount; i++) {
-                int nameLen = frame.read16();
-                if (nameLen > frame.remaining()) {
+            keyBuffer.setBytes(frame.data, frame.off, nameLen);
+            if (keyBuffer.equals("method")) {
+                frame.advance(nameLen);
+                int valueLen = frame.read16();
+                if (valueLen > frame.remaining()) {
                     throw new IOException("Name too long");
                 }
-
-                keyBuffer.setBytes(frame.data, frame.off, nameLen);
-                if (keyBuffer.equals("method")) {
-                    frame.advance(nameLen);
-                    int valueLen = frame.read16();
-                    if (valueLen > frame.remaining()) {
-                        throw new IOException("Name too long");
-                    }
-                    request.method().setBytes(frame.data, frame.off, valueLen);
-                    frame.advance(valueLen);
-                } else if (keyBuffer.equals("url")) {
-                    frame.advance(nameLen);
-                    int valueLen = frame.read16();
-                    if (valueLen > frame.remaining()) {
-                        throw new IOException("Name too long");
-                    }
-                    request.requestURI().setBytes(frame.data, frame.off,
-                            valueLen);
-                    if (spdy.getSpdyContext().debug) {
-                        System.err.println("URL= " + request.requestURI());
-                    }
-                    frame.advance(valueLen);
-                } else if (keyBuffer.equals("version")) {
-                    frame.advance(nameLen);
-                    int valueLen = frame.read16();
-                    if (valueLen > frame.remaining()) {
-                        throw new IOException("Name too long");
-                    }
-                    frame.advance(valueLen);
-                } else {
-                    MessageBytes value = mimeHeaders.addValue(frame.data,
-                            frame.off, nameLen);
-                    frame.advance(nameLen);
-                    int valueLen = frame.read16();
-                    if (valueLen > frame.remaining()) {
-                        throw new IOException("Name too long");
-                    }
-                    value.setBytes(frame.data, frame.off, valueLen);
-                    frame.advance(valueLen);
+                request.method().setBytes(frame.data, frame.off, valueLen);
+                frame.advance(valueLen);
+            } else if (keyBuffer.equals("url")) {
+                frame.advance(nameLen);
+                int valueLen = frame.read16();
+                if (valueLen > frame.remaining()) {
+                    throw new IOException("Name too long");
                 }
+                request.requestURI().setBytes(frame.data, frame.off, valueLen);
+                if (spdy.getSpdyContext().debug) {
+                    System.err.println("URL= " + request.requestURI());
+                }
+                frame.advance(valueLen);
+            } else if (keyBuffer.equals("version")) {
+                frame.advance(nameLen);
+                int valueLen = frame.read16();
+                if (valueLen > frame.remaining()) {
+                    throw new IOException("Name too long");
+                }
+                frame.advance(valueLen);
+            } else {
+                MessageBytes value = mimeHeaders.addValue(frame.data,
+                        frame.off, nameLen);
+                frame.advance(nameLen);
+                int valueLen = frame.read16();
+                if (valueLen > frame.remaining()) {
+                    throw new IOException("Name too long");
+                }
+                value.setBytes(frame.data, frame.off, valueLen);
+                frame.advance(valueLen);
             }
-
-            onRequest();
         }
 
-        public synchronized void sendDataFrame(byte[] data, int start,
-                int length, boolean close) throws IOException {
-
-            SpdyFrame oframe = spdy.getDataFrame();
-
-            // Options:
-            // 1. wrap the byte[] data, use a separate header[], wait frame sent
-            // -> 2 socket writes
-            // 2. copy the data to frame byte[] -> non-blocking queue
-            // 3. copy the data, blocking drain -> like 1, trade one copy to
-            // avoid
-            // 1 tcp packet. That's the current choice, seems closer to rest of
-            // tomcat
-
-            oframe.streamId = reqFrame.streamId;
-            if (close)
-                oframe.halfClose();
-
-            oframe.append(data, start, length);
-            spdy.sendFrameBlocking(oframe, spdyStream);
-        }
-
+        onRequest();
     }
 
     @Override
@@ -601,4 +582,5 @@ public class SpdyProcessor extends AbstractProcessor<Object>
     public UpgradeInbound getUpgradeInbound() {
         return null;
     }
+
 }

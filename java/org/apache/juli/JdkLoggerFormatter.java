@@ -86,7 +86,12 @@ public class JdkLoggerFormatter extends Formatter {
         buf.append(name);
 
         // pad to 20 chars
-        for( int i=0; i<8-buf.length(); i++ ) { buf.append(" "); }
+        if (buf.length() < 20) {
+            for( int i=0; i < 20 - buf.length(); i++ ) { buf.append(" "); }
+        } else {
+            buf.append(" ");
+        }
+            
 
         // Append the message
         buf.append(message);
