@@ -32,7 +32,6 @@ public class TomcatSpdyTest extends TomcatBaseTest {
                     "org.apache.coyote.spdy.SpdyAprNpnHandler");
             
             spdyCtx = new SpdyContextJni();
-            ((SpdyContextJni) spdyCtx).getAprContext().addListener(new HexDumpListener());
             realSpdy = true;
             Tomcat tomcat = getTomcatInstance();
             TesterSupport.initSsl(tomcat);

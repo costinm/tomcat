@@ -21,9 +21,7 @@ import java.io.IOException;
 import java.security.cert.CertificateException;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Logger;
 
 import org.apache.tomcat.jni.Address;
@@ -43,73 +41,56 @@ public class AprSocket implements Runnable {
 
     static Logger log = Logger.getLogger("AprChannel");
 
-    static AtomicInteger handshakeTimeouts = new AtomicInteger();
+    static int CONNECTING = 1;
+    static int CONNECTED = 0x2;
 
-    static AtomicInteger handshakeErrors = new AtomicInteger();
-
-    static AtomicInteger handshakeOk = new AtomicInteger();
-
-    static AtomicInteger channelCnt = new AtomicInteger();
-
-
-    public static int CONNECTING = 1;
-    public static int CONNECTED = 0x2;
+    static int NONBLOCK = 0x4;
     
-    public static int READING = 0x4; // 0x04 
-    public static int WRITING = 0x8; // 0x08
-    
-    public static int IN_CLOSED = 0x10;
-    public static int OUT_CLOSED = 0x20;
-    public static int SSL_ATTACHED = 0x40;
+    static int IN_CLOSED = 0x10;
+    static int OUT_CLOSED = 0x20;
+    static int SSL_ATTACHED = 0x40;
 
-    public static int POLLIN = 0x80;
-    public static int POLLOUT = 0x100;
+    static int POLLIN = 0x80;
+    static int POLLOUT = 0x100;
 
-    public static int ACCEPTED = 0x200;
-    public static int ERROR = 0x400;
+    static int ACCEPTED = 0x200;
+    static int ERROR = 0x400;
 
-    AprSocketContext context;
+    // Not null
+    private AprSocketContext context;
 
     // only one - to save per/socket memory - context has similar callbacks.
-    AprSocketHandler handler;
+    private AprSocketHandler handler;
 
+    // Blocking: set when read polling. Accessed/modified from context.
+    // Non-blocking: set unless 'suspendRead' and no write interest.
+    // ( write interest is automatic ).
     AprPoller poller;
     
-    private Lock channelLock = new ReentrantLock();
-
     // Bit field indicating the status and socket should only be accessed with 
     // socketLock protection
     private int status;
     
     long socket;
 
-    // used for blocking. TODO: use in non-blocking as well
-    long ioTimeout = 10000; // ms
-
-    // Last activity timestamp.
-    public long ts;
-
     // Persistent info about the peer ( SSL, etc )
-    HostInfo hostInfo;
-
-    protected String errorMessage;
-
-    private boolean blocking = true;
+    private HostInfo hostInfo;
 
     public void recycle() {
         status = 0;
         hostInfo = null;
-        ts = 0;
         handler = null;
-        errorMessage = null;
-        ioTimeout = 10000;
         socket = 0;
         poller = null;
     }
 
-    public AprSocket() {
+    AprSocket(AprSocketContext context) {
+        this.context = context;
     }
 
+    /**
+     * Close the socket non-gracefully.
+     */
     public void error(Throwable exception) {
         if (exception != null) {
             exception.printStackTrace();
@@ -118,26 +99,35 @@ public class AprSocket implements Runnable {
         error(exception.getMessage());
     }
 
-    public long getIOTimeout() {
-        return ioTimeout;
+    public void setIOTimeout(long timeout) throws IOException {
+        if (socket != 0) {
+            Socket.timeoutSet(socket, timeout * 1000);
+        } else { 
+            throw new IOException("Socket is closed");
+        }
     }
 
-    public void setIOTimeout(long timeout) {
-        ioTimeout = timeout;
+    public long getIOTimeout() throws IOException {
         if (socket != 0) {
-            Socket.timeoutSet(socket, ioTimeout * 1000);
+            try {
+                return Socket.timeoutGet(socket) / 1000;
+            } catch (Exception e) {
+                throw new IOException(e);
+            }
+        } else { 
+            throw new IOException("Socket is closed");
         }
     }
 
     void notifyIO(boolean needThread) throws IOException {
-        ts = System.currentTimeMillis();
+        long t0 = System.currentTimeMillis();
         try {
             if (handler != null) {
                 if (!needThread) {
                     handler.process(this);
                     return;
                 }
-                if (blocking) {
+                if (isBlocking()) {
                     context.getExecutor().execute(this);
                 } else {
                     // from IO thread, for a non blocking socket.
@@ -152,68 +142,96 @@ public class AprSocket implements Runnable {
             } else {
                 throw new IOException(t);
             }
+        } finally {
+            long t1 = System.currentTimeMillis();
+            t1 -= t0;
+            if (t1 > maxNotify.get()) {
+                maxNotify.set(t1);
+            }
         }
     }
+    
+    AtomicLong maxNotify = new AtomicLong();
+    
 
     public void setHandler(AprSocketHandler l) {
         handler = l;
     }
     
+    public AprSocketHandler getHandler() {
+        return handler;
+    }
+    
     /**
      * For blocking: read poll.
+     * For non-blocking: re-start polling after suspendRead()
      * 
      * @throws IOException
      */
     public void poll() throws IOException {
+        if (handler == null) {
+            throw new IOException("No callback");
+        }
         context.poll(this);
     }
 
-    // TODO: update
+    /**
+     * Suspend read events for non-blocking sockets.
+     */
     public void suspendRead() throws IOException {
-        if (blocking) {
+        if ((status & NONBLOCK) == 0) {
             throw new IOException("suspendRead() on blocking " + this);
         }
         clearStatus(POLLIN);
+    }
+
+    public void resumeRead() throws IOException {
+        if ((status & NONBLOCK) == 0) {
+            throw new IOException("resumeRead() on blocking " + this);
+        }
+        setStatus(POLLIN);
+        poll();
     }
 
     public AprSocketContext getContext() {
         return context;
     }
 
-    public void setBlocking(boolean block) {
-        this.blocking = block;
+    public void setNonBlocking() {
+        setStatus(NONBLOCK);
         if (socket != 0) {
-            if (block) {
-                Socket.optSet(socket, Socket.APR_SO_NONBLOCK, 0);
-                Socket.timeoutSet(socket, ioTimeout);
-            } else {
-                Socket.optSet(socket, Socket.APR_SO_NONBLOCK, 1);
-                Socket.timeoutSet(socket, 0);
-            }
+            Socket.optSet(socket, Socket.APR_SO_NONBLOCK, 1);
+            Socket.timeoutSet(socket, 0);
+        }
+    }
+    
+    public void setBlocking(long ioTimeout) throws IOException {
+        clearStatus(NONBLOCK);
+        if (socket != 0) {
+            Socket.optSet(socket, Socket.APR_SO_NONBLOCK, 0);
+            Socket.timeoutSet(socket, ioTimeout * 1000);
+        } else {
+            throw new IOException("Not connected");
         }
     }
 
-    public AprSocket setTarget(HostInfo hi) {
+    AprSocket setHost(HostInfo hi) {
         hostInfo = hi;
         return this;
     }
      
     /**
-     * Non-blocking connect method
      */
     public void connect() throws IOException {
-        if (blocking) {
-            context.connectBlocking(this, hostInfo);
+        if ((status & NONBLOCK) == 0) {
             // will call handleConnected() at the end.
+            context.connectBlocking(this);
         } else {
-            channelLock.lock();
-            try {
-                if ((status & CONNECTING) == 0) {
+            synchronized(this) {
+                if ((status & CONNECTING) != 0) {
                     return;
                 }
                 status |= CONNECTING;
-            } finally {
-                channelLock.unlock();
             }
             context.getExecutor().execute(this);
         }
@@ -227,18 +245,18 @@ public class AprSocket implements Runnable {
             blockingStartTLS();
         }
 
-        Socket.timeoutSet(socket, ioTimeout * 1000);
-
-        if (! blocking) {
-            setBlocking(false);
+        if ((status & NONBLOCK) != 0) {
+            setNonBlocking(); // call again, to set the bits ( connect was blocking )
         }
 
         setStatus(CONNECTED);
         clearStatus(CONNECTING);
+        
+        context.onSocket(this);
         notifyIO(false);
     }
 
-    public HostInfo getPeerInfo() {
+    public HostInfo getHost() {
         return hostInfo;
     }
 
@@ -265,119 +283,86 @@ public class AprSocket implements Runnable {
     }
 
     public String toString() {
-        return "AprCh-" + Long.toHexString(socket) + " " + Integer.toHexString(status);
+        return (context.isServer() ? "AprSrv-" : "AprCli-") + Long.toHexString(socket) + " " + Integer.toHexString(status);
     }
 
     public int write(byte[] data, int off, int len) throws IOException {
-        channelLock.lock();
-        try {
-            if (socket == 0 || (status & OUT_CLOSED) != 0) {
-                return -1;
-            }
-            status |= WRITING;
-        } finally {
-            channelLock.unlock();
+        if (socket == 0 || (status & OUT_CLOSED) != 0) {
+            return -1;
         }
         
         int sent = Socket.send(socket, data, off, len);
-        ts = System.currentTimeMillis();
-        clearStatus(WRITING);
-
-        if (sent == -Status.TIMEUP) {
-            if (context.debugRW) {
-                log.info("apr.send TIMEUP");
-            }
-            sent = 0;
-        } else if (sent == -Status.EAGAIN) {
-            sent = 0;
+        if (context.rawDataHandler != null) {
+            context.rawData(this, false, data, off, sent, len, false);
         }
-
-        if (sent < 0) {
+        
+        if (sent <= 0) {
+            if (sent == -Status.TIMEUP) {
+                return 0;
+            } else if (sent == -Status.EAGAIN) {
+                return 0;
+            } else if (sent == 0) {
+                return 0;
+            }
+            
             if (context.debug) {
                 log.warning("apr.send(): Failed to send, closing socket " + sent);
             }
             error("Error sending " + sent + " " + Error.strerror((int) -sent));
             return sent;
         } else {
-            if (sent > 0) {
-                context.rawData(this, false, data, off, sent, false);
-            }
             if (sent < len) {
-                if (context.debugRW) {
-                    log.warning("apr.send(): Incomplete send, poll out");
-                }
                 setStatus(POLLOUT);
-            }
-            if (context.debugRW) {
-                log.info("apr.send() " + sent);
             }
             return sent;
         }
     }
 
     public int read(byte[] data, int off, int len) throws IOException {
-        channelLock.lock();
-        try {
-            if (socket == 0 || (status & IN_CLOSED) != 0) {
-                return -1;
-            }
-            status |= READING;
-        } finally {
-            channelLock.unlock();
-        }
-        int read = Socket.recv(socket, data, off, len);
-        ts = System.currentTimeMillis();
-        clearStatus(READING);
-
-        if (read == -Status.TIMEUP || read == -Status.ETIMEDOUT) {
-            read = 0;
-        }
-        if (read == -Status.EAGAIN) {
-            read = 0;
-        }
-        if (read == -Status.APR_EOF) {
-            log.info("apr.read(): EOF " + this);
-            inClosed();
-            context.rawData(this, true, null, 0, read, true);
+        // we can sync, and track 'in progress' - but it's expensive
+        // For non-blocking: this is called in IO thread, shouldn't be needed.
+        // For blocking: the caller can make sure close/destroy are called after
+        // read/write is done.
+        if (socket == 0 || (status & IN_CLOSED) != 0) {
             return -1;
         }
-        if (read < 0) {
-            String msg = socket + " apr.read(): " + read + " "
-                    + Error.strerror((int) -read);
-            log.info(msg);
-            error(msg);
+        int read = Socket.recv(socket, data, off, len);
+        if (context.rawDataHandler != null) {
+            context.rawData(this, true, data, off, read, len, false);
+        }
+        
+        if (read > 0) {
             return read;
         }
-        if (context.debugRW)
-            log.info(socket + " apr.read(): " + read);
-        if (read > 0) {
-            context.rawData(this, true, null, 0, read, false);
-        } else {
+
+        if (read == 0 || read == -Status.TIMEUP || read == -Status.ETIMEDOUT 
+                || read == -Status.EAGAIN) {
+            read = 0;
             setStatus(POLLIN);
+            return 0;
         }
 
+        if (read == -Status.APR_EOF) {
+            inClosed();
+            return -1;
+        }
+        error("apr.read(): " + read + " " + Error.strerror((int) -read));
         return read;
     }
     
     private void inClosed() {
-        channelLock.lock();
-        try {
+        synchronized(this) {
             status |= IN_CLOSED;
             status &= ~POLLIN;
             maybeDestroy();
-        } finally {
-            channelLock.unlock();
         }
     }
     
     private void outClosed() {
-        channelLock.lock();
-        try {
+        synchronized(this) {
             status |= OUT_CLOSED;
             status &= ~POLLOUT;
             maybeDestroy();
-        } finally {
-            channelLock.unlock();
         }
     }
     
@@ -390,32 +375,28 @@ public class AprSocket implements Runnable {
      * close() has been called. 
      */
     public void writeEnd() throws IOException {
-        channelLock.lock();
-        try {
-            if ((status & OUT_CLOSED) != 0 || socket == 0) {
-                return;
-            }
-            status |= WRITING;
-        } finally {
-            channelLock.unlock();
+        if ((status & OUT_CLOSED) != 0 || socket == 0) {
+            return;
+            
         }
 
-        if (context.debug) {
-            log.info("FIN: " + this);
+        if (context.rawDataHandler != null) {
+            context.rawDataHandler.rawData(this, false, null, 0, 0, 0, true);
         }
         // After flush: FIN
         // if data has not been fully flushed: RST
+        if (context.debug) {
+            log.info("writeEnd: " + context.open.get() + " " + this);
+        }
         Socket.shutdown(socket, Socket.APR_SHUTDOWN_WRITE);
         
-        clearStatus(WRITING);
         outClosed();
     }
     
     void maybeDestroy() {
-        channelLock.lock();
-        try {
+        synchronized(this) {
             if (socket == 0 ||
-                    (status & (WRITING | READING | CONNECTING)) != 0) {
+                    (status & CONNECTING) != 0) {
                 // closed or operation in progress
                 return;
             }
@@ -424,15 +405,17 @@ public class AprSocket implements Runnable {
                     (status & OUT_CLOSED) == 0) {
                 return; // not closed
             }
-            if (context.debug) {
-                log.info("Destroy " + context.open.decrementAndGet() + " " + this);
+            if (context.rawDataHandler != null) {
+                context.rawDataHandler.rawData(this, false, null, -1, -1, -1, true);
             }
+            if (context.debug) {
+                log.info("close: " + context.open.get() + " " + this);
+            }
+            context.open.decrementAndGet();
             Socket.close(socket);
             Socket.destroy(socket);
             socket = 0;
             // if (socketpool != 0) { Pool.destroy(socketpool); }
-        } finally {
-            channelLock.unlock();
         }
     }
     
@@ -440,8 +423,7 @@ public class AprSocket implements Runnable {
      * Close input and output, potentially sending RST, than close the socket.
      */
     public void error(String err) {
-        errorMessage = err;
-        log.warning("ERR: " + socket + " " + err);
+        log.warning("ERR: " + this + " " + err);
         
         outClosed();
         inClosed();
@@ -457,14 +439,11 @@ public class AprSocket implements Runnable {
      * True if read() returned -1
      */
     public boolean isInClosed() {
-        channelLock.lock();
-        try {
+        synchronized(this) {
             if ((status & IN_CLOSED) != 0 || socket == 0) {
                 return true;
             }
             return false;
-        } finally {
-            channelLock.unlock();
         }
     }
 
@@ -472,38 +451,31 @@ public class AprSocket implements Runnable {
      * True if close() has been called.
      */
     public boolean isOutClosed() {
-        channelLock.lock();
-        try {
+        synchronized(this) {
             if ((status & OUT_CLOSED) != 0 || socket == 0) {
                 return true;
             }
             return false;
-        } finally {
-            channelLock.unlock();
         }
     }
 
     private boolean check(int bits, int inProgress) {
-        channelLock.lock();
-        try {
+        synchronized (this) {
             if ((status & bits) == 0 || socket == 0) {
                 return true;
             }
             status |= inProgress;
             return false;
-        } finally {
-            channelLock.unlock();
         }
     }
 
     int requestedPolling() {
-        channelLock.lock();
-        try {
+        synchronized(this) {
             if (socket == 0) {
                 return 0;
             }
             int res = 0;
-            if (blocking) {
+            if ((status & NONBLOCK) == 0) { // blocking
                 if ((res & IN_CLOSED) != 0) {
                     return 0;
                 }
@@ -520,60 +492,46 @@ public class AprSocket implements Runnable {
                 res |= Poll.APR_POLLNVAL | Poll.APR_POLLHUP | Poll.APR_POLLERR; 
             }
             return res;
-        } finally {
-            channelLock.unlock();
         }
     }
     
     boolean check(int bit) {
-        channelLock.lock();
-        try {
+        synchronized (this) {
             return ((status & bit) != 0 && socket != 0);
-        } finally {
-            channelLock.unlock();
+        }
+    }
+
+    boolean checkPreConnect(int bit) {
+        synchronized (this) {
+            return ((status & bit) != 0);
         }
     }
 
     void clearStatus(int inProgress) {
-        channelLock.lock();
-        try {
+        synchronized (this) {
             status &= ~inProgress;
             if ((status & (IN_CLOSED |OUT_CLOSED)) == (IN_CLOSED | OUT_CLOSED)) {
                 maybeDestroy();
-            }
-        } finally {
-            channelLock.unlock();
+            }            
         }
     }
 
     boolean setStatus(int inProgress) {
-        channelLock.lock();
-        try {
+        synchronized (this) {
             int old = status & inProgress;
             status |= inProgress;
             return old != 0;
-        } finally {
-            channelLock.unlock();
         }
     }
     
-    /** 
-     * If error() is called both in and out will be closed non-gracefully.
-     * 
-     * @return Error code, or null if error() has not been called. 
-     */
-    public String errorMessage() {
-        return errorMessage;
-    }
-
     // Cert is in DER format
     // Called after handshake
     public byte[][] getPeerCert(boolean check) throws IOException {
-        getPeerInfo();
+        getHost();
         if (hostInfo.certs != null && hostInfo.certs != NO_CERTS && !check) {
             return hostInfo.certs;
         }
-        if (check(SSL_ATTACHED, READING)) {
+        if (check(SSL_ATTACHED)) {
             return NO_CERTS;
         }
         try {
@@ -599,8 +557,6 @@ public class AprSocket implements Runnable {
             return hostInfo.certs;
         } catch (Exception e) {
             throw new IOException(e);
-        } finally {
-            clearStatus(READING);
         }
     }
 
@@ -614,8 +570,7 @@ public class AprSocket implements Runnable {
      * @throws IOException 
      */
     public void blockingStartTLS() throws IOException {
-        channelLock.lock();
-        try {
+        synchronized(this) {
             if (socket == 0) {
                 return;
             }
@@ -623,8 +578,6 @@ public class AprSocket implements Runnable {
                 return;
             }
             status |= SSL_ATTACHED;
-        } finally {
-            channelLock.unlock();
         }
         
         try {
@@ -635,7 +588,7 @@ public class AprSocket implements Runnable {
             AprSocketContext aprCon = (AprSocketContext) context;
             SSLSocket.attach(aprCon.getSslCtx(), socket);
 
-            if (context.debugRW) {
+            if (context.debug) {
                 SSLExt.debug(socket);
             }
             if (!((AprSocketContext) getContext()).isServer()) {
@@ -667,7 +620,7 @@ public class AprSocket implements Runnable {
      */
     boolean continueHandshake() throws IOException {
         int rc = SSLSocket.handshake(socket);
-        if (context.debugRW) {
+        if (context.debug) {
             log.info(this + " ContinueHandshake " + rc);
         }
 
@@ -675,8 +628,6 @@ public class AprSocket implements Runnable {
             if (context.debug) {
                 log.info("Timeout in handshake, will continue");
             }
-            // will continue.
-            handshakeTimeouts.incrementAndGet();
             try {
                 log.severe(this + " Handshake failed " + rc + " "
                         + Error.strerror(rc) + " SSLL "
@@ -689,7 +640,6 @@ public class AprSocket implements Runnable {
                 return false;
             }
         } else if (rc != Status.APR_SUCCESS) {
-            handshakeErrors.incrementAndGet();
             try {
                 log.severe(this + " Handshake failed " + rc + " "
                         + Error.strerror(rc) + " SSLL "
@@ -702,31 +652,30 @@ public class AprSocket implements Runnable {
                 return false;
             }
         } else { // SUCCESS
-            if (context.debugRW) {
+            if (context.debug) {
                 log.info("Handshake OK " + this);
             }
-            handshakeOk.incrementAndGet();
             handshakeDone();
             return true;
         }
     }
 
     protected void handshakeDone() throws IOException {
-        getPeerInfo();
+        getHost();
         if (socket == 0) {
             throw new IOException("Socket closed");
         }
-        if (context.USE_TICKETS && ! context.serverMode) {
-//            if (hostInfo.ticket == null) {
-//                hostInfo.ticket = new byte[2048];
-//            }
-//            int ticketLen = SSLExt.getTicket(socket, hostInfo.ticket);
-//            if (ticketLen > 0) {
-//                hostInfo.ticketLen = ticketLen;
-//                if (context.debug) {
-//                    log.info("Received ticket: " + ticketLen);
-//                }
-//            }
+        if (context.USE_TICKETS && ! context.isServer()) {
+            if (hostInfo.ticket == null) {
+                hostInfo.ticket = new byte[2048];
+            }
+            int ticketLen = SSLExt.getTicket(socket, hostInfo.ticket);
+            if (ticketLen > 0) {
+                hostInfo.ticketLen = ticketLen;
+                if (context.debug) {
+                    log.info("Received ticket: " + ticketLen);
+                }
+            }
         }
 
         // TODO: if the ticket, session id or session changed - callback to 
@@ -744,32 +693,30 @@ public class AprSocket implements Runnable {
         hostInfo.npnLen = SSLExt.getNPN(socket, hostInfo.npn);
 
         // If custom verification is used - should check the certificates
-        context.notifyHandshakeDone(this);
+        if (context.tlsCertVerifier != null) {
+            context.tlsCertVerifier.handshakeDone(this);            
+        }
     }
 
     public String getCipherSuite() throws IOException {
-        if (check(SSL_ATTACHED, READING)) {
+        if (check(SSL_ATTACHED)) {
             return null;
         }
         try {
             return SSLSocket.getInfoS(socket, SSL.SSL_INFO_CIPHER);
         } catch (Exception e) {
             throw new IOException(e);
-        } finally {
-            clearStatus(READING);
         }
     }
 
     public int getKeySize() throws IOException {
-        if (check(SSL_ATTACHED, READING)) {
+        if (check(SSL_ATTACHED)) {
             return -1;
         }
         try {
             return SSLSocket.getInfoI(socket, SSL.SSL_INFO_CIPHER_USEKEYSIZE);
         } catch (Exception e) {
             throw new IOException(e);
-        } finally {
-            clearStatus(READING);
         }
     }
 
@@ -787,7 +734,7 @@ public class AprSocket implements Runnable {
     }
 
     public String getRemoteAddress() throws IOException {
-        if (socket != 0) {// && remoteAddress == null) {
+        if (socket != 0) {
             try {
                 long sa = Address.get(Socket.APR_REMOTE, socket);
                 return Address.getip(sa);
@@ -852,20 +799,30 @@ public class AprSocket implements Runnable {
 
     @Override
     public void run() {
+        long t0 = System.currentTimeMillis();
         try {
-            if (!check(CONNECTED)) {
+            if (!checkPreConnect(CONNECTED)) {
                 if (check(ACCEPTED)) {
+                    context.open.incrementAndGet();
+                    
+                    if (context.debug) {
+                        log.info("Accept: " + context.open.get() + " " + this + " " + 
+                                getRemotePort());
+                    }
+                    if (context.tcpNoDelay) {
+                        Socket.optSet(socket, Socket.APR_TCP_NODELAY, 1);
+                    }
+
                     setStatus(CONNECTED);
                     if (context.sslMode) {
-                        Socket.timeoutSet(socket, context.connectTimeout);
+                        Socket.timeoutSet(socket, context.connectTimeout * 1000);
                         blockingStartTLS();
                     }
-                    context.onAccepted(this);
+                    context.onSocket(this);
                     return;
                 } 
-                if (check(CONNECTING)) {
-                    context.connectBlocking(this, hostInfo);
-                    
+                if (checkPreConnect(CONNECTING)) {
+                    context.connectBlocking(this);
                 }
             } else {
                 if (handler != null) {
@@ -874,11 +831,18 @@ public class AprSocket implements Runnable {
             }
         } catch (IOException e) {
             error(e);
+        } finally {
+            long t1 = System.currentTimeMillis();
+            if (t1 - t0 > maxtime.get())  {
+                maxtime.set(t1 - t0);
+            }
         }
     }
+    
+    AtomicLong maxtime = new AtomicLong();
 
     public boolean isBlocking() {
-        return blocking;
+        return !checkPreConnect(NONBLOCK);
     }
 
 }

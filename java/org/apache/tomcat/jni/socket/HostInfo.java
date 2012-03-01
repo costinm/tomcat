@@ -32,11 +32,6 @@ import java.io.Serializable;
  */
 public class HostInfo implements Serializable {
     
-    /**
-     * Client: hostname:port of the peer. 
-     */
-    public String target;
-    
     public String host;
     
     public int port;
@@ -69,14 +64,10 @@ public class HostInfo implements Serializable {
     public HostInfo() {
     }
 
-    public HostInfo(String target) {
-        this.target = target;
-    }
-    
-    public HostInfo setHost(String host, int port) {
+    public HostInfo(String host, int port, boolean secure) {
         this.host = host;
         this.port = port;
-        return this;
+        this.secure = secure;
     }
     
     public String getNpn() {

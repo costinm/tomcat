@@ -37,7 +37,7 @@ public class SpdyClientExternalTest extends TestCase {
         assertTrue(dataLen > 100);
         
         // Send again, to verify ticket is working
-        HostInfo hostInfo = spdyContext.getAprContext().getPeerInfo(host, port, true);
+        HostInfo hostInfo = spdyContext.getAprContext().getHostInfo(host, port, true);
         assertEquals("spdy/2", hostInfo.getNpn());
         hostInfo.setNpn(null);
         //assertTrue(hostInfo.ticketLen > 0);

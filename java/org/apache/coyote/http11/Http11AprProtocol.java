@@ -284,29 +284,6 @@ public class Http11AprProtocol extends AbstractHttp11Protocol {
         }
 
         @Override
-        public SocketState process(SocketWrapper<Long> socket,
-                SocketStatus status) {
-            if (proto.npnHandler != null) {
-                Processor<Long> processor = null;
-                if (status == SocketStatus.OPEN) {
-                    processor = connections.get(socket.getSocket());
-
-                }
-                if (processor == null) {
-                    // if not null - this is a former comet request, handled by http11
-                    SocketState socketState = proto.npnHandler.process(socket, status,
-                            proto, proto.endpoint);
-                    // handled by npn protocol.
-                    if (socketState == SocketState.CLOSED ||
-                            socketState == SocketState.LONG) {
-                        return socketState;
-                    }
-                }
-            }
-            return super.process(socket, status);
-        }
-
-        @Override
         protected void initSsl(SocketWrapper<Long> socket,
                 Processor<Long> processor) {
             // NOOP for APR

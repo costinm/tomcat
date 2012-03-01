@@ -7,6 +7,7 @@ import java.io.IOException;
 import org.apache.tomcat.jni.Status;
 import org.apache.tomcat.jni.socket.AprSocket;
 import org.apache.tomcat.jni.socket.AprSocketContext;
+import org.apache.tomcat.jni.socket.AprSocketContext.TlsCertVerifier;
 
 public class SpdyContextJni extends SpdyContext {
     AprSocketContext con;
@@ -14,7 +15,11 @@ public class SpdyContextJni extends SpdyContext {
     public SpdyContextJni() {
         con = new AprSocketContext();
         //if (insecureCerts) {
-        con.customVerification();
+        con.customVerification(new TlsCertVerifier() {
+            @Override
+            public void handshakeDone(AprSocket ch) {
+            }
+        });
         //}
         con.setNpn("spdy/2");
     }
