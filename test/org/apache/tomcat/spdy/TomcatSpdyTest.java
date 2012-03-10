@@ -72,11 +72,11 @@ public class TomcatSpdyTest extends TomcatBaseTest {
         SpdyStream stream = client.get(host, "/hello");
         SpdyFrame f;
         int dataLen = 0;
-        while ((f = stream.getIn(to)) != null) {
+        while ((f = stream.getDataFrame(to)) != null) {
             dataLen += f.getDataSize();
         }
         HashMap<String, String> resHeaders = new HashMap<String, String>();
-        stream.getHeaders(resHeaders);        
+        stream.getResponse().getHeaders(resHeaders);        
         assertEquals(resHeaders.get("status"), "200 OK");
         assertEquals(dataLen,
                 Integer.parseInt(resHeaders.get("content-length")));
@@ -93,11 +93,11 @@ public class TomcatSpdyTest extends TomcatBaseTest {
         for (int i = 0; i < n; i++) {
             SpdyFrame f;
             int dataLen = 0;
-            while ((f = streams[i].getIn(to)) != null) {
+            while ((f = streams[i].getDataFrame(to)) != null) {
                 dataLen += f.getDataSize();
             }
             HashMap<String, String> resHeaders = new HashMap<String, String>();
-            streams[i].getHeaders(resHeaders);
+            streams[i].getResponse().getHeaders(resHeaders);
             assertEquals(resHeaders.get("status"), "200 OK");
             assertEquals(dataLen, Integer.parseInt(resHeaders
                     .get("content-length")));

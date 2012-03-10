@@ -7,7 +7,6 @@ import java.util.HashMap;
 
 import junit.framework.TestCase;
 
-import org.apache.tomcat.jni.socket.AprSocketContext;
 import org.apache.tomcat.jni.socket.HostInfo;
 
 /**
@@ -16,22 +15,50 @@ import org.apache.tomcat.jni.socket.HostInfo;
 public class SpdyClientExternalTest extends TestCase {
 
     public void testSSLG() throws IOException {
-        testSSL("www.google.com", 443);
+        testSSLSession("www.google.com", 443);
     }
 
-    public void testSSL(String host, int port) throws IOException {
+    public void testSimple() throws IOException {
+        get("www.google.com", 443, "/");
+    }
+    
+    public void get(String host, int port, String path) throws IOException {
         SpdyContextJni spdyContext = new SpdyContextJni();
+
+        SpdyConnection client = spdyContext.getConnection(host, port);
+        SpdyStream stream = client.get(host, path);
         
+        // Wait for control frame
+        stream.getFrame(10000);
+        
+        HashMap<String, String> resHeaders = new HashMap<String, String>();
+        stream.getResponse().getHeaders(resHeaders);
+        assertEquals(resHeaders.get("status"), "200 OK");
+        
+        SpdyFrame f;
+        int dataLen = 0;
+        while ((f = stream.getDataFrame(10000)) != null) {
+            if (f.isData()) {
+                dataLen += f.getDataSize();
+            }
+        }
+        
+        assertTrue(dataLen > 100);
+    }
+    
+    
+    public void testSSLSession(String host, int port) throws IOException {
+        SpdyContextJni spdyContext = new SpdyContextJni();
         SpdyConnection client = spdyContext.getConnection(host, port);
         SpdyStream stream = client.get(host, "/");
 
         SpdyFrame f;
         int dataLen = 0;
-        while ((f = stream.getIn(10000)) != null) {
+        while ((f = stream.getDataFrame(10000)) != null) {
             dataLen += f.getDataSize();
         }
         HashMap<String, String> resHeaders = new HashMap<String, String>();
-        stream.getHeaders(resHeaders);
+        stream.getResponse().getHeaders(resHeaders);
         assertEquals(resHeaders.get("status"), "200 OK");
 
         assertTrue(dataLen > 100);
@@ -52,11 +79,11 @@ public class SpdyClientExternalTest extends TestCase {
         stream = client.get(host, "/");
 
         int dataLen2 = 0;
-        while ((f = stream.getIn(10000)) != null) {
+        while ((f = stream.getDataFrame(10000)) != null) {
             dataLen2 += f.getDataSize();
         }
         resHeaders.clear();
-        stream.getHeaders(resHeaders);
+        stream.getResponse().getHeaders(resHeaders);
         assertEquals(resHeaders.get("status"), "200 OK");
 
         assertEquals("spdy/2", hostInfo.getNpn());

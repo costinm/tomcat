@@ -17,14 +17,23 @@
 package org.apache.tomcat.jni.socket;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionHandler;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -74,7 +83,7 @@ public class AprSocketContext {
      */
     static final int TCN_BUFFER_SZ = 8192;
 
-    static Logger log = Logger.getLogger("AprSocket");
+    static Logger log = Logger.getLogger("AprSocketCtx");
     
     // If interrupt() or thread-safe poll update are not supported - the 
     // poll updates will happen after the poll() timeout. 
@@ -90,10 +99,18 @@ public class AprSocketContext {
         
     boolean useFinalizer = true;
 
+    final AprSocket END = new AprSocket(this);
+    
+    static AtomicInteger contextNumber = new AtomicInteger();
+    int contextId;
+    
+    AtomicInteger threadNumber = new AtomicInteger();
+
     /**
      * For now - single acceptor thread per connector. 
      */
     AcceptorThread acceptor;
+    AcceptorDispatchThread acceptorDispatch;
     
     // APR/JNI is thread safe
     boolean threadSafe = true;
@@ -111,6 +128,12 @@ public class AprSocketContext {
     protected boolean running = true;
     
     protected boolean sslMode;
+
+    // onSocket() will be called in accept thread.
+    // If false: use executor ( but that may choke the acceptor thread )
+    protected boolean nonBlockingAccept = false;
+    
+    BlockingQueue<AprSocket> acceptedQueue = new LinkedBlockingQueue<AprSocket>();
     
     /**
      * Root APR memory pool.
@@ -138,7 +161,7 @@ public class AprSocketContext {
      * poll interrupt - it'll take this time to stop the poller. 
      * 
      */
-    protected int pollTime = 10000000; //200000; // 200 ms
+    protected int pollTime = 5 * 1000000; 
     
     HostInfoLoader hostInfoLoader;
 
@@ -159,11 +182,12 @@ public class AprSocketContext {
     // For resolving DNS ( i.e. connect ), callbacks
     private ExecutorService threadPool;
 
-    // Separate executor for pollers - will set thread names.
-    private ExecutorService pollerExecutor;
+    // Separate executor for connect/handshakes
+    ExecutorService connectExecutor;
     
     boolean debug = false;
-    boolean debugPoll = false;
+    boolean debugSSL = false;
+    boolean debugPoll = true;
 
     protected boolean deferAccept = false;
 
@@ -171,10 +195,33 @@ public class AprSocketContext {
 
     protected boolean useSendfile;
 
-    int sslProtocol = SSL.SSL_PROTOCOL_TLSV1;
+    int sslProtocol = SSL.SSL_PROTOCOL_TLSV1 | SSL.SSL_PROTOCOL_SSLV3;
+
+    /** 
+     * Max time spent in a callback ( will be longer for blocking )
+     */
+    AtomicLong maxHandlerTime = new AtomicLong();
+    AtomicLong totalHandlerTime = new AtomicLong();
+    AtomicLong handlerCount = new AtomicLong();
+
+    /** 
+     * Total connections handled ( accepted or connected ).
+     */
+    AtomicInteger connectionsCount = new AtomicInteger();
+    
 
     public AprSocketContext() {
-        pollerExecutor = Executors.newCachedThreadPool();
+        connectExecutor =new ThreadPoolExecutor(0, 64, 5, TimeUnit.SECONDS, 
+                new LinkedBlockingQueue<Runnable>(), new RejectedExecutionHandler() {
+                    @Override
+                    public void rejectedExecution(Runnable r,
+                            java.util.concurrent.ThreadPoolExecutor executor) {
+                        AprSocket s = (AprSocket) r;
+                        log.severe("Rejecting " + s);
+                        s.reset();
+                    }
+                });
+        contextId = contextNumber.incrementAndGet();
     }
     
     /**
@@ -206,10 +253,18 @@ public class AprSocketContext {
      * @param npn
      */
     public void setNpn(String npn) {
-        spdyNPN = new byte[npn.length() + 2];
-        System.arraycopy(npn.getBytes(), 0, spdyNPN, 1, npn.length());
-        spdyNPN[0] = (byte) npn.length();
-        spdyNPN[npn.length() + 1] = 0;        
+        byte[] data = npn.getBytes();
+        byte[] npnB = new byte[data.length + 2];
+
+        System.arraycopy(data, 0, npnB, 1, data.length);
+        npnB[0] = (byte) data.length;
+        npnB[npnB.length - 1] = 0;
+        spdyNPN = npnB;
+        
+    }
+    
+    public void setNpn(byte[] data) {
+        spdyNPN = data;
     }
         
     public void setHostLoader(HostInfoLoader handler) {
@@ -222,7 +277,15 @@ public class AprSocketContext {
     
     protected Executor getExecutor() {
         if (threadPool == null) {
-            threadPool = Executors.newCachedThreadPool();
+            threadPool = Executors.newCachedThreadPool(new ThreadFactory( ) {
+                @Override
+                public Thread newThread(Runnable r) {
+                    Thread t = new Thread(r, "AprThread-" + contextId + "-" + 
+                            threadNumber.incrementAndGet());
+                    t.setDaemon(true);
+                    return t;
+                }
+            });
         }
         return threadPool;
     }
@@ -230,7 +293,7 @@ public class AprSocketContext {
     /**
      * All accepted sockets will start handshake automatically.
      */
-    public AprSocketContext setSecureServer() {
+    public AprSocketContext setTls() {
         this.sslMode = true;
         return this;
     }
@@ -270,11 +333,18 @@ public class AprSocketContext {
     public AprSocketContext setKeys(String certPemFile, String keyDerFile)
             throws IOException {
         this.sslMode = true;
-        setSecureServer();
+        setTls();
         certFile = certPemFile;
         keyFile = keyDerFile;
         return this;
     }
+    
+    /**
+     * SSL cipher suite.
+     */
+    protected String SSLCipherSuite = "ALL";
+    public String getSSLCipherSuite() { return SSLCipherSuite; }
+    public void setSSLCipherSuite(String SSLCipherSuite) { this.SSLCipherSuite = SSLCipherSuite; }
     
     /**
      * Override or use hostInfoLoader to implement persistent/memcache storage.
@@ -308,10 +378,18 @@ public class AprSocketContext {
         if (sslMode && certFile == null) {
             throw new IOException("Missing certificates for server");
         }
+        if (sslMode || !nonBlockingAccept) {
+            acceptorDispatch = new AcceptorDispatchThread(port);
+            acceptorDispatch.setName("AprAcceptorDispatch-" + port);
+            acceptorDispatch.start();
+        }
+        
         acceptor = new AcceptorThread(port);
         acceptor.prepare();
         acceptor.setName("AprAcceptor-" + port);
         acceptor.start();
+        
+        
     }
     
     /**
@@ -326,42 +404,64 @@ public class AprSocketContext {
         AprSocket sock = newSocket(this);
         sock.setHost(hi);
         return sock;
-    }    
+    }   
     
-    protected void connectBlocking(AprSocket apr) {
+    void destroySocket(AprSocket socket) {
+        // TODO: does it need to be done in io thread ?
+        synchronized (socket) {
+            if (socket.socket != 0) {
+                long s = socket.socket;
+                socket.socket = 0;
+                System.err.println("DESTROY: " + Long.toHexString(s));
+                Socket.destroy(s);
+            }
+        }
+    }
+    
+    protected void connectBlocking(AprSocket apr) throws IOException {
         try {
+            if (!running) {
+                throw new IOException("Stopped");
+            }
             HostInfo hi = apr.getHost();
 
-            long socketpool = Pool.create(getRootPool());
+            long clientSockP;
+            synchronized (pollers) {
+                long socketpool = Pool.create(getRootPool());
 
-            
-            int family = Socket.APR_INET;
+                
+                int family = Socket.APR_INET;
 
-            long clientSockP = Socket.create(family,
-                    Socket.SOCK_STREAM,
-                    Socket.APR_PROTO_TCP, socketpool); // or rootPool ?
-            
+                clientSockP = Socket.create(family,
+                        Socket.SOCK_STREAM,
+                        Socket.APR_PROTO_TCP, socketpool); // or rootPool ?
+            }
             Socket.timeoutSet(clientSockP, connectTimeout * 1000); 
             if (OS.IS_UNIX) {
                 Socket.optSet(clientSockP, Socket.APR_SO_REUSEADDR, 1);
             }
-
-            // TODO: option
+            
             Socket.optSet(clientSockP, Socket.APR_SO_KEEPALIVE, 1);
-
+            
             // Blocking 
             // TODO: use socket pool
             // TODO: cache it ( and TTL ) in hi
             long inetAddress = Address.info(hi.host, Socket.APR_INET,
                   hi.port, 0, rootPool);
+            // this may take a long time - stop/destroy must wait 
+            // at least connect timeout
             int rc = Socket.connect(clientSockP, inetAddress);
         
             if (rc != 0) {
-                Socket.close(clientSockP);
-                Socket.destroy(clientSockP);
-                apr.error("Socket.connect(): " + Error.strerror(rc) + " " + connectTimeout);
+                synchronized (pollers) {
+                    Socket.close(clientSockP);
+                    Socket.destroy(clientSockP);                    
+                }
                 /////Pool.destroy(socketpool);
-                return;
+                throw new IOException("Socket.connect(): " + rc + " " + Error.strerror(rc) + " " + connectTimeout);
+            }
+            if (!running) {
+                throw new IOException("Stopped");                
             }
             
             connectionsCount.incrementAndGet();
@@ -374,15 +474,18 @@ public class AprSocketContext {
             apr.socket = clientSockP;
             
             apr.afterConnect();
-        } catch (Exception e) {
+        } catch (IOException e) {
+            apr.reset();
+            throw e;
+        } catch (Throwable e) {
+            apr.reset();
             e.printStackTrace();
-            
+            throw new IOException(e);
         }
     }
 
     AprSocket newSocket(AprSocketContext context) throws IOException {
-        return context.useFinalizer ? new FinalizedAprSocket(context) 
-            : new AprSocket(context);
+        return new AprSocket(context);
     }
 
     /**
@@ -392,18 +495,23 @@ public class AprSocketContext {
     protected void finalize() {
         if (rootPool != 0) {
             log.warning(this + " GC without stop()");
-        }
-        try {
-            stop();
-        } catch (Exception e) {
-            //TODO Auto-generated catch block
-            e.printStackTrace();
+            try {
+                stop();
+            } catch (Exception e) {
+                //TODO Auto-generated catch block
+                e.printStackTrace();
+            }
         }
     }
     
 
     public void stop() throws IOException {
-        running = false;
+        synchronized (pollers) {
+            if (!running) {
+                return;
+            }
+            running = false;
+        }
         
         if (rootPool != 0) {
             if (acceptor != null) {
@@ -414,27 +522,72 @@ public class AprSocketContext {
                     e.printStackTrace();
                 }
             }  
-            for (AprPoller a: pollers) {
-                a.interruptPoll();
+            if (acceptorDispatch != null) {
+                acceptedQueue.add(END);
+                try {
+                    acceptorDispatch.join();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
             }
-            // Should distroy all other native resources creted by this connector
-            Pool.destroy(rootPool);
-            rootPool = 0;
+            if (threadPool != null) {
+                threadPool.shutdownNow();
+            }
+            
+            log.info("Stopping pollers " + contextId);
+                
+            while (true) {
+                AprPoller a;
+                synchronized (pollers) {
+                    if (pollers.size() == 0) {
+                        break;
+                    }
+                    a = pollers.remove(0);
+                }
+                a.interruptPoll();
+                try {
+                    a.join();
+                    log.info("Poller " + a.id + " done ");
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
         }
-        if (threadPool != null) {
-            threadPool.shutdownNow();
+    }
+    
+
+    // Called when the last poller has been destroyed.
+    void destroy() {
+        synchronized (pollers) {
+            if (pollers.size() != 0) {
+                return;
+            }
+            
+            if (rootPool == 0) {
+                return;
+            }
+            System.err.println("DESTROY " + rootPool);
+            //Pool.destroy(rootPool);
+            //rootPool = 0;        
         }
-        pollerExecutor.shutdownNow();
+    }
+    
+    static IOException noApr;
+    static {
+        
+        try {
+            Library.initialize(null);
+            SSL.initialize(null);                
+        } catch (Exception e) {
+            noApr = new IOException("APR not present", e);
+        }
         
     }
     
     private long getRootPool() throws IOException {
         if (rootPool == 0) {
-            try {
-                Library.initialize(null);
-                SSL.initialize(null);                
-            } catch (Exception e) {
-                throw new IOException("APR not present", e);
+            if (noApr != null) {
+                throw noApr;
             }
             // Create the root APR memory pool
             rootPool = Pool.create(0);
@@ -452,11 +605,14 @@ public class AprSocketContext {
     
     long getSslCtx() throws Exception {
         if (sslCtx == 0) {
+            synchronized (AprSocketContext.class) {
+                
             boolean serverMode = acceptor != null;
             sslCtx = SSLContext.make(getRootPool(), 
                     sslProtocol,
                     serverMode ? SSL.SSL_MODE_SERVER : SSL.SSL_MODE_CLIENT);
 
+            
             // SSL.SSL_OP_NO_SSLv3 
             int opts = SSL.SSL_OP_NO_SSLv2 |
                 SSL.SSL_OP_SINGLE_DH_USE;
@@ -471,7 +627,7 @@ public class AprSocketContext {
             
             // Client certificate verification - maybe make it option
             try {
-                SSLContext.setCipherSuite(sslCtx, "ALL");
+                SSLContext.setCipherSuite(sslCtx, SSLCipherSuite);
                 
                 
                 if (serverMode) {
@@ -514,31 +670,64 @@ public class AprSocketContext {
                 throw new IOException(e);
             }
             
+            long mode = 
+                    SSLExt.sslCtxSetMode(sslCtx, SSLExt.SSL_MODE_ENABLE_PARTIAL_WRITE |
+                            SSLExt.SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+            
+            System.err.println("MODE: " + mode);
+            // TODO: try release buffers
+            }            
         }
         return sslCtx;
     }
     
-    
-    /**
-     * Request read polling for a blocking socket.
+    /** 
+     * For NB sockets, if 'suspendPolling' has been called. 
      * 
-     * Resume polling for a non-blocking socket.
+     * Called from non-IO thread.
+     * @throws IOException 
      */
-    void poll(AprSocket ch) throws IOException {
-        if (ch.poller != null) {
-            if (ch.isBlocking()) {
-                throw new IOException("Poll already called");
-            } else {
-                return; // redundant call for non-blocking
-            }
+    public void resumeRead(AprSocket ch) throws IOException {
+        if (ch.isBlocking()) {
+            throw new IOException("Resume read called in blocking mode, ignore");
         }
-        if (ch.isInClosed()) {
+        if (ch.isClosed()) {
             throw new IOException("Closed");            
         }
-        // When adding - we need POLLIN, it's automatic after read/write
-        if (!ch.isBlocking()) {
-            ch.setStatus(AprSocket.POLLIN);
+        ch.setStatus(AprSocket.POLLIN);
+        findPollerAndAdd(ch);
+    }
+    
+    /**
+     * Suspend read events for non-blocking sockets.
+     * Only for non-blocking mode.
+     * @throws IOException 
+     */
+    public void suspendRead(AprSocket ch) throws IOException  {
+        if (ch.isBlocking()) {
+            throw new IOException("Resume read called in blocking mode, ignore");
         }
+        if (ch.socket == 0) {
+            throw new IOException("no socket");            
+        }
+        if (ch.poller == null) {
+            log.severe("Not polling");
+            return;
+        }
+        ch.clearStatus(AprSocket.POLLIN);
+        ch.poller.requestUpdate(ch);
+    }
+    
+    void findPollerAndAdd(AprSocket ch) throws IOException {
+        if (ch.poller != null) {
+            ch.poller.requestUpdate(ch);
+            return;
+        }
+        assignPoller(ch);
+    }
+    
+    void assignPoller(AprSocket ch) throws IOException {
+        AprPoller target = null;
         synchronized (pollers) {
             // Make sure we have min number of pollers
             int needPollers = pollerThreadCount - pollers.size();
@@ -548,7 +737,6 @@ public class AprSocketContext {
                 }
             }
             int max = 0;
-            AprPoller target = null;
             for (AprPoller poller: pollers) {
                 int rem = poller.remaining();
                 if (rem > max) {
@@ -556,26 +744,16 @@ public class AprSocketContext {
                     max = rem;
                 }
             }
-            if (target != null && target.add(ch)) {
-                return;
-            } 
-            // can't be added - add a new poller 
+        }
+        if (target != null && target.add(ch)) {
+            return;
+        } 
+        
+        // can't be added - add a new poller 
+        synchronized (pollers) {
             AprPoller poller = allocatePoller();
             poller.add(ch);
             pollers.add(poller);
-        }
-    }
-
-    static class FinalizedAprSocket extends AprSocket {
-        public FinalizedAprSocket(AprSocketContext context) {
-            super(context);
-        }
-        
-        protected void finalize() {
-            if (socket != 0) {
-                log.log(Level.SEVERE, this + " Socket not closed");
-                error("Socket not closed");
-            }
         }
     }
 
@@ -655,17 +833,12 @@ public class AprSocketContext {
             }
         }
         
-        void cleanup() {
-            Socket.close(serverSock);
-        }
-        
         void unblock() {
             try {
                 // Easiest ( maybe safest ) way to interrupt accept
                 // we could have it in non-blocking mode, etc
-                AprSocket cli = socket("127.0.0.1", port, false);
-                cli.connect();
-                cli.error("Abort");
+                java.net.Socket sock = new java.net.Socket();
+                sock.connect(new InetSocketAddress("127.0.0.1", port));
             } catch (Exception ex) {
                 // ignore - the acceptor may have shut down by itself.
             }
@@ -678,18 +851,50 @@ public class AprSocketContext {
                     // each socket has a pool.
                     final AprSocket ch = newSocket(AprSocketContext.this);
                     ch.setStatus(AprSocket.ACCEPTED);
+                    
                     ch.socket = Socket.accept(serverSock);
+                    if (!running) {
+                        break;
+                    }
                     connectionsCount.incrementAndGet();
-                    getExecutor().execute(ch);
+                    if (connectionsCount.get() % 1000 == 0) {
+                        System.err.println("Accepted: " + connectionsCount.get());
+                    }
+                    
+                    if (nonBlockingAccept && !sslMode) {
+                        ch.setStatus(AprSocket.CONNECTED);
+                        // TODO: SSL really needs a thread.
+                        onSocket(ch);
+                    } else {
+                        acceptedQueue.add(ch);
+                    }
                 } catch (Throwable e) {
                     e.printStackTrace();
                 }
             }
-            cleanup();
+            Socket.close(serverSock);
         }
     }
 
-    AtomicInteger connectionsCount = new AtomicInteger();
+    class AcceptorDispatchThread extends Thread {
+        
+        AcceptorDispatchThread(int port) {
+            setDaemon(true);
+        }
+        
+        public void run() {
+            while(running) {
+                try {
+                    AprSocket ch = acceptedQueue.take();
+                    if (ch == END) {
+                        return;
+                    }
+                    connectExecutor.execute(ch);
+                } catch (InterruptedException e) {
+                }
+            }
+        }
+    }
     
     /**
      * Create the poller. With some versions of APR, the maximum poller size will
@@ -712,12 +917,25 @@ public class AprSocketContext {
             serverPollset = allocatePoller(size, pool, timeout);
         }
         
-        AprPoller res = threadSafe ? new AprPoller() : new AprPollerNotThreadSafe();
+        AprPoller res = new AprPoller();
         res.pool = pool;
         res.serverPollset = serverPollset;
         res.desc = new long[size * 2];
+        res.size = size;
+        res.id = contextId++;
+        res.setDaemon(true);
+        res.setName("AprPoller-" + res.id);
+        res.start();
+        if (debugPoll && !sizeLogged) {
+            sizeLogged = true;
+            log.info("Poller size " + (res.desc.length / 2));
+        }
         return res;
     }
+    
+    // Removed the 'thread safe' updates for now, to simplify the code
+    // last test shows a small improvement, can switch later.
+    static boolean sizeLogged = false;
     
     protected long allocatePoller(int size, long pool, int timeout) {
         int flag = threadSafe ? Poll.APR_POLLSET_THREADSAFE: 0;
@@ -746,279 +964,146 @@ public class AprSocketContext {
         return 0;
     }
     
-  
-    class AprPoller implements Runnable {
+    class AprPoller extends Thread {
 
+        public int id;
+        public int size;
         protected long serverPollset = 0;
         protected long pool = 0;
         protected long[] desc;
-        private boolean interrupt = true;
-        
-        
+
+        long lastPoll;
+        long lastPollTime;
+        long lastCallbackTime;
+        AtomicBoolean inPoll = new AtomicBoolean(false);
+
+        // Should be replaced with socket data.
+        // used only to lookup by socket
         Map<Long, AprSocket> channels = new HashMap<Long, AprSocket>();
         
+        // Active + pending, must be < desc.length / 2
+        // The channel will also have poller=this when active or pending
+        // How many sockets have poller == this
         protected AtomicInteger keepAliveCount = new AtomicInteger();
+        // Tracks desc, how many sockets are actively polled
+        protected AtomicInteger polledCount = new AtomicInteger();
         
-        protected Thread myThread;
+        protected AtomicInteger pollCount = new AtomicInteger();
         
-        /**
-         * Destroy the poller.
-         */
-        protected void destroyPoller() {
-            synchronized (pollers) {
-                pollers.remove(this);
-            }
-            // Wait for polltime before doing anything, so that the poller threads
-            // exit, otherwise parallel destruction of sockets which are still
-            // in the poller can cause problems
-            try {
-                synchronized (this) {
-                    this.wait(pollTime / 1000);
-                }
-            } catch (InterruptedException e) {
-                // Ignore
-            }
-            // Close all sockets still in the poller
-            int rv = Poll.pollset(serverPollset, desc);
-            if (rv > 0) {
-                for (int n = 0; n < rv; n++) {
-                    channels.get(desc[n*2+1]).error("Poll.destroy()");
-                }
-            }
-            Pool.destroy(pool);
-        }
-        
-        int to = 10000;
+        private List<AprSocket> updates = new ArrayList<AprSocket>();
 
-        /** 
-         * Called from any thread.
-         * @throws IOException 
-         */
-        boolean add(AprSocket ch) throws IOException {
-            synchronized (channels) {
-                if (!addChannel(ch)) {
-                    return false;
-                }
-                realAddOrUpdate(ch);
-                if (channels.size() == 1) {
-                    getExecutor().execute(this);
-                }
-                return true;
-            }
-        }
-
-        int remaining() {
-            synchronized (channels) {
-                return (desc.length - channels.size() * 2);
-            }            
-        }
-        
-        protected boolean addChannel(AprSocket ch) throws IOException {
-            synchronized (channels) {
-                if (ch.poller != null) {
-                    throw new IOException("Already polling " + ch);
-                }
-    
-                if (channels.size() * 2 > desc.length) {
-                    return false;
-                }
-                channels.put(ch.socket, ch);
-                return true;
-            }
-        }
-
-        /** 
-         * Actual poll update - called in the polling thread or 
-         * if thread safe in any thread.
-         * @throws IOException 
-         */
-        protected void realAddOrUpdate(AprSocket up) throws IOException {
-            int rv = Status.APR_SUCCESS;
-            
-            int req = up.requestedPolling();
-
-            boolean polling = up.poller != null;
-            if (polling && up.isBlocking()) {
-                throw new IOException("Update for blocking socket " + up);
-            }
-            
-            synchronized (channels) {
-                if (polling) { // non blocking - update
-                    // It is already polling - maybe for something else.
-                    synchronized (AprSocketContext.class) {
-                        rv = Poll.remove(serverPollset, up.socket);
-                    }
-                    if (rv != Status.APR_SUCCESS) {
-                        log.severe("Failed to remove " +Error.strerror((int)rv) + 
-                                " " + up);
-                        rv = Status.APR_SUCCESS;
-                    } else {
-                        keepAliveCount.decrementAndGet();
-                    }
-                    if (req == 0) {
-                        // No longer polling for this socket
-                        up.poller = null;
-                        channels.remove(up.socket); 
-
-                        // In case it was delayed because polling had to be removed
-                        up.maybeDestroy();
-                        if (debug) {
-                            log.info("pollUpdate - remove " + req + " res=" + rv + " " + up );
-                        }
-                        return;
-                    }
-                    // else: will add it back
-                }
-
-                synchronized (AprSocketContext.class) {
-                    rv = Poll.add(serverPollset, up.socket, req);                    
-                }
-                if (debugPoll) {
-                    log.info("pollUpdate " + Integer.toHexString(req) + " res=" + rv + " " + up );
-                }
-            }
-            if (rv != Status.APR_SUCCESS) {
-                log.info("poll remove - error adding " +  rv + " " + up);                        
-                // Can't do anything: close the socket right away
-                up.error("ERR: Poll.add " + rv + " " + Error.strerror((int)rv));
-            } else {
-                keepAliveCount.incrementAndGet();
-                up.poller = this;
-            }
-        }
-        
-        /** 
-         * Called from any thread.
-         */
-        boolean updateNonBlocking(AprSocket ch) throws IOException {
-            synchronized (channels) {
-                realAddOrUpdate(ch);
-            }
-            return true;
-        }
-
-        /**
-         * For non-blocking, to simplify the poll update only happens 
-         * after the handler has been called. 
-         */
-        private void pollUpdateNB(AprSocket up, long sock) {
-            synchronized(channels) {
-                int req = up.requestedPolling();
-                if (req == 0) {
-                    // no longer interested in polling
-                    channels.remove(sock);
-                    up.poller = null;
-                    // In case it was delayed because polling had to be removed
-                    up.maybeDestroy();
-                    if (debug) {
-                        log.info("pollUpdate - remove nb " + up );
-                    }
-                    return;
-                }
-
-                int rv = Status.APR_SUCCESS;
-                synchronized (AprSocketContext.class) {
-                    rv = Poll.add(serverPollset, up.socket, req);
-                }
-                if (debugPoll) {
-                    log.info("pollUpdate " + Integer.toHexString(req) + " res=" + rv + " " + up );
-                }
-                if (rv != Status.APR_SUCCESS) {
-                    log.info("poll update NB - error adding " +  rv + " " + up);                        
-                    // Can't do anything: close the socket right away
-                    channels.remove(sock);
-                    up.poller = null;
-                    up.error("ERR: Poll.add " + rv + " " + Error.strerror((int)rv));
-                } else {
-                    keepAliveCount.incrementAndGet();
-                }
-            }
-        }
-        
         public void run() {
-            myThread = Thread.currentThread();
-            log.info("Starting poller " + (isServer() ? "SRV ": "CLI ") + (desc.length / 2));
-            if (debug) {
-                myThread.setName("Poller " + pollerCnt++);
+            if (!running) {
+                return;
             }
+            log.info("Starting poller " + id + " " + (isServer() ? "SRV ": "CLI "));
+            long t0 = System.currentTimeMillis();
             while (running) {
                 try {
-                    long t0 = System.currentTimeMillis();
-                    synchronized (channels) {
-                        updates();
-                        if (channels.size() == 0) {
+                    updates();
+                    
+                    
+                    lastCallbackTime = t0 - lastPoll;
+                    
+                    // Pool for the specified interval. Remove signaled sockets
+                    synchronized (this) {
+                        inPoll.set(true);
+                    }
+                    // if updates are added after updates and poll - interrupt will have still
+                    // work
+                    
+                    int rv = Poll.poll(serverPollset, pollTime, desc, true);
+                    synchronized (this) {
+                        inPoll.set(false);
+                        if (!running) {
                             break;
                         }
                     }
+        
+                    pollCount.incrementAndGet();                    
+                    lastPoll = System.currentTimeMillis();
+                    lastPollTime = lastPoll - t0;
                     
-                    // Pool for the specified interval. Remove signaled sockets
-                    int rv = Poll.poll(serverPollset, pollTime, desc, true);
-                    if (!running) {
-                        break;
-                    }
-                    long t1 = System.currentTimeMillis();
-                    if (debugPoll) {
-                        debugAfterPoll(t0, rv, t1);
-                    }
                     if (rv > 0) {
-                        keepAliveCount.addAndGet(-rv);
+                        if (debugPoll) {
+                            log.info(" Poll() id=" + id + " rv=" + rv + " keepAliveCount=" + keepAliveCount + 
+                                    " polled = " + polledCount.get()
+                                    + " time=" + lastPollTime);
+                        }
+                        polledCount.addAndGet(-rv);
                         for (int pollIdx = 0; pollIdx < rv; pollIdx++) {
                             long sock = desc[pollIdx * 2 + 1];
                             AprSocket ch;
+                            boolean blocking = false;
+                            
                             synchronized (channels) {
                                 ch = channels.get(sock);
                                 if (ch != null) {
-                                    if (ch.isBlocking()) {
-                                        channels.remove(sock);
-                                        ch.poller = null;
-                                    }
+                                    blocking = ch.isBlocking();
                                 } else {
                                     log.severe("Polled socket not found !!!!!" + Long.toHexString(sock));
+                                    // TODO: destroy/close the raw socket
                                     continue;
                                 }
                             }
-
+                            // was removed from polling
+                            ch.clearStatus(AprSocket.POLL);
+        
                             // We just removed it ( see last param to poll()).
                             // Check for failed sockets and hand this socket off to a worker
                             long mask = desc[pollIdx * 2];
-                            if (debugPoll) {
-                                log.info(" Polled " + Long.toHexString(mask) + " " + ch);
-                            }
-
+        
                             boolean hup = ((mask & Poll.APR_POLLHUP) == Poll.APR_POLLHUP);
                             boolean err = ((mask & Poll.APR_POLLERR) == Poll.APR_POLLERR);
+                            boolean nval = ((mask & Poll.APR_POLLNVAL) != 0);
+                            if (err || nval) {
+                                System.err.println("ERR " + err + " NVAL " + nval);
+                            }
+                            
                             boolean out = (mask & Poll.APR_POLLOUT) == Poll.APR_POLLOUT;
                             boolean in = (mask & Poll.APR_POLLIN) == Poll.APR_POLLIN;
-
-//                            if (err) {
-//                                ch.setStatus(AprSocket.ERROR);
-//                                ch.notifyIO(true);                                
-//                                ch.error("POLERR");
-//                                continue;
-//                            }
-//                            if (hup) {
-//                                ch.setStatus(AprSocket.ERROR);
-//                                ch.notifyIO(true);                                
-//                                ch.error("Poller hup");
-//                                continue;
-//                            }
-                            if (out || in || hup || err) {
-                                // try to send if needed
-                                ch.notifyIO(true);                                
+                            if (debugPoll) {
+                                log.info(" Poll channel: " + Long.toHexString(mask) + 
+                                        (out ? " OUT" :"") +
+                                        (in ? " IN": "") +
+                                        (err ? " ERR" : "") +
+                                        " Ch: " + ch);
                             }
-                            if (!ch.isBlocking()) {
-                                // Blocking: notifyIO is in a thread, most likely 
-                                // won't need polling until timeouts.
-                                pollUpdateNB(ch, sock);
+        
+                            // will be set again in process(), if all read/write is done
+                            ch.clearStatus(AprSocket.POLLOUT);
+                            ch.clearStatus(AprSocket.POLLIN);
+                            
+                            // try to send if needed
+                            if (blocking) {
+                                synchronized (ch) {
+                                    ch.notifyAll();                                    
+                                }
+                                getExecutor().execute(ch);
+                            } else {
+                                ((AprSocketContext.PollHandler) ch.handler).process(ch, in, out, false);
+                                
+                                // Update polling for the channel (in IO thread, safe) 
+                                updateIOThread(ch);
                             }
                         }
                     } else if (rv < 0) {
                         int errn = -rv;
                         if (errn == Status.TIMEUP) {
-                            // ignore
+                            // to or interrupt
+//                            if (debugPoll) {
+//                                log.info(" Poll() timeup" + " keepAliveCount=" + keepAliveCount + 
+//                                        " polled = " + polledCount.get()
+//                                        + " time=" + lastPollTime);
+//                            }
                         } else if (errn == Status.EINTR) {
-                            log.info("Poll: EINTR");                            
+                            // interrupt - no need to log
                         } else {
+                            if (debugPoll) {
+                                log.info(" Poll() rv=" + rv + " keepAliveCount=" + keepAliveCount + 
+                                        " polled = " + polledCount.get()
+                                        + " time=" + lastPollTime);
+                            }
                             /* Any non timeup or interrupted error is critical */
                             if (errn >  Status.APR_OS_START_USERERR) {
                                 errn -=  Status.APR_OS_START_USERERR;
@@ -1035,117 +1120,260 @@ public class AprSocketContext {
                 } catch (Throwable t) {
                     log.log(Level.SEVERE, "endpoint.poll.error", t);
                 }
-
-            }
-
-            if (debug) {
-                log.info("Poll done");
-            }
-
-            synchronized (this) {
-                this.notifyAll();
-            }
-        }
-
-        protected void updates() throws IOException {
-        }
-
-        private void debugAfterPoll(long t0, int rv, long t1) {
-            if (rv == -Status.TIMEUP) {
-                if (t1 - t0 < pollTime / 2000 ) {
-                    log.info(" Poll: TIMEUP " + pollTime + " real:" + (t1 - t0));
-                }
-            } else {
-                log.info(" Poll " + rv + " waiting " + keepAliveCount
-                     + " t=" + (t1 - t0) );
-            }
-        }
         
-        void interruptPoll() {
-            if (interrupt) {
-                try {
-                    int rc = Poll.interrupt(serverPollset);
-                    if (rc != Status.APR_SUCCESS) {
-                        log.severe("Failed interrupt and not thread safe");
-                    }
-                } catch (Throwable t) {
-                    interrupt = false;
-                    if (pollTime > FALLBACK_POLL_TIME) {
-                        pollTime = FALLBACK_POLL_TIME;
-                    }
+            }
+            if (!running) {
+                destroyPoller();
+            }
+        }
+
+        /**
+                 * Destroy the poller.
+                 */
+        protected void destroyPoller() {
+            synchronized (pollers) {
+                pollers.remove(this);
+            }
+            log.info("Poller stopped after cnt=" + 
+                    pollCount.get() + 
+                    " sockets=" + channels.size() + 
+                    " lastPoll=" + lastPoll);
+
+            // Close all sockets
+            synchronized (this)  {
+                if (serverPollset == 0) {
+                    return;
+                }
+
+//                for (AprSocket ch: channels.values()) {
+//                    ch.poller = null;
+//                    ch.reset();
+//                }
+                keepAliveCount.set(0);
+                log.warning("Destroy pollset");
+                //serverPollset = 0;
+            }
+            Pool.destroy(pool);
+            pool = 0;
+            synchronized (pollers) {
+                // Now we can destroy the root pool
+                if (pollers.size() == 0 && !running) {
+                    log.info("Destroy server context");
+//                    AprSocketContext.this.destroy();
                 }
             }
         }
-        
-    }
-    
-    // TODO: not tested / not used in recent past, most tests done with thread-safe apr.
-    class AprPollerNotThreadSafe extends AprPoller {
-        private List<AprSocket> updates = new ArrayList<AprSocket>();
-        private List<AprSocket> updating = new ArrayList<AprSocket>();
-        long updatesChanged;
-     
 
         /** 
          * Called only in poller thread, only used if not thread safe
          * @throws IOException 
          */
         protected void updates() throws IOException {
-            synchronized (channels) {
-                List<AprSocket> tmp = updates;
-                updates = updating;
-                updating = tmp;
-                updatesChanged = 0;
-                for (AprSocket up: updating) {
-                    if (up.isInClosed() && up.isOutClosed()) {
-                        continue;
-                    }
-                    if (debug)
-                        log.info("Delayed update " + 
-                                (System.currentTimeMillis() - updatesChanged) +
-                                " " + up);
-                    realAddOrUpdate(up);
+            synchronized (this) {
+                for (AprSocket up: updates) {
+                    updateIOThread(up);
                 }
-                updating.clear();
+                updates.clear();
             }
         }
         
+        void interruptPoll() {
+            try {
+                int rc = Status.APR_SUCCESS;
+                synchronized (this) {
+                    if (serverPollset != 0) {
+                        rc = Poll.interrupt(serverPollset);
+                    } else {
+                        log.severe("Interrupt with closed pollset");
+                    }
+                }
+                if (rc != Status.APR_SUCCESS) {
+                    log.severe("Failed interrupt and not thread safe");
+                }
+            } catch (Throwable t) {
+                t.printStackTrace();
+                if (pollTime > FALLBACK_POLL_TIME) {
+                    pollTime = FALLBACK_POLL_TIME;
+                }
+            }
+        }
+
+        
+        int remaining() {
+            synchronized (channels) {
+                return (desc.length - channels.size() * 2);
+            }            
+        }
+        
+
+        
         /** 
-         * Called from any thread.
+         * Called from any thread, return true if we could add it 
+         * to pending.
          */
         boolean add(AprSocket ch) throws IOException {
-            synchronized (channels) {
-                if (!addChannel(ch)) {
+            synchronized (this) {
+                if (!running) {
                     return false;
                 }
-                if (channels.size() == 1) {
-                    // Just added - this is the first, need to start thread.
-                    realAddOrUpdate(ch);
-                    pollerExecutor.execute(this);
-                    return true;
+                if (keepAliveCount.get() >= size) {
+                    return false;
                 }
-                updates.add(ch);
-                if (updatesChanged == 0) {
-                    updatesChanged = System.currentTimeMillis();
-                }
-                interruptPoll();
+                keepAliveCount.incrementAndGet();
+                ch.poller = this;
             }
+
+            requestUpdate(ch);
+
             return true;
+        }
+
+        /**
+         * May be called outside of IOThread.
+         */
+        protected void requestUpdate(AprSocket ch) throws IOException {
+            synchronized (this) {
+                if (!running) {
+                    return;
+                }
+            }
+            if (isPollerThread()) {
+                updateIOThread(ch);
+            } else {
+                synchronized (this) {
+                    updates.add(ch);                
+                    interruptPoll();
+                }
+                if (debugPoll) {
+                    log.info("Poll: requestUpdate " + id + " " + ch);
+                }
+            }
+        }
+
+        private void updateIOThread(AprSocket ch) throws IOException {
+            if (!running || ch.socket == 0) {
+                return;
+            }
+            // called from IO thread, either in 'updates' or after
+            // poll.
+            //synchronized (ch)
+            boolean polling = ch.checkPreConnect(AprSocket.POLL);
+            
+            int requested = ch.requestedPolling();
+            if (requested == 0) {
+                if (polling) {
+                    removeSafe(ch);
+                }
+                if (ch.isClosed()) {
+                    synchronized (channels) {
+                        ch.poller = null;
+                        channels.remove(ch.socket);
+                    }
+                    keepAliveCount.decrementAndGet();
+                    ch.reset(); 
+                }
+            } else {
+                if (polling) {
+                    removeSafe(ch);
+                }
+                // will close if error
+                pollAdd(ch, requested);
+            }
+            if (debugPoll) {
+                log.info("Poll: updated=" + id + " " + ch); 
+            }
         }
         
         /** 
-         * Called from any thread.
+         * Called only from IO thread 
          */
-        boolean updateNonBlocking(AprSocket ch) throws IOException {
+        private void pollAdd(AprSocket up, int req) throws IOException {
+            boolean failed = false;
+            int rv;
             synchronized (channels) {
-                updates.add(ch);
-                if (updatesChanged == 0) {
-                    updatesChanged = System.currentTimeMillis();
+                rv = Poll.add(serverPollset, up.socket, req);
+                if (rv != Status.APR_SUCCESS) {
+                    up.poller = null;
+                    keepAliveCount.decrementAndGet();
+                    failed = true;
+                } else {
+                    polledCount.incrementAndGet();
+                    channels.put(up.socket, up);
+                    up.setStatus(AprSocket.POLL);
                 }
-                interruptPoll();
             }
-            return true;
+            if (failed) {
+                up.reset();
+                throw new IOException("poll add error " +  rv + " " + up + " " + Error.strerror((int)rv));                        
+            }
         }
+
+        /** 
+         * Called only from IO thread. Remove from Poll and channels,
+         * set POLL bit to false.
+         */
+        private void removeSafe(AprSocket up) throws IOException {
+            int rv = Status.APR_EGENERAL;
+            if (running && serverPollset != 0 && up.socket != 0
+                    && !up.isClosed()) {
+                rv = Poll.remove(serverPollset, up.socket);
+            }
+            up.clearStatus(AprSocket.POLL);
+            
+            if (rv != Status.APR_SUCCESS) {
+                log.severe("poll remove error " +  Error.strerror((int)rv) + " " + up);
+            } else {
+                polledCount.decrementAndGet();
+            }
+        }
+        
+        
+        public boolean isPollerThread() {
+            return Thread.currentThread() == this;
+        }
+        
     }
+
+    /**
+     *  Additional callbacks for non-blocking. 
+     *  This can be much faster - but it's harder to code, should be used only 
+     *  for low-level protocol implementation, proxies, etc. 
+     *  
+     *  The model is restricted in many ways to avoid complexity and bugs:
+     *  
+     *  - read can only happen in the IO thread associated with the poller
+     *  - user doesn't control poll interest - it is set automatically based
+     *  on read/write results
+     *  - it is only possible to suspend read, for TCP flow control - also
+     *  only from the IO thread. Resume can happen from any thread.
+     *  - it is also possible to call write() from any thread 
+     */
+    public static interface PollHandler extends AprSocketHandler {
     
+        /**
+         * Called on read events, as well as in case of errors.
+         * It is ok to write in this method. 
+         * 
+         * All reading should happen in this method.
+         * If read() returns 0 the socket will continue to be polled in.
+         * 
+         *  If you want to suspend read polling - call "suspendRead()" - this
+         *  method will still be called for hup, error and pollout.
+         *  
+         *  Write polling is also set automatically after a write fails.
+         */
+        public void process(AprSocket ch, boolean in, boolean out, boolean close);
+    
+        /** 
+         * Called after connection is established, in a thread pool.
+         * Process will be called next.
+         */
+        public void connected(AprSocket ch);
+    
+        /** 
+         * Before close, if an exception happens.
+         */
+        public void error(AprSocket ch, Throwable t);
+    }
+
 }

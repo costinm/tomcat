@@ -31,4 +31,9 @@ public interface AprSocketHandler {
      * 
      */
     public void process(AprSocket ch) throws IOException;
+    
+    /**
+     *  Called just before the socket is destroyed 
+     */
+    public void closed(AprSocket ch);
 }
