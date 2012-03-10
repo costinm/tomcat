@@ -45,6 +45,9 @@ public class SpdyStream {
 
     public SpdyFrame resFrame;
 
+    /**
+     * For blocking support.
+     */
     protected BlockingQueue<SpdyFrame> inData = new LinkedBlockingQueue<SpdyFrame>();
 
     protected boolean finSent;
@@ -97,6 +100,7 @@ public class SpdyStream {
         } else if (frame.type == SpdyConnection.TYPE_RST_STREAM) {
             onReset();
         }
+        inData.add(frame);
         if (frame.isHalfClose()) {
             finRcvd = true;
         }
@@ -121,8 +125,23 @@ public class SpdyStream {
     public boolean isFinished() {
         return finSent && finRcvd;
     }
-
-    public SpdyFrame getIn(long to) throws IOException {
+    
+    /**
+     * Waits and return the next data frame.
+     */
+    public SpdyFrame getDataFrame(long to) throws IOException {
+        while (true) {
+            SpdyFrame res = getFrame(to);
+            if (res == null || res.isData()) {
+                return res;
+            }
+        }
+    }
+    
+    /**
+     * Waits and return the next frame. First frame will be the control frame
+     */
+    public SpdyFrame getFrame(long to) throws IOException {
         SpdyFrame in;
         try {
             if (inData.size() == 0 && finRcvd) {
@@ -159,13 +178,13 @@ public class SpdyStream {
         return reqFrame;
     }
 
-    public void addHeader(String name, String value) {
-        byte[] nameB = name.getBytes();
-        getRequest().headerName(nameB, 0, nameB.length);
-        nameB = value.getBytes();
-        reqFrame.headerValue(nameB, 0, nameB.length);
+    public SpdyFrame getResponse() {
+        if (resFrame == null) {
+            resFrame = spdy.getFrame(SpdyConnection.TYPE_SYN_REPLY);
+            resFrame.streamId = reqFrame.streamId;
+        }
+        return resFrame;
     }
-
 
     public synchronized void sendDataFrame(byte[] data, int start,
             int length, boolean close) throws IOException {
@@ -181,7 +200,6 @@ public class SpdyStream {
         // 1 tcp packet. That's the current choice, seems closer to rest of
         // tomcat
 
-        oframe.streamId = reqFrame.streamId;
         if (close)
             oframe.halfClose();
 
@@ -194,8 +212,8 @@ public class SpdyStream {
     }
 
     public void send(String host, String url, String scheme, String method) throws IOException {
-        addHeader("host", host);
-        addHeader("url", url);
+        getRequest().addHeader("host", host);
+        getRequest().addHeader("url", url);
 
         send(scheme, method);
     }
@@ -206,9 +224,9 @@ public class SpdyStream {
             // TODO: add the others
             reqFrame.halfClose();
         }
-        addHeader("scheme", "http"); // todo
-        addHeader("method", method);
-        addHeader("version", "HTTP/1.1");
+        getRequest().addHeader("scheme", "http"); // todo
+        getRequest().addHeader("method", method);
+        getRequest().addHeader("version", "HTTP/1.1");
         if (reqFrame.isHalfClose()) {
             finSent = true;
         }

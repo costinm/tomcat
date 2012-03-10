@@ -118,6 +118,10 @@ public class SpdyAprNpnHandler implements Http11AprProtocol.NpnHandler {
             }
         }
 
+        @Override
+        public void close() throws IOException {
+        }
+        
         // TODO: write/read should go to SocketWrapper.
         @Override
         public int write(byte[] data, int off, int len) {

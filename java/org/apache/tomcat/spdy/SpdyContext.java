@@ -49,7 +49,7 @@ public class SpdyContext {
 
     int defaultFrameSize = 8192;
 
-    public static boolean debug = true;
+    public static boolean debug = false;
 
     /**
      * Get a frame - frames are heavy buffers, may be reused.
@@ -116,5 +116,15 @@ public class SpdyContext {
     }
 
     public void releaseConnection(SpdyConnection con) {
+    }
+    
+    public void listen(final int port, String cert, String key) throws IOException {
+        throw new IOException("Not implemented");
+    }    
+    
+    /**
+     * Close all pending connections and free resources.
+     */
+    public void stop() throws IOException {
     }
 }

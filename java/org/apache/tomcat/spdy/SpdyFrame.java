@@ -16,7 +16,18 @@
  */
 package org.apache.tomcat.spdy;
 
+import java.util.Map;
+
 public class SpdyFrame {
+    public static byte[] STATUS = "status".getBytes();
+
+    public static byte[] VERSION = "version".getBytes();
+
+    public static byte[] HTTP11 = "HTTP/1.1".getBytes();
+
+    public static byte[] OK200 = "200 OK".getBytes();
+    
+    
     // This is a bit more complicated, to avoid multiple reads/writes.
     // We'll read as much as possible - possible past frame end. This may
     // cost an extra copy - or even more complexity for dealing with slices
@@ -229,6 +240,37 @@ public class SpdyFrame {
         nvCount++;
         headerValue(buf, soff, len);
     }
+    
+    public void addHeader(String name, String value) {
+        byte[] nameB = name.getBytes();
+        headerName(nameB, 0, nameB.length);
+        nameB = value.getBytes();
+        headerValue(nameB, 0, nameB.length);
+    }
+
+    public void addHeader(byte[] nameB, String value) {
+        headerName(nameB, 0, nameB.length);
+        nameB = value.getBytes();
+        headerValue(nameB, 0, nameB.length);
+    }
+
+    public void addHeader(byte[] nameB, byte[] valueB) {
+        headerName(nameB, 0, nameB.length);
+        headerValue(valueB, 0, valueB.length);
+    }
+    
+    public void getHeaders(Map<String, String> resHeaders) {
+        for (int i = 0; i < nvCount; i++) {
+            int len = read16();
+            String n = new String(data, off, len, SpdyStream.UTF8);
+            advance(len);
+            len = read16();
+            String v = new String(data, off, len, SpdyStream.UTF8);
+            advance(len);
+            resHeaders.put(n, v);
+        }
+    }
+    
 
     // TODO: instead of that, use byte[][]
     void makeSpace(int len) {
@@ -304,4 +346,7 @@ public class SpdyFrame {
         off += cnt;
     }
 
+    public boolean isData() {
+        return !c;
+    }
 }

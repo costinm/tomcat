@@ -157,6 +157,8 @@ public abstract class SpdyConnection { // implements Runnable {
      */
     public abstract int read(byte[] data, int off, int len) throws IOException;
 
+    public abstract void close() throws IOException;
+
     public void setCompressSupport(CompressSupport cs) {
         compressSupport = cs;
     }
@@ -168,7 +170,7 @@ public abstract class SpdyConnection { // implements Runnable {
         return frame;
     }
 
-    public SpdyFrame getDataFrame() throws IOException {
+    public SpdyFrame getDataFrame() {
         SpdyFrame frame = getSpdyContext().getFrame();
         return frame;
     }
@@ -205,8 +207,13 @@ public abstract class SpdyConnection { // implements Runnable {
                     }
                     SpdyFrame oframe = out;
                     try {
-                        
-                        if (oframe.type == TYPE_SYN_STREAM) {
+                        if (!oframe.c) {
+                            // late: IDs are assigned as we send ( priorities may affect
+                            // the transmission order )
+                            if (oframe.stream != null) {
+                                oframe.streamId = oframe.stream.getRequest().streamId;
+                            }
+                        } else if (oframe.type == TYPE_SYN_STREAM) {
                             oframe.fixNV(18);
                             if (compressSupport != null) {
                                 compressSupport.compress(oframe, 18);
@@ -225,7 +232,9 @@ public abstract class SpdyConnection { // implements Runnable {
                     if (oframe.type == TYPE_SYN_STREAM) {
                         oframe.streamId = outStreamId;
                         outStreamId += 2;
-                        channels.put(oframe.streamId, oframe.stream);
+                        synchronized(channels) {
+                            channels.put(oframe.streamId, oframe.stream);
+                        }
                     }
 
                     oframe.serializeHead();
@@ -245,21 +254,32 @@ public abstract class SpdyConnection { // implements Runnable {
 
             try {
                 int toWrite = out.endData - out.off;
-                int wr = write(out.data, out.off, toWrite);
-                if (wr < 0) {
-                    return false;
-                }
-                if (wr < toWrite) {
-                    out.off += wr;
-                    return true; // non blocking connection
-                }
-                out.off += wr;
+                int wr;
+                while (toWrite > 0) {
+                    wr = write(out.data, out.off, toWrite);
+                    if (wr < 0) {
+                        return false;
+                    }
+                    if (wr == 0) {
+                        return true; // non blocking or to
+                    }
+                    if (wr <= toWrite) {
+                        out.off += wr;
+                        toWrite -= wr;
+                    }
+                } 
                 // Frame was sent
                 framerLock.lock();
                 try {
                     outCondition.signalAll();
                 } finally {
                     framerLock.unlock();
+                }
+                
+                synchronized (channels) {
+                    if (out.stream.finRcvd && out.stream.finSent) {
+                        channels.remove(out.streamId);
+                    }
                 }
                 out = null;
             } catch (IOException e) {
@@ -340,7 +360,7 @@ public abstract class SpdyConnection { // implements Runnable {
         // We can't assing a stream ID until it is sent - priorities
         // we can't compress either - it's stateful.
         oframe.stream = proc;
-
+        
         framerLock.lock();
         try {
             outQueue.add(oframe);
@@ -402,11 +422,16 @@ public abstract class SpdyConnection { // implements Runnable {
 
                 int rd = read(inFrame.data, inFrame.endReadData,
                         inFrame.data.length - inFrame.endReadData);
-                if (rd < 0) {
-                    abort("Closed");
+                if (rd == -1) {
+                    if (channels.size() == 0) {
+                        return CLOSE;
+                    } else {
+                        abort("Closed");
+                    }
+                } else if (rd < 0) {
+                    abort("Closed - read error");
                     return CLOSE;
-                }
-                if (rd == 0) {
+                } else if (rd == 0) {
                     return LONG;
                     // Non-blocking channel - will resume reading at off
                 }
@@ -573,12 +598,19 @@ public abstract class SpdyConnection { // implements Runnable {
                         + " "
                         + ((errCode < RST_ERRORS.length) ? RST_ERRORS[errCode]
                                 : errCode));
-                SpdyStream sch = channels.get(inFrame.streamId);
+                SpdyStream sch;
+                synchronized(channels) {
+                        sch = channels.get(inFrame.streamId);
+                }
                 if (sch == null) {
                     abort("Missing channel " + inFrame.streamId);
                     return CLOSE;
                 }
                 sch.onCtlFrame(inFrame);
+                
+                synchronized(channels) {
+                    channels.remove(inFrame.streamId);
+                }
                 inFrame = null;
                 break;
             }
@@ -602,7 +634,10 @@ public abstract class SpdyConnection { // implements Runnable {
                 break;
             }
             case TYPE_SYN_REPLY: {
-                SpdyStream sch = channels.get(inFrame.streamId);
+                SpdyStream sch;
+                synchronized(channels) {
+                    sch = channels.get(inFrame.streamId);
+                }
                 if (sch == null) {
                     abort("Missing channel");
                     return CLOSE;
@@ -632,12 +667,20 @@ public abstract class SpdyConnection { // implements Runnable {
             }
         } else {
             // Data frame
-            SpdyStream sch = channels.get(inFrame.streamId);
+            SpdyStream sch;
+            synchronized (channels) {
+                sch = channels.get(inFrame.streamId);                
+            }
             if (sch == null) {
                 abort("Missing channel");
                 return CLOSE;
             }
             sch.onDataFrame(inFrame);
+            synchronized (channels) {
+                if (sch.finRcvd && sch.finSent) {
+                    channels.remove(inFrame.streamId);
+                }
+            }
             inFrame = null;
         }
         return LONG;
@@ -649,8 +692,8 @@ public abstract class SpdyConnection { // implements Runnable {
 
     public SpdyStream get(String host, String url) throws IOException {
         SpdyStream sch = new SpdyStream(this);
-        sch.addHeader("host", host);
-        sch.addHeader("url", url);
+        sch.getRequest().addHeader("host", host);
+        sch.getRequest().addHeader("url", url);
 
         sch.send();
 
