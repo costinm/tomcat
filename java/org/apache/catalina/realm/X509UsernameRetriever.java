@@ -14,23 +14,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.coyote.http11.upgrade;
+package org.apache.catalina.realm;
 
-import java.io.IOException;
-
-import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
+import java.security.cert.X509Certificate;
 
 /**
- * Receives notification that there is data to be read on the upgraded
- * connection and processes it.
+ * Provides an interface for retrieving a user name from an X509Certificate.
  */
-public interface UpgradeInbound {
-
-    void setUpgradeProcessor(UpgradeProcessor<?> processor);
-
-    void onUpgradeComplete();
-
-    SocketState onData() throws IOException;
-
-    void setUpgradeOutbound(UpgradeOutbound upgradeOutbound);
+public interface X509UsernameRetriever {
+    /**
+     * Gets a user name from an X509Certificate.
+     *
+     * @param cert The certificate containing the user name.
+     * @return An appropriate user name obtained from one or more fields
+     *         in the certificate.
+     */
+    public String getUsername(X509Certificate cert);
 }

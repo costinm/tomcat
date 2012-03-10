@@ -19,14 +19,9 @@ package org.apache.coyote.http11.upgrade;
 import java.io.IOException;
 
 import org.apache.tomcat.jni.Socket;
+import org.apache.tomcat.jni.Status;
 import org.apache.tomcat.util.net.SocketWrapper;
 
-/**
- * Implementation note: The need to extend Http11Processor could probably be
- * removed if the Processor interface was expanded to cover all of the methods
- * required by the AbstractProtocol. That would simplify the code and further
- * reduce the size of instances of this class.
- */
 public class UpgradeAprProcessor extends UpgradeProcessor<Long> {
 
     private final long socket;
@@ -77,7 +72,25 @@ public class UpgradeAprProcessor extends UpgradeProcessor<Long> {
 
 
     @Override
-    public int read(byte[] bytes, int off, int len) throws IOException {
-        return Socket.recv(socket, bytes, off, len);
+    public int read(boolean block, byte[] bytes, int off, int len)
+            throws IOException {
+        if (!block) {
+            Socket.optSet(socket, Socket.APR_SO_NONBLOCK, -1);
+        }
+        try {
+            int result = Socket.recv(socket, bytes, off, len);
+            if (result > 0) {
+                return result;
+            } else if (-result == Status.EAGAIN) {
+                return 0;
+            } else {
+                throw new IOException(sm.getString("apr.error",
+                        Integer.valueOf(-result)));
+            }
+        } finally {
+            if (!block) {
+                Socket.optSet(socket, Socket.APR_SO_NONBLOCK, 0);
+            }
+        }
     }
 }

@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.nio.ByteBuffer;
 import java.nio.charset.MalformedInputException;
 import java.nio.charset.UnmappableCharacterException;
 
@@ -38,10 +39,51 @@ public abstract class StreamInbound implements UpgradeInbound {
 
     private UpgradeProcessor<?> processor = null;
     private WsOutbound outbound;
+    private int outboundByteBufferSize = WsOutbound.DEFAULT_BUFFER_SIZE;
+    private int outboundCharBufferSize = WsOutbound.DEFAULT_BUFFER_SIZE;
+
+
+
+    public int getOutboundByteBufferSize() {
+        return outboundByteBufferSize;
+    }
+
+
+    /**
+     * This only applies to the {@link WsOutbound} instance returned from
+     * {@link #getWsOutbound()} created by a subsequent call to
+     * {@link #setUpgradeOutbound(UpgradeOutbound)}. The current
+     * {@link WsOutbound} instance, if any, is not affected.
+     *
+     * @param outboundByteBufferSize
+     */
+    public void setOutboundByteBufferSize(int outboundByteBufferSize) {
+        this.outboundByteBufferSize = outboundByteBufferSize;
+    }
+
+
+    public int getOutboundCharBufferSize() {
+        return outboundCharBufferSize;
+    }
+
+
+    /**
+     * This only applies to the {@link WsOutbound} instance returned from
+     * {@link #getWsOutbound()} created by a subsequent call to
+     * {@link #setUpgradeOutbound(UpgradeOutbound)}. The current
+     * {@link WsOutbound} instance, if any, is not affected.
+     *
+     * @param outboundCharBufferSize
+     */
+    public void setOutboundCharBufferSize(int outboundCharBufferSize) {
+        this.outboundCharBufferSize = outboundCharBufferSize;
+    }
+
 
     @Override
     public final void setUpgradeOutbound(UpgradeOutbound upgradeOutbound) {
-        outbound = new WsOutbound(upgradeOutbound);
+        outbound = new WsOutbound(upgradeOutbound, outboundByteBufferSize,
+                outboundCharBufferSize);
     }
 
 
@@ -64,18 +106,16 @@ public abstract class StreamInbound implements UpgradeInbound {
     public final SocketState onData() throws IOException {
         // Must be start the start of a message (which may consist of multiple
         // frames)
+        WsInputStream wsIs = new WsInputStream(processor, getWsOutbound());
 
-        // TODO - change this test to check if there is data to read
-        while (true) {
-            try {
-                // New WsInputStream for each message (not each frame)
-                WsInputStream wsIs =
-                        new WsInputStream(processor, getWsOutbound());
-                WsFrame frame = wsIs.getFrame();
+        try {
+            WsFrame frame = wsIs.nextFrame(true);
 
+            while (frame != null) {
                 // TODO User defined extensions may define values for rsv
                 if (frame.getRsv() > 0) {
-                    getWsOutbound().close(1002, null);
+                    closeOutboundConnection(
+                            Constants.STATUS_PROTOCOL_ERROR, null);
                     return SocketState.CLOSED;
                 }
 
@@ -88,7 +128,7 @@ public abstract class StreamInbound implements UpgradeInbound {
                             new InputStreamReader(wsIs, new Utf8Decoder());
                     onTextData(r);
                 } else if (opCode == Constants.OPCODE_CLOSE){
-                    getWsOutbound().close(frame);
+                    closeOutboundConnection(frame);
                     return SocketState.CLOSED;
                 } else if (opCode == Constants.OPCODE_PING) {
                     getWsOutbound().pong(frame.getPayLoad());
@@ -96,26 +136,70 @@ public abstract class StreamInbound implements UpgradeInbound {
                     // NO-OP
                 } else {
                     // Unknown OpCode
-                    getWsOutbound().close(1002, null);
+                    closeOutboundConnection(
+                            Constants.STATUS_PROTOCOL_ERROR, null);
                     return SocketState.CLOSED;
                 }
-            } catch (MalformedInputException mie) {
-                // Invalid UTF-8
-                getWsOutbound().close(1007, null);
-                return SocketState.CLOSED;
-            } catch (UnmappableCharacterException uce) {
-                // Invalid UTF-8
-                getWsOutbound().close(1007, null);
-                return SocketState.CLOSED;
-            } catch (IOException ioe) {
-                // Given something must have gone to reach this point, this might
-                // not work but try it anyway.
-                getWsOutbound().close(1002, null);
-                return SocketState.CLOSED;
+                frame = wsIs.nextFrame(false);
             }
+        } catch (MalformedInputException mie) {
+            // Invalid UTF-8
+            closeOutboundConnection(Constants.STATUS_BAD_DATA, null);
+            return SocketState.CLOSED;
+        } catch (UnmappableCharacterException uce) {
+            // Invalid UTF-8
+            closeOutboundConnection(Constants.STATUS_BAD_DATA, null);
+            return SocketState.CLOSED;
+        } catch (IOException ioe) {
+            // Given something must have gone to reach this point, this
+            // might not work but try it anyway.
+            closeOutboundConnection(Constants.STATUS_PROTOCOL_ERROR, null);
+            return SocketState.CLOSED;
         }
-        // TODO Required once while loop is fixed
-        // return SocketState.UPGRADED;
+        return SocketState.UPGRADED;
+    }
+
+    private void closeOutboundConnection(int status, ByteBuffer data) throws IOException {
+        try {
+            getWsOutbound().close(status, data);
+        } finally {
+            onClose(status);
+        }
+    }
+
+    private void closeOutboundConnection(WsFrame frame) throws IOException {
+        try {
+            getWsOutbound().close(frame);
+        } finally {
+            onClose(Constants.OPCODE_CLOSE);
+        }
+    }
+
+    @Override
+    public void onUpgradeComplete() {
+        onOpen(outbound);
+    }
+
+    /**
+     * Intended to be overridden by sub-classes that wish to be notified
+     * when the outbound connection is established. The default implementation
+     * is a NO-OP.
+     *
+     * @param outbound    The outbound WebSocket connection.
+     */
+    protected void onOpen(WsOutbound outbound) {
+        // NO-OP
+    }
+
+    /**
+     * Intended to be overridden by sub-classes that wish to be notified
+     * when the outbound connection is closed. The default implementation
+     * is a NO-OP.
+     *
+     * @param status    The status code of the close reason.
+     */
+    protected void onClose(int status) {
+        // NO-OP
     }
 
 

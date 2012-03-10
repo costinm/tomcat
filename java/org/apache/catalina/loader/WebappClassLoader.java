@@ -27,6 +27,7 @@ import java.io.InputStream;
 import java.lang.ref.Reference;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.net.MalformedURLException;
@@ -2244,8 +2245,7 @@ public class WebappClassLoader
                     }
 
                     // TimerThread can be stopped safely so treat separately
-                    if (thread.getClass().getName().equals(
-                            "java.util.TimerThread") &&
+                    if (thread.getClass().getName().startsWith("java.util.Timer") &&
                             clearReferencesStopTimerThreads) {
                         clearReferencesStopTimerThread(thread);
                         continue;
@@ -2268,20 +2268,28 @@ public class WebappClassLoader
                     // If the thread has been started via an executor, try
                     // shutting down the executor
                     try {
-                        Field targetField =
-                            thread.getClass().getDeclaredField("target");
-                        targetField.setAccessible(true);
-                        Object target = targetField.get(thread);
 
-                        if (target != null &&
-                                target.getClass().getCanonicalName().equals(
-                                "java.util.concurrent.ThreadPoolExecutor.Worker")) {
-                            Field executorField =
-                                target.getClass().getDeclaredField("this$0");
-                            executorField.setAccessible(true);
-                            Object executor = executorField.get(target);
-                            if (executor instanceof ThreadPoolExecutor) {
-                                ((ThreadPoolExecutor) executor).shutdownNow();
+                        Field targetField = null;
+                        try {
+                            targetField = thread.getClass().getDeclaredField("target");
+                        }catch (NoSuchFieldException nfe){
+                            targetField = thread.getClass().getDeclaredField("runnable");
+                        }
+                        if (null != targetField){
+                            targetField.setAccessible(true);
+                            Object target = targetField.get(thread);
+
+                            if (target != null &&
+                                    target.getClass().getCanonicalName() != null
+                                    && target.getClass().getCanonicalName().equals(
+                                    "java.util.concurrent.ThreadPoolExecutor.Worker")) {
+                                Field executorField =
+                                    target.getClass().getDeclaredField("this$0");
+                                executorField.setAccessible(true);
+                                Object executor = executorField.get(target);
+                                if (executor instanceof ThreadPoolExecutor) {
+                                    ((ThreadPoolExecutor) executor).shutdownNow();
+                                }
                             }
                         }
                     } catch (SecurityException e) {
@@ -2350,21 +2358,33 @@ public class WebappClassLoader
         // - queue.clear()
 
         try {
-            Field newTasksMayBeScheduledField =
-                thread.getClass().getDeclaredField("newTasksMayBeScheduled");
-            newTasksMayBeScheduledField.setAccessible(true);
-            Field queueField = thread.getClass().getDeclaredField("queue");
-            queueField.setAccessible(true);
 
-            Object queue = queueField.get(thread);
+            try {
+                Field newTasksMayBeScheduledField =
+                    thread.getClass().getDeclaredField("newTasksMayBeScheduled");
+                newTasksMayBeScheduledField.setAccessible(true);
+                Field queueField = thread.getClass().getDeclaredField("queue");
+                queueField.setAccessible(true);
 
-            Method clearMethod = queue.getClass().getDeclaredMethod("clear");
-            clearMethod.setAccessible(true);
+                Object queue = queueField.get(thread);
 
-            synchronized(queue) {
-                newTasksMayBeScheduledField.setBoolean(thread, false);
-                clearMethod.invoke(queue);
-                queue.notify();  // In case queue was already empty.
+                Method clearMethod = queue.getClass().getDeclaredMethod("clear");
+                clearMethod.setAccessible(true);
+
+                synchronized(queue) {
+                    newTasksMayBeScheduledField.setBoolean(thread, false);
+                    clearMethod.invoke(queue);
+                    queue.notify();  // In case queue was already empty.
+                }
+
+            }catch (NoSuchFieldException nfe){
+                Method cancelMethod = thread.getClass().getDeclaredMethod("cancel");
+                if (null != cancelMethod){
+                    synchronized(thread) {
+                        cancelMethod.setAccessible(true);
+                        cancelMethod.invoke(thread);
+                    }
+                }
             }
 
             log.error(sm.getString("webappClassLoader.warnTimerThread",
@@ -2394,21 +2414,29 @@ public class WebappClassLoader
             inheritableThreadLocalsField.setAccessible(true);
             // Make the underlying array of ThreadLoad.ThreadLocalMap.Entry objects
             // accessible
-            Class<?> tlmClass =
-                Class.forName("java.lang.ThreadLocal$ThreadLocalMap");
+            Class<?> tlmClass = Class.forName("java.lang.ThreadLocal$ThreadLocalMap");
             Field tableField = tlmClass.getDeclaredField("table");
             tableField.setAccessible(true);
+            Method expungeStaleEntriesMethod = tlmClass.getDeclaredMethod("expungeStaleEntries");
+            expungeStaleEntriesMethod.setAccessible(true);
 
             for (int i = 0; i < threads.length; i++) {
                 Object threadLocalMap;
                 if (threads[i] != null) {
+
                     // Clear the first map
                     threadLocalMap = threadLocalsField.get(threads[i]);
-                    checkThreadLocalMapForLeaks(threadLocalMap, tableField);
+                    if (null != threadLocalMap){
+                        expungeStaleEntriesMethod.invoke(threadLocalMap);
+                        checkThreadLocalMapForLeaks(threadLocalMap, tableField);
+                    }
+
                     // Clear the second map
-                    threadLocalMap =
-                        inheritableThreadLocalsField.get(threads[i]);
-                    checkThreadLocalMapForLeaks(threadLocalMap, tableField);
+                    threadLocalMap =inheritableThreadLocalsField.get(threads[i]);
+                    if (null != threadLocalMap){
+                        expungeStaleEntriesMethod.invoke(threadLocalMap);
+                        checkThreadLocalMapForLeaks(threadLocalMap, tableField);
+                    }
                 }
             }
         } catch (SecurityException e) {
@@ -2424,6 +2452,12 @@ public class WebappClassLoader
             log.warn(sm.getString("webappClassLoader.checkThreadLocalsForLeaksFail",
                     contextName), e);
         } catch (IllegalAccessException e) {
+            log.warn(sm.getString("webappClassLoader.checkThreadLocalsForLeaksFail",
+                    contextName), e);
+        } catch (InvocationTargetException e) {
+            log.warn(sm.getString("webappClassLoader.checkThreadLocalsForLeaksFail",
+                    contextName), e);
+        } catch (NoSuchMethodException e) {
             log.warn(sm.getString("webappClassLoader.checkThreadLocalsForLeaksFail",
                     contextName), e);
         }
@@ -2529,7 +2563,7 @@ public class WebappClassLoader
 
         ClassLoader cl = clazz.getClassLoader();
         while (cl != null) {
-            if(cl == this) {
+            if (cl == this) {
                 return true;
             }
             cl = cl.getParent();
@@ -3311,44 +3345,53 @@ public class WebappClassLoader
      * Check the specified JAR file, and return <code>true</code> if it does
      * not contain any of the trigger classes.
      *
-     * @param jarfile The JAR file to be checked
+     * @param file  The JAR file to be checked
      *
      * @exception IOException if an input/output error occurs
      */
-    protected boolean validateJarFile(File jarfile)
+    protected boolean validateJarFile(File file)
         throws IOException {
 
         if (triggers == null)
             return (true);
-        JarFile jarFile = new JarFile(jarfile);
-        for (int i = 0; i < triggers.length; i++) {
-            Class<?> clazz = null;
-            try {
-                if (parent != null) {
-                    clazz = parent.loadClass(triggers[i]);
-                } else {
-                    clazz = Class.forName(triggers[i]);
+
+        JarFile jarFile = null;
+        try {
+            jarFile = new JarFile(file);
+            for (int i = 0; i < triggers.length; i++) {
+                Class<?> clazz = null;
+                try {
+                    if (parent != null) {
+                        clazz = parent.loadClass(triggers[i]);
+                    } else {
+                        clazz = Class.forName(triggers[i]);
+                    }
+                } catch (Exception e) {
+                    clazz = null;
                 }
-            } catch (Exception e) {
-                clazz = null;
+                if (clazz == null)
+                    continue;
+                String name = triggers[i].replace('.', '/') + ".class";
+                if (log.isDebugEnabled())
+                    log.debug(" Checking for " + name);
+                JarEntry jarEntry = jarFile.getJarEntry(name);
+                if (jarEntry != null) {
+                    log.info("validateJarFile(" + file +
+                        ") - jar not loaded. See Servlet Spec 2.3, "
+                        + "section 9.7.2. Offending class: " + name);
+                    return false;
+                }
             }
-            if (clazz == null)
-                continue;
-            String name = triggers[i].replace('.', '/') + ".class";
-            if (log.isDebugEnabled())
-                log.debug(" Checking for " + name);
-            JarEntry jarEntry = jarFile.getJarEntry(name);
-            if (jarEntry != null) {
-                log.info("validateJarFile(" + jarfile +
-                    ") - jar not loaded. See Servlet Spec 2.3, "
-                    + "section 9.7.2. Offending class: " + name);
-                jarFile.close();
-                return (false);
+            return true;
+        } finally {
+            if (jarFile != null) {
+                try {
+                    jarFile.close();
+                } catch (IOException ioe) {
+                    // Ignore
+                }
             }
         }
-        jarFile.close();
-        return (true);
-
     }
 
 
