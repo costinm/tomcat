@@ -42,7 +42,6 @@ public class SecureNioChannel extends NioChannel  {
     protected ByteBuffer netOutBuffer;
 
     protected SSLEngine sslEngine;
-    protected String npn;
 
     protected boolean handshakeComplete = false;
     protected HandshakeStatus handshakeStatus; //gets set by handshake

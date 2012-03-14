@@ -36,24 +36,22 @@ import org.apache.tomcat.jni.Status;
 import org.apache.tomcat.jni.socket.AprSocketContext.AprPoller;
 import org.apache.tomcat.jni.socket.AprSocketContext.BlockingPollHandler;
 
-import com.sun.org.apache.bcel.internal.generic.GETSTATIC;
-
 /**
- * Native socket, using JNI + APR + openssl. 
- * 
+ * Native socket, using JNI + APR + openssl.
+ *
  * The socket is non-blocking - you can register either a blocking or non
  * blocking callback.
- * 
- * There is no explicit method to register/unregister poll interest - 
+ *
+ * There is no explicit method to register/unregister poll interest -
  * it is done automatically, when read/write methods return 0.
- * 
+ *
  * To keep the socket polling you must read all the available data, until
  * read() returns 0. If you want to pause - don't read all input. To resume -
  * read again until it returns 0.
- * 
- * Same for write - when write() returns 0 the socket is registered for 
- * write interest. 
- * 
+ *
+ * Same for write - when write() returns 0 the socket is registered for
+ * write interest.
+ *
  * You can also use the blocking read/write methods.
  */
 public class AprSocket implements Runnable {
@@ -64,13 +62,13 @@ public class AprSocket implements Runnable {
 
     static int CONNECTING = 1;
     static int CONNECTED = 0x2;
-    
+
     // Current ( real ) poll status
     static int POLLIN_ACTIVE = 0x4;
     static int POLLOUT_ACTIVE = 0x8;
-    
+
     static int POLL = 0x10;
-    
+
     static int SSL_ATTACHED = 0x40;
 
     // Requested poll status. Set by read/write when needed.
@@ -91,19 +89,19 @@ public class AprSocket implements Runnable {
     // only one - to save per/socket memory - context has similar callbacks.
     BlockingPollHandler handler;
 
-    // Set while it's associated with a poller - it'll stay associated after 
+    // Set while it's associated with a poller - it'll stay associated after
     // connect until close. Destroy will happen in the poller.
     // POLL bit indicates if the socket is actually polling.
     AprPoller poller;
-    
-    // Bit field indicating the status and socket should only be accessed with 
+
+    // Bit field indicating the status and socket should only be accessed with
     // socketLock protection
     private int status;
-    
+
     long socket;
 
     //long to = 10000;
-    
+
     // Persistent info about the peer ( SSL, etc )
     private HostInfo hostInfo;
 
@@ -119,15 +117,16 @@ public class AprSocket implements Runnable {
         poller = null;
     }
 
+    @Override
     public String toString() {
-        return (context.isServer() ? "AprSrv-" : "AprCli-") + 
+        return (context.isServer() ? "AprSrv-" : "AprCli-") +
                 Long.toHexString(socket) + " " + Integer.toHexString(status);
     }
 
     public void setHandler(BlockingPollHandler l) {
         handler = l;
     }
-    
+
     private void setNonBlocking() {
         if (socket != 0 && context.running) {
             Socket.optSet(socket, Socket.APR_SO_NONBLOCK, 1);
@@ -147,7 +146,7 @@ public class AprSocket implements Runnable {
     public BlockingPollHandler getHandler() {
         return handler;
     }
-    
+
     public AprSocketContext getContext() {
         return context;
     }
@@ -156,7 +155,7 @@ public class AprSocket implements Runnable {
         hostInfo = hi;
         return this;
     }
-     
+
     /**
      */
     public void connect() throws IOException {
@@ -186,21 +185,21 @@ public class AprSocket implements Runnable {
 
         setStatus(CONNECTED);
         clearStatus(CONNECTING);
-        
+
         notifyConnected(false);
     }
-    
+
     public HostInfo getHost() {
         return hostInfo;
     }
 
     /**
-     * Write. 
-     * 
-     *  For both blocking and non-blocking, it'll return the number of bytes 
+     * Write.
+     *
+     *  For both blocking and non-blocking, it'll return the number of bytes
      *  written - it'll attempt to send as much as possible, but if the buffers
-     *  are full it'll return 0. 
-     *  
+     *  are full it'll return 0.
+     *
      * @param data
      * @param off
      * @param len
@@ -215,7 +214,7 @@ public class AprSocket implements Runnable {
             if (rc < 0) {
                 throw new IOException("Write error " + rc);
             } else if (rc == 0) {
-                // need poll out - do we need to update polling ? 
+                // need poll out - do we need to update polling ?
                 context.findPollerAndAdd(this);
             } else {
                 return rc;
@@ -239,20 +238,20 @@ public class AprSocket implements Runnable {
         if (rc < 0) {
             throw new IOException("Write error " + rc);
         } else if (rc == 0) {
-            // need poll out - do we need to update polling ? 
+            // need poll out - do we need to update polling ?
             synchronized (this) {
                 context.findPollerAndAdd(this);
             }
         }
         return rc;
     }
-    
+
     private int writeInternal(byte[] data, int off, int len) throws IOException {
         int rt = 0;
         int sent = 0;
         synchronized(this) {
-            if ((status & CLOSED) != 0 
-                    || socket == 0 
+            if ((status & CLOSED) != 0
+                    || socket == 0
                     || !context.running) {
                 throw new IOException("Closed");
             }
@@ -260,7 +259,7 @@ public class AprSocket implements Runnable {
                 throw new IOException("Write from 2 threads not allowed");
             }
             status |= WRITING;
-            
+
             while (len > 0) {
                 sent = Socket.send(socket, data, off, len);
                 if (sent <= 0) {
@@ -287,7 +286,7 @@ public class AprSocket implements Runnable {
                 log.warning("apr.send(): Failed to send, closing " + sent);
             }
             reset();
-            throw new IOException("Error sending " + sent + " " + Error.strerror((int) -sent));
+            throw new IOException("Error sending " + sent + " " + Error.strerror(-sent));
         } else {
             off += sent;
             len -= sent;
@@ -320,12 +319,12 @@ public class AprSocket implements Runnable {
         if (context.rawDataHandler != null) {
             context.rawData(this, true, data, off, read, len, false);
         }
-        
+
         if (read > 0) {
             return read;
         }
 
-        if (read == 0 || read == -Status.TIMEUP || read == -Status.ETIMEDOUT 
+        if (read == 0 || read == -Status.TIMEUP || read == -Status.ETIMEDOUT
                 || read == -Status.EAGAIN) {
             read = 0;
             setStatus(POLLIN);
@@ -339,19 +338,14 @@ public class AprSocket implements Runnable {
         }
         // abrupt close
         reset();
-        String sslErr = checkPreConnect(SSL_ATTACHED) ? 
-            SSLExt.sslErrReasonErrorString() : "";
-        
-        throw new IOException("apr.read(): " + read + " " + 
-                sslErr + " " +
-                Error.strerror((int) -read));
+        throw new IOException("apr.read(): " + read + " " + Error.strerror(-read));
     }
 
     public int readNB(byte[] data, int off, int len) throws IOException {
         int read;
         synchronized(this) {
-            if ((status & CLOSED) != 0 
-                    || socket == 0 
+            if ((status & CLOSED) != 0
+                    || socket == 0
                     || !context.running) {
                 return -1;
             }
@@ -359,19 +353,19 @@ public class AprSocket implements Runnable {
                 throw new IOException("Read from 2 threads not allowed");
             }
             status |= READING;
-            
+
             read = Socket.recv(socket, data, off, len);
             status &= ~READING;
         }
         return processReadResult(data, off, len, read);
     }
-    
+
     /*
       No support for shutdownOutput: SSL is quite tricky.
       Use close() instead - no read/write will be allowed after.
-     
+
      */
-    
+
     public void close() throws IOException {
         synchronized (this) {
             if ((status & CLOSED) != 0 || socket == 0) {
@@ -380,7 +374,7 @@ public class AprSocket implements Runnable {
             status |= CLOSED;
             status &= ~POLLIN;
             status &= ~POLLOUT;
-        }            
+        }
         if (context.rawDataHandler != null) {
             context.rawDataHandler.rawData(this, false, null, 0, 0, 0, true);
         }
@@ -411,41 +405,41 @@ public class AprSocket implements Runnable {
             if ((status & (WRITING | READING)) != 0) {
                 return; // not closed
             }
-            
+
             if (context.rawDataHandler != null) {
                 context.rawDataHandler.rawData(this, false, null, -1, -1, -1, true);
             }
             if (context.debug) {
                 log.info("closing: context.open=" + context.open.get() + " " + this);
             }
-            
+
             context.open.decrementAndGet();
-            
+
             if (socket != 0 && (status & CLOSED) == 0) {
                 Socket.close(socket);
                 status |= CLOSED;
             }
-            
+
             if (handler != null) {
                 if (isBlocking()) {
                     context.getExecutor().execute(this);
                 } else {
-                    handler.closed(this);                    
+                    handler.closed(this);
                 }
             }
-            
+
             context.destroySocket(this);
         }
     }
 
-    
-    
+
+
     /**
      * Close input and output, potentially sending RST, than close the socket.
-     * 
-     * The proper way to close when gracefully done is by calling writeEnd() and 
-     * reading all remaining input until -1 (EOF) is received. 
-     * 
+     *
+     * The proper way to close when gracefully done is by calling writeEnd() and
+     * reading all remaining input until -1 (EOF) is received.
+     *
      * If EOF is received, the proper way to close is send whatever is remaining and
      * call writeEnd();
      */
@@ -457,7 +451,7 @@ public class AprSocket implements Runnable {
             e.printStackTrace();
         }
     }
-    
+
 
     /**
      */
@@ -477,7 +471,7 @@ public class AprSocket implements Runnable {
             } catch (Exception e) {
                 throw new IOException(e);
             }
-        } else { 
+        } else {
             throw new IOException("Socket is closed");
         }
     }
@@ -638,7 +632,7 @@ public class AprSocket implements Runnable {
         }
         throw new IOException("Socket closed");
     }
-    
+
     public boolean isBlocking() {
         return ! (handler instanceof AprSocketContext.NonBlockingPollHandler);
     }
@@ -650,7 +644,7 @@ public class AprSocket implements Runnable {
     void notifyError(Throwable err, boolean needsThread) {
         if (handler instanceof AprSocketContext.NonBlockingPollHandler) {
             if (err != null) {
-                ((AprSocketContext.NonBlockingPollHandler) handler).error(this, err);                
+                ((AprSocketContext.NonBlockingPollHandler) handler).error(this, err);
             }
         } else {
             // poller destroyed, etc
@@ -689,16 +683,16 @@ public class AprSocket implements Runnable {
     private void notifyConnected(boolean server) throws IOException {
         // Will set the handler on the channel for accepted
         context.onSocket(this);
-        
+
         if (handler instanceof AprSocketContext.NonBlockingPollHandler) {
             ((AprSocketContext.NonBlockingPollHandler) handler).connected(this);
-            
+
             ((AprSocketContext.NonBlockingPollHandler) handler).process(this, true, true, false);
-            // Now register for polling - unless process() set suspendRead and 
+            // Now register for polling - unless process() set suspendRead and
             // doesn't need out notifications
             updatePolling();
         } else {
-            if (server) { 
+            if (server) {
                 // client will block in connect().
                 // Server: call process();
                 notifyIO();
@@ -733,7 +727,7 @@ public class AprSocket implements Runnable {
                     context.open.incrementAndGet();
 
                     if (context.debug) {
-                        log.info("Accept: " + context.open.get() + " " + this + " " + 
+                        log.info("Accept: " + context.open.get() + " " + this + " " +
                                 getRemotePort());
                     }
                     if (context.tcpNoDelay) {
@@ -746,7 +740,7 @@ public class AprSocket implements Runnable {
                         blockingStartTLS();
                     }
                     setNonBlocking(); // call again, to set the bits ( connect was blocking )
-                    
+
                     notifyConnected(true);
                     return;
                 } catch (Throwable t) {
@@ -755,7 +749,7 @@ public class AprSocket implements Runnable {
                     notifyError(t, false);
                     return;
                 }
-            } 
+            }
             if (checkPreConnect(CONNECTING)) {
                 // Non-blocking connect - will call 'afterConnection' at the end.
                 try {
@@ -763,7 +757,7 @@ public class AprSocket implements Runnable {
                 } catch (IOException t) {
                     reset(); // also sets status ERROR
                     if (handler instanceof AprSocketContext.NonBlockingPollHandler) {
-                        ((AprSocketContext.NonBlockingPollHandler) handler).process(this, false, false, true);                
+                        ((AprSocketContext.NonBlockingPollHandler) handler).process(this, false, false, true);
                     }
                     notifyError(t, false);
                 }
@@ -783,12 +777,12 @@ public class AprSocket implements Runnable {
 
     /**
      * This is a blocking call ! ( can be made non-blocking, but too complex )
-     * 
+     *
      * Will be called automatically after connect() or accept if 'secure' is
      * true.
-     * 
+     *
      * Can be called manually to upgrade the channel
-     * @throws IOException 
+     * @throws IOException
      */
     public void blockingStartTLS() throws IOException {
         synchronized(this) {
@@ -800,19 +794,19 @@ public class AprSocket implements Runnable {
             }
             status |= SSL_ATTACHED;
         }
-        
+
         try {
             if (context.debug) {
                 log.info(this + " StartSSL");
             }
-    
-            AprSocketContext aprCon = (AprSocketContext) context;
+
+            AprSocketContext aprCon = context;
             SSLSocket.attach(aprCon.getSslCtx(), socket);
-    
+
             if (context.debugSSL) {
                 SSLExt.debug(socket);
             }
-            if (!((AprSocketContext) getContext()).isServer()) {
+            if (!getContext().isServer()) {
                 if (context.USE_TICKETS && hostInfo.ticketLen > 0) {
                     SSLExt.setTicket(socket, hostInfo.ticket,
                             hostInfo.ticketLen);
@@ -821,17 +815,17 @@ public class AprSocket implements Runnable {
                             hostInfo.sessDer.length);
                 }
             }
-            SSLExt.sslSetMode(socket, SSLExt.SSL_MODE_ENABLE_PARTIAL_WRITE | 
+            SSLExt.sslSetMode(socket, SSLExt.SSL_MODE_ENABLE_PARTIAL_WRITE |
                     SSLExt.SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
-    
+
             int rc = SSLSocket.handshake(socket);
-    
-            // At this point we have the session ID, remote certs, etc 
+
+            // At this point we have the session ID, remote certs, etc
             // we can lookup host info
             if (hostInfo == null) {
                 hostInfo = new HostInfo();
             }
-            
+
             if (rc != Status.APR_SUCCESS) {
                 throw new IOException(this + " Handshake failed " + rc + " "
                         + Error.strerror(rc) + " SSLL "
@@ -863,8 +857,8 @@ public class AprSocket implements Runnable {
                 }
             }
         }
-    
-        // TODO: if the ticket, session id or session changed - callback to 
+
+        // TODO: if the ticket, session id or session changed - callback to
         // save the session again
         try {
             hostInfo.sessDer = SSLExt.getSessionData(socket);
@@ -874,13 +868,13 @@ public class AprSocket implements Runnable {
         } catch (Exception e) {
             throw new IOException(e);
         }
-    
+
         hostInfo.npn = new byte[32];
         hostInfo.npnLen = SSLExt.getNPN(socket, hostInfo.npn);
-    
+
         // If custom verification is used - should check the certificates
         if (context.tlsCertVerifier != null) {
-            context.tlsCertVerifier.handshakeDone(this);            
+            context.tlsCertVerifier.handshakeDone(this);
         }
     }
 
@@ -890,7 +884,7 @@ public class AprSocket implements Runnable {
                 return 0;
             }
             // Implicit:
-            //Poll.APR_POLLNVAL | Poll.APR_POLLHUP | Poll.APR_POLLERR | 
+            //Poll.APR_POLLNVAL | Poll.APR_POLLHUP | Poll.APR_POLLERR |
             int res = 0;
             if ((status & POLLIN) != 0) {
                 res = Poll.APR_POLLIN;
@@ -901,10 +895,10 @@ public class AprSocket implements Runnable {
             return res;
         }
     }
-    
+
     boolean checkBitAndSocket(int bit) {
         synchronized (this) {
-            return ((status & bit) != 0 && socket != 0 && 
+            return ((status & bit) != 0 && socket != 0 &&
                     (status & CLOSED) == 0 && context.running);
         }
     }
@@ -928,6 +922,6 @@ public class AprSocket implements Runnable {
             return old != 0;
         }
     }
-    
-    
+
+
 }

@@ -114,7 +114,7 @@ import org.apache.tomcat.util.res.StringManager;
  * </p>
  * @author Craig R. McClanahan
  * @author Remy Maucherat
- * @version $Id$
+ * @version $Id: DefaultServlet.java 1299821 2012-03-12 20:12:01Z markt $
  */
 
 public class DefaultServlet
@@ -158,7 +158,7 @@ public class DefaultServlet
     /**
      * Array containing the safe characters set.
      */
-    protected static URLEncoder urlEncoder;
+    protected static final URLEncoder urlEncoder;
 
 
     /**
@@ -211,7 +211,7 @@ public class DefaultServlet
     /**
      * Full range marker.
      */
-    protected static ArrayList<Range> FULL = new ArrayList<Range>();
+    protected static final ArrayList<Range> FULL = new ArrayList<Range>();
 
 
     // ----------------------------------------------------- Static Initializer
@@ -711,22 +711,6 @@ public class DefaultServlet
      */
     protected String rewriteUrl(String path) {
         return urlEncoder.encode( path );
-    }
-
-
-    /**
-     * Display the size of a file.
-     */
-    protected void displaySize(StringBuilder buf, int filesize) {
-
-        int leftside = filesize / 1024;
-        int rightside = (filesize % 1024) / 103;  // makes 1 digit
-        // To avoid 0.0 for non-zero file, we bump to 0.1
-        if (leftside == 0 && rightside == 0 && filesize != 0)
-            rightside = 1;
-        buf.append(leftside).append(".").append(rightside);
-        buf.append(" KB");
-
     }
 
 
