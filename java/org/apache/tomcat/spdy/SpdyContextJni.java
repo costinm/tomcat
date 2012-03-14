@@ -146,6 +146,13 @@ public class SpdyContextJni extends SpdyContext {
 
         public SpdyConnectionAprSocket(SpdyContext spdyContext) {
             super(spdyContext);
+<<<<<<< HEAD
+=======
+            //setCompressSupport(new CompressJzlib());
+            if (spdyContext.compression) {
+                setCompressSupport(new CompressDeflater6());
+            }
+>>>>>>> upstream/trunk
         }
 
         public void setSocket(AprSocket ch) {
