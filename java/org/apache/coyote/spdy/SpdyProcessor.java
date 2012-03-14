@@ -31,8 +31,8 @@ import org.apache.coyote.Request;
 import org.apache.coyote.RequestInfo;
 import org.apache.coyote.Response;
 import org.apache.coyote.http11.upgrade.UpgradeInbound;
-import org.apache.tomcat.spdy.SpdyFrame;
 import org.apache.tomcat.spdy.SpdyConnection;
+import org.apache.tomcat.spdy.SpdyFrame;
 import org.apache.tomcat.spdy.SpdyStream;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.buf.Ascii;
@@ -460,7 +460,8 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
         }
         rframe.addHeader(SpdyFrame.VERSION, SpdyFrame.HTTP11);
 
-        spdy.sendFrameBlocking(rframe, spdyStream);
+        rframe.streamId = spdyStream.reqFrame.streamId;
+        spdy.send(rframe, spdyStream);
         // we can't reuse the frame - it'll be queued, the coyote processor
         // may be reused as well.
         outCommit = true;

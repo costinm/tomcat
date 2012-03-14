@@ -47,6 +47,8 @@ import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLSessionContext;
 import javax.net.ssl.X509KeyManager;
 
+import org.apache.coyote.Adapter;
+import org.apache.coyote.spdy.SpdyNioNpnHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
@@ -316,6 +318,12 @@ public class NioEndpoint extends AbstractEndpoint {
     public void setHandler(Handler handler ) { this.handler = handler; }
     public Handler getHandler() { return handler; }
 
+    NioNpnHandler npnHandler = new SpdyNioNpnHandler();
+    public void setNpnHandler(String handlerClass ) { 
+        // TODO
+    }
+    public NioNpnHandler getNpnHandler() { return npnHandler; }
+    
 
     /**
      * Allow comet request handling.
@@ -647,7 +655,6 @@ public class NioEndpoint extends AbstractEndpoint {
             socket.configureBlocking(false);
             Socket sock = socket.socket();
             socketProperties.setProperties(sock);
-
             NioChannel channel = nioChannels.poll();
             if ( channel == null ) {
                 // SSL setup
@@ -665,6 +672,7 @@ public class NioEndpoint extends AbstractEndpoint {
                                                                        socketProperties.getDirectBuffer());
 
                     channel = new NioChannel(socket, bufhandler);
+                    
                 }
             } else {
                 channel.setIOChannel(socket);
@@ -702,6 +710,10 @@ public class NioEndpoint extends AbstractEndpoint {
         engine.setUseClientMode(false);
         if ( getCiphersArray().length > 0 ) engine.setEnabledCipherSuites(getCiphersArray());
         if ( getSslEnabledProtocolsArray().length > 0 ) engine.setEnabledProtocols(getSslEnabledProtocolsArray());
+        
+        if (npnHandler != null) {
+            npnHandler.onCreateEngine(engine);
+        }
 
         return engine;
     }
@@ -1555,6 +1567,12 @@ public class NioEndpoint extends AbstractEndpoint {
         public SSLImplementation getSslImplementation();
     }
 
+    public static interface NioNpnHandler {
+        public void onCreateEngine(SSLEngine engine);
+        public SocketState process(KeyAttachment socket, SocketStatus socketStatus);
+        public void init(NioEndpoint endpoint, Adapter adapter);
+    }
+    
 
     // ---------------------------------------------- SocketProcessor Inner Class
     /**
@@ -1584,7 +1602,6 @@ public class NioEndpoint extends AbstractEndpoint {
                 try {
                     key = socket.getIOChannel().keyFor(socket.getPoller().getSelector());
                     int handshake = -1;
-
                     try {
                         if (key!=null) handshake = socket.handshake(key.isReadable(), key.isWritable());
                     }catch ( IOException x ) {
@@ -1595,17 +1612,27 @@ public class NioEndpoint extends AbstractEndpoint {
                     }
                     if ( handshake == 0 ) {
                         SocketState state = SocketState.OPEN;
+                        KeyAttachment socketWrapper = (KeyAttachment) key.attachment();
+                        
+                        if (npnHandler != null) {
+                            state = npnHandler.process(socketWrapper,
+                                    status == null ? SocketStatus.OPEN : status);
+                            
+                        }
+                        
                         // Process the request from this socket
                         // Suppress null warnings for key in this block since
                         // key can't be null in this block
-                        if (status == null) {
-                            state = handler.process(
-                                    (KeyAttachment) key.attachment(),
-                                    SocketStatus.OPEN);
-                        } else {
-                            state = handler.process(
-                                    (KeyAttachment) key.attachment(),
-                                    status);
+                        if (state == SocketState.OPEN) {
+                            if (status == null) {
+                                state = handler.process(
+                                        socketWrapper,
+                                        SocketStatus.OPEN);
+                            } else {
+                                state = handler.process(
+                                        socketWrapper,
+                                        status);
+                            }
                         }
 
                         if (state == SocketState.CLOSED) {

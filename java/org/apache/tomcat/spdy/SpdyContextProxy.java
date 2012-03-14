@@ -20,7 +20,7 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
-import java.util.concurrent.Semaphore;
+import java.net.UnknownHostException;
 
 /**
  * Spdy context for 'proxy' or test mode spdy - no NPN, no SSL, no compression.
@@ -31,11 +31,14 @@ import java.util.concurrent.Semaphore;
  */
 public class SpdyContextProxy extends SpdyContext {
 
+    protected Socket getSocket(String host, int port) throws IOException {
+        return new Socket(host, port);
+    }
 
     @Override
     public SpdyConnection getConnection(String host, int port) throws IOException {
         try {
-            Socket sock = new Socket(host, port);
+            Socket sock = getSocket(host, port);
 
             sock.getInputStream();
             SpdyConnectionSocket con = new SpdyConnectionSocket(this, sock);

@@ -51,6 +51,9 @@ public class SpdyContext {
 
     public static boolean debug = false;
 
+    protected boolean tls = true;
+    protected boolean compression = false;
+
     /**
      * Get a frame - frames are heavy buffers, may be reused.
      */

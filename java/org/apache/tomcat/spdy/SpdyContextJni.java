@@ -7,13 +7,17 @@ import java.io.IOException;
 import org.apache.tomcat.jni.Status;
 import org.apache.tomcat.jni.socket.AprSocket;
 import org.apache.tomcat.jni.socket.AprSocketContext;
+import org.apache.tomcat.jni.socket.AprSocketContext.NonBlockingPollHandler;
 import org.apache.tomcat.jni.socket.AprSocketContext.TlsCertVerifier;
-import org.apache.tomcat.jni.socket.AprSocketHandler;
 
 public class SpdyContextJni extends SpdyContext {
     AprSocketContext con;
-
+    
+    //AprSocketContext socketCtx;
+    
     public SpdyContextJni() {
+        compression = true;
+        tls = true;
         con = new AprSocketContext();
         //if (insecureCerts) {
         con.customVerification(new TlsCertVerifier() {
@@ -29,91 +33,102 @@ public class SpdyContextJni extends SpdyContext {
     public SpdyConnection getConnection(String host, int port) throws IOException {
         SpdyConnectionAprSocket spdy = new SpdyConnectionAprSocket(this);
         
-        AprSocket ch = con.socket(host, port, true);
+        AprSocket ch = con.socket(host, port, tls);
 
         spdy.setSocket(ch);
 
         ch.connect();
 
-        getExecutor().execute(spdy.inputThread);
-        return spdy;
-    }
-    
-    public SpdyConnection getConnection(AprSocket ch, boolean needTP) {
-        SpdyConnectionAprSocket spdy = new SpdyConnectionAprSocket(this);
-        spdy.setSocket(ch);
-
-        if (needTP) {
-            getExecutor().execute(spdy.inputThread);
-        } else {
-            spdy.inputThread.run();
+        ch.setHandler(new SpdySocketHandler(spdy));
+        
+        // need to consume the input to receive more read events
+        int rc = spdy.processInput();
+        if (rc == SpdyConnection.CLOSE) {
+            ch.close();
+            throw new IOException("Error connecting");
         }
+
         return spdy;
     }
-
     
-    AprSocketContext socketCtx;
+    public void onAccept(long socket) throws IOException {
+        SpdyConnectionAprSocket spdy = new SpdyConnectionAprSocket(SpdyContextJni.this);
+        AprSocket s = con.socket(socket);
+        spdy.setSocket(s);
+        
+        SpdySocketHandler handler = new SpdySocketHandler(spdy);
+        s.setHandler(handler);    
+        handler.process(s, true, true, false);
+    }
     
     public void listen(final int port, String cert, String key) throws IOException {
-        socketCtx = new AprSocketContext() {
+        con = new AprSocketContext() {
             protected void onSocket(AprSocket s) throws IOException {
-                SpdySocketHandler handler = new SpdySocketHandler();
+                SpdyConnectionAprSocket spdy = new SpdyConnectionAprSocket(SpdyContextJni.this);
+                spdy.setSocket(s);
+                
+                SpdySocketHandler handler = new SpdySocketHandler(spdy);
                 s.setHandler(handler);
             }
         };
         
-        socketCtx.setNpn(SpdyContext.SPDY_NPN_OUT);
-        socketCtx.setKeys(cert, key);
+        con.setNpn(SpdyContext.SPDY_NPN_OUT);
+        con.setKeys(cert, key);
         
-        socketCtx.listen(port);
+        con.listen(port);
     }
 
     public void stop() throws IOException {
-        socketCtx.stop();
+        con.stop();
     }
     
     public AprSocketContext getAprContext() {
         return con;
     } 
     
-    class SpdySocketHandler implements AprSocketHandler {
+    // NB
+    class SpdySocketHandler implements NonBlockingPollHandler {
         SpdyConnection con;
         
-        @Override
-        public void process(AprSocket ch) throws IOException {
-            getConnection(ch, false);
+        SpdySocketHandler(SpdyConnection con) {
+            this.con = con;
         }
-
+        
         @Override
         public void closed(AprSocket ch) {
             // not used ( polling not implemented yet )
         }
+
+        @Override
+        public void process(AprSocket ch, boolean in, boolean out, boolean close) {
+            try {
+                int rc = con.processInput();
+                if (rc == SpdyConnection.CLOSE) {
+                    ch.close();
+                }
+                con.drain();
+            } catch (IOException e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
+                ch.reset();
+            }
+        }
+
+        @Override
+        public void connected(AprSocket ch) {
+        }
+
+        @Override
+        public void error(AprSocket ch, Throwable t) {
+        }
         
     }
-
+    
     public static class SpdyConnectionAprSocket extends SpdyConnection {
         AprSocket socket;
 
-        Runnable inputThread = new Runnable() {
-            @Override
-            public void run() {
-                int rc;
-                do {
-                    rc = onBlockingSocket();
-                } while (rc == SpdyConnection.LONG);
-                
-                try {
-                    socket.close();
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
-            }
-        };
-
         public SpdyConnectionAprSocket(SpdyContext spdyContext) {
             super(spdyContext);
-            //setCompressSupport(new CompressJzlib());
-            setCompressSupport(new CompressDeflater6());
         }
 
         public void setSocket(AprSocket ch) {
@@ -160,7 +175,6 @@ public class SpdyContextJni extends SpdyContext {
             len -= rd;
             return rd;
         }
-
     }
 
 }

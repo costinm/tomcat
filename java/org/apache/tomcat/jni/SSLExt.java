@@ -119,7 +119,7 @@ public final class SSLExt {
     /**
      * SSL_set_mode
      */
-    public static native int sslSetMode(long tcsock, int mode);
+    public static native long sslSetMode(long tcsock, long mode);
 
     public static int setNPN(long sslContext, byte[] spdyNPN) {
         try {

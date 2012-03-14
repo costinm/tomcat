@@ -17,6 +17,7 @@
 package org.apache.tomcat.spdy;
 
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedList;
@@ -137,13 +138,29 @@ public abstract class SpdyConnection { // implements Runnable {
      */
     SpdyFrame out;
 
-    boolean draining = false;
-
     private int goAway = Integer.MAX_VALUE;
 
     public SpdyConnection(SpdyContext spdyContext) {
         this.spdyContext = spdyContext;
         outCondition = framerLock.newCondition();
+        if (spdyContext.compression) {
+            setCompressSupport(new CompressDeflater6());
+        }
+    }
+    
+    public String toString() {
+        return "SpdyCon open=" + channels.size() + " " + lastChannel;
+    }
+    
+    public void dump(PrintWriter out) {
+        out.println("SpdyConnection open=" + channels.size() + 
+                " outQ:" + outQueue.size());
+        for (SpdyStream str: channels.values()) {
+            str.dump(out);
+        }
+        
+        out.println();
+        
     }
 
     /**
@@ -186,10 +203,16 @@ public abstract class SpdyConnection { // implements Runnable {
      * - for fully non-blocking write: there will be a drain callback.
      */
 
+    public void drain() {
+        synchronized (nbDrain) {
+            _drain();
+        }
+    }
+    
     /**
      * Non blocking if the socket is not blocking.
      */
-    private boolean drain() {
+    private boolean _drain() {
         while (true) {
             framerLock.lock();
 
@@ -277,8 +300,14 @@ public abstract class SpdyConnection { // implements Runnable {
                 }
                 
                 synchronized (channels) {
-                    if (out.stream.finRcvd && out.stream.finSent) {
-                        channels.remove(out.streamId);
+                    
+                    if (out.stream != null) {
+                        if (out.isHalfClose()) {
+                            out.stream.finSent = true;
+                        }
+                        if (out.stream.finRcvd && out.stream.finSent) {
+                            channels.remove(out.streamId);
+                        }
                     }
                 }
                 out = null;
@@ -287,31 +316,6 @@ public abstract class SpdyConnection { // implements Runnable {
                 e.printStackTrace();
                 onClose();
                 return false;
-            }
-        }
-    }
-
-    /**
-     * Blocking call for sendFrame: must be called from a thread pool.
-     *
-     * Will wait until the actual frame is sent.
-     */
-    public void sendFrameBlocking(SpdyFrame oframe, SpdyStream proc)
-            throws IOException {
-        queueFrame(oframe, proc, oframe.pri == 0 ? outQueue : prioriyQueue);
-
-        nonBlockingDrain();
-
-        while (!inClosed) {
-            framerLock.lock();
-            try {
-                if (oframe.off == oframe.endData) {
-                    return; // was sent
-                }
-                outCondition.await();
-            } catch (InterruptedException e) {
-            } finally {
-                framerLock.unlock();
             }
         }
     }
@@ -330,26 +334,14 @@ public abstract class SpdyConnection { // implements Runnable {
 
     Runnable nbDrain = new Runnable() {
         public void run() {
-            int i = drainCnt++;
-            long t0 = System.currentTimeMillis();
-            synchronized (nbDrain) {
-                if (draining) {
-                    return;
-                }
-                draining = true;
-            }
-
             drain();
-            synchronized (nbDrain) {
-                draining = false;
-            }
         }
     };
 
-    public void sendFrameNonBlocking(SpdyFrame oframe, SpdyStream proc)
+    public void send(SpdyFrame oframe, SpdyStream proc)
             throws IOException {
         queueFrame(oframe, proc, oframe.pri == 0 ? outQueue : prioriyQueue);
-        nonBlockingDrain();
+        drain();
     }
 
     private void queueFrame(SpdyFrame oframe, SpdyStream proc,
@@ -661,7 +653,7 @@ public abstract class SpdyConnection { // implements Runnable {
                 oframe.append32(inFrame.read32());
                 oframe.pri = 0x80;
 
-                sendFrameNonBlocking(oframe, null);
+                send(oframe, null);
                 break;
             }
             }

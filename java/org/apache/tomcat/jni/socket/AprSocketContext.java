@@ -147,8 +147,7 @@ public class AprSocketContext {
 
     TlsCertVerifier tlsCertVerifier;
 
-    private int pollerSize = 8 * 1024;
-    
+    // 
     int connectTimeout =  20000;
     int defaultTimeout = 100000;
     
@@ -187,7 +186,7 @@ public class AprSocketContext {
     
     boolean debug = false;
     boolean debugSSL = false;
-    boolean debugPoll = true;
+    boolean debugPoll = false;
 
     protected boolean deferAccept = false;
 
@@ -230,6 +229,12 @@ public class AprSocketContext {
     protected int pollerThreadCount = 4;
     public void setPollerThreadCount(int pollerThreadCount) { this.pollerThreadCount = pollerThreadCount; }
     public int getPollerThreadCount() { return pollerThreadCount; }
+    
+    // to test the limits - default should be lower
+    int maxConnections = 64 * 1024;
+    public void setMaxconnections(int maxCon) {
+        this.maxConnections = maxCon;
+    }
     
     public void setBacklog(int backlog) { if (backlog > 0) this.backlog = backlog; }
     public int getBacklog() { return backlog; }
@@ -291,7 +296,7 @@ public class AprSocketContext {
     }
     
     /**
-     * All accepted sockets will start handshake automatically.
+     * All accepted/connected sockets will start handshake automatically.
      */
     public AprSocketContext setTls() {
         this.sslMode = true;
@@ -330,6 +335,10 @@ public class AprSocketContext {
         enabledCiphers = enabled;
     }
 
+    // TODO: should have a separate method for switching to tls later.
+    /** 
+     * Set certificate, will also enable TLS mode.
+     */
     public AprSocketContext setKeys(String certPemFile, String keyDerFile)
             throws IOException {
         this.sslMode = true;
@@ -405,7 +414,15 @@ public class AprSocketContext {
         sock.setHost(hi);
         return sock;
     }   
-    
+
+    public AprSocket socket(long socket) throws IOException {
+        AprSocket sock = newSocket(this);
+        sock.setStatus(AprSocket.ACCEPTED);
+        sock.socket = socket;
+        return sock;
+    }
+
+
     void destroySocket(AprSocket socket) {
         // TODO: does it need to be done in io thread ?
         synchronized (socket) {
@@ -428,7 +445,6 @@ public class AprSocketContext {
             long clientSockP;
             synchronized (pollers) {
                 long socketpool = Pool.create(getRootPool());
-
                 
                 int family = Socket.APR_INET;
 
@@ -593,11 +609,11 @@ public class AprSocketContext {
             rootPool = Pool.create(0);
 
             // Adjust poller sizes
-            if ((OS.IS_WIN32 || OS.IS_WIN64) && (pollerSize > 1024)) {
+            if ((OS.IS_WIN32 || OS.IS_WIN64) && (maxConnections > 1024)) {
                 // The maximum per poller to get reasonable performance is 1024
-                pollerThreadCount = pollerSize / 1024;
+                pollerThreadCount = maxConnections / 1024;
                 // Adjust poller size so that it won't reach the limit
-                pollerSize = pollerSize - (pollerSize % 1024);
+                maxConnections = maxConnections - (maxConnections % 1024);
             }
         }
         return rootPool;
@@ -674,48 +690,10 @@ public class AprSocketContext {
                     SSLExt.sslCtxSetMode(sslCtx, SSLExt.SSL_MODE_ENABLE_PARTIAL_WRITE |
                             SSLExt.SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
             
-            System.err.println("MODE: " + mode);
             // TODO: try release buffers
             }            
         }
         return sslCtx;
-    }
-    
-    /** 
-     * For NB sockets, if 'suspendPolling' has been called. 
-     * 
-     * Called from non-IO thread.
-     * @throws IOException 
-     */
-    public void resumeRead(AprSocket ch) throws IOException {
-        if (ch.isBlocking()) {
-            throw new IOException("Resume read called in blocking mode, ignore");
-        }
-        if (ch.isClosed()) {
-            throw new IOException("Closed");            
-        }
-        ch.setStatus(AprSocket.POLLIN);
-        findPollerAndAdd(ch);
-    }
-    
-    /**
-     * Suspend read events for non-blocking sockets.
-     * Only for non-blocking mode.
-     * @throws IOException 
-     */
-    public void suspendRead(AprSocket ch) throws IOException  {
-        if (ch.isBlocking()) {
-            throw new IOException("Resume read called in blocking mode, ignore");
-        }
-        if (ch.socket == 0) {
-            throw new IOException("no socket");            
-        }
-        if (ch.poller == null) {
-            log.severe("Not polling");
-            return;
-        }
-        ch.clearStatus(AprSocket.POLLIN);
-        ch.poller.requestUpdate(ch);
     }
     
     void findPollerAndAdd(AprSocket ch) throws IOException {
@@ -903,16 +881,18 @@ public class AprSocketContext {
      */
     AprPoller allocatePoller() throws IOException {
         long pool = Pool.create(getRootPool());
-        int size = pollerSize / pollerThreadCount;
+        int size = maxConnections / pollerThreadCount;
         int timeout = keepAliveTimeout;
         
         long serverPollset = allocatePoller(size, pool, timeout);
 
         if (serverPollset == 0 && size > 1024) {
+            log.severe("Falling back to 1024-sized poll, won't scale");
             size = 1024;
             serverPollset = allocatePoller(size, pool, timeout);
         }
         if (serverPollset == 0) {
+            log.severe("Falling back to 62-sized poll, won't scale");
             size = 62;
             serverPollset = allocatePoller(size, pool, timeout);
         }
@@ -996,7 +976,9 @@ public class AprSocketContext {
             if (!running) {
                 return;
             }
-            log.info("Starting poller " + id + " " + (isServer() ? "SRV ": "CLI "));
+            if (debugPoll) {
+                log.info("Starting poller " + id + " " + (isServer() ? "SRV ": "CLI "));
+            }
             long t0 = System.currentTimeMillis();
             while (running) {
                 try {
@@ -1081,7 +1063,7 @@ public class AprSocketContext {
                                 }
                                 getExecutor().execute(ch);
                             } else {
-                                ((AprSocketContext.PollHandler) ch.handler).process(ch, in, out, false);
+                                ((AprSocketContext.NonBlockingPollHandler) ch.handler).process(ch, in, out, false);
                                 
                                 // Update polling for the channel (in IO thread, safe) 
                                 updateIOThread(ch);
@@ -1333,7 +1315,27 @@ public class AprSocketContext {
         }
         
     }
-
+    
+    /**
+     * Callback for poll events, will be invoked in a thread pool.
+     *  
+     */
+    public static interface BlockingPollHandler {
+        
+        /**
+         * Called when the socket has been polled for in, out or closed.
+         * 
+         * 
+         */
+        public void process(AprSocket ch, boolean in, boolean out, boolean close);
+    
+        
+        /**
+         *  Called just before the socket is destroyed 
+         */
+        public void closed(AprSocket ch);
+    }
+    
     /**
      *  Additional callbacks for non-blocking. 
      *  This can be much faster - but it's harder to code, should be used only 
@@ -1348,21 +1350,7 @@ public class AprSocketContext {
      *  only from the IO thread. Resume can happen from any thread.
      *  - it is also possible to call write() from any thread 
      */
-    public static interface PollHandler extends AprSocketHandler {
-    
-        /**
-         * Called on read events, as well as in case of errors.
-         * It is ok to write in this method. 
-         * 
-         * All reading should happen in this method.
-         * If read() returns 0 the socket will continue to be polled in.
-         * 
-         *  If you want to suspend read polling - call "suspendRead()" - this
-         *  method will still be called for hup, error and pollout.
-         *  
-         *  Write polling is also set automatically after a write fails.
-         */
-        public void process(AprSocket ch, boolean in, boolean out, boolean close);
+    public static interface NonBlockingPollHandler extends BlockingPollHandler {
     
         /** 
          * Called after connection is established, in a thread pool.

@@ -73,7 +73,13 @@ public class Http11NioProtocol extends AbstractHttp11JsseProtocol {
         return ((NioEndpoint)endpoint);
     }
 
-
+    @Override
+    public void start() throws Exception {
+        super.start();
+        if (getEndpoint().getNpnHandler() != null) {
+            getEndpoint().getNpnHandler().init(getEndpoint(), adapter);
+        }
+    }
     // -------------------- Properties--------------------
 
     private Http11ConnectionHandler cHandler;

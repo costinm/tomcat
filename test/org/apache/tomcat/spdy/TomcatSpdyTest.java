@@ -24,6 +24,9 @@ public class TomcatSpdyTest extends TomcatBaseTest {
     String host = "localhost";
     
     protected void extraConnectorSetup(Connector connector, String protocol) {
+        if (port != 0) {
+            connector.setPort(port);
+        }
         if ("org.apache.coyote.spdy.SpdyProxyProtocol".equals(protocol)) {
             spdyCtx = new SpdyContextProxy();
         } else if ("org.apache.coyote.http11.Http11AprProtocol"
@@ -48,6 +51,8 @@ public class TomcatSpdyTest extends TomcatBaseTest {
         }
         return protocol;
     }
+    
+    int port = 0;
     
     @Before
     @Override

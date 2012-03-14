@@ -28,8 +28,6 @@ import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.AbstractEndpoint;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.AprEndpoint;
-import org.apache.tomcat.util.net.SocketStatus;
-import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.AprEndpoint.Handler;
 import org.apache.tomcat.util.net.SocketStatus;
 import org.apache.tomcat.util.net.SocketWrapper;
@@ -259,7 +257,7 @@ public class Http11AprProtocol extends AbstractHttp11Protocol {
                         socket.getSocket().longValue(), true);
             }
         }
-        
+
         @Override
         public SocketState process(SocketWrapper<Long> socket,
                 SocketStatus status) {
@@ -267,7 +265,7 @@ public class Http11AprProtocol extends AbstractHttp11Protocol {
                 Processor<Long> processor = null;
                 if (status == SocketStatus.OPEN) {
                     processor = connections.get(socket.getSocket());
-                   
+
                 }
                 if (processor == null) {
                     // if not null - this is a former comet request, handled by http11

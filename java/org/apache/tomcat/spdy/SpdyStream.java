@@ -17,6 +17,7 @@
 package org.apache.tomcat.spdy;
 
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.nio.charset.Charset;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
@@ -71,6 +72,16 @@ public class SpdyStream {
         this.spdy = spdy;
     }
 
+    public void dump(PrintWriter out) {
+        if (reqFrame != null) {
+            out.println("Req: " + reqFrame);
+        }
+        if (resFrame != null) {
+            out.println("Res: " + resFrame);
+        }
+        out.println("In: " + inData.size() + (finRcvd ? " FIN":""));
+    }
+
     /**
      * Non-blocking, called when a data frame is received.
      *
@@ -78,10 +89,12 @@ public class SpdyStream {
      * buffer ( to avoid a copy ).
      */
     public void onDataFrame(SpdyFrame inFrame) {
-        if (inFrame.closed()) {
-            finRcvd = true;
+        synchronized(this) {
+            inData.add(inFrame);
+            if (inFrame.closed()) {
+                finRcvd = true;
+            }
         }
-        inData.add(inFrame);
     }
 
     /**
@@ -100,9 +113,11 @@ public class SpdyStream {
         } else if (frame.type == SpdyConnection.TYPE_RST_STREAM) {
             onReset();
         }
-        inData.add(frame);
-        if (frame.isHalfClose()) {
-            finRcvd = true;
+        synchronized (this) {
+            inData.add(frame);
+            if (frame.isHalfClose()) {
+                finRcvd = true;
+            }            
         }
     }
 
@@ -144,8 +159,10 @@ public class SpdyStream {
     public SpdyFrame getFrame(long to) throws IOException {
         SpdyFrame in;
         try {
-            if (inData.size() == 0 && finRcvd) {
-                return null;
+            synchronized (this) {
+                if (inData.size() == 0 && finRcvd) {
+                    return null;
+                }                
             }
             in = inData.poll(to, TimeUnit.MILLISECONDS);
             if (in == END_FRAME) {
@@ -204,7 +221,7 @@ public class SpdyStream {
             oframe.halfClose();
 
         oframe.append(data, start, length);
-        spdy.sendFrameBlocking(oframe, this);
+        spdy.send(oframe, this);
     }
 
     public void send() throws IOException {
@@ -230,7 +247,8 @@ public class SpdyStream {
         if (reqFrame.isHalfClose()) {
             finSent = true;
         }
-        spdy.sendFrameBlocking(reqFrame, this);
+        spdy.send(reqFrame, this);
     }
+
 
 }

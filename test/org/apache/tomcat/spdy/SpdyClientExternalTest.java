@@ -13,6 +13,7 @@ import org.apache.tomcat.jni.socket.HostInfo;
  * External test - get google /
  */
 public class SpdyClientExternalTest extends TestCase {
+    SpdyContextJni spdyContext = new SpdyContextJni();
 
     public void testSSLG() throws IOException {
         testSSLSession("www.google.com", 443);
@@ -23,7 +24,6 @@ public class SpdyClientExternalTest extends TestCase {
     }
     
     public void get(String host, int port, String path) throws IOException {
-        SpdyContextJni spdyContext = new SpdyContextJni();
 
         SpdyConnection client = spdyContext.getConnection(host, port);
         SpdyStream stream = client.get(host, path);
@@ -48,7 +48,6 @@ public class SpdyClientExternalTest extends TestCase {
     
     
     public void testSSLSession(String host, int port) throws IOException {
-        SpdyContextJni spdyContext = new SpdyContextJni();
         SpdyConnection client = spdyContext.getConnection(host, port);
         SpdyStream stream = client.get(host, "/");
 
