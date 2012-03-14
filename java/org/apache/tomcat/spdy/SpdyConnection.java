@@ -164,22 +164,6 @@ public abstract class SpdyConnection { // implements Runnable {
 
     }
 
-    @Override
-    public String toString() {
-        return "SpdyCon open=" + channels.size();
-    }
-
-    public void dump(PrintWriter out) {
-        out.println("SpdyConnection open=" + channels.size() +
-                " outQ:" + outQueue.size());
-        for (SpdyStream str: channels.values()) {
-            str.dump(out);
-        }
-
-        out.println();
-
-    }
-
     /**
      * Write.
      */
@@ -222,15 +206,7 @@ public abstract class SpdyConnection { // implements Runnable {
 
     public void drain() {
         synchronized (nbDrain) {
-            if (draining) {
-                return;
-            }
-            draining = true;
-        }
-
-        _drain();
-        synchronized (nbDrain) {
-            draining = false;
+            _drain();
         }
     }
 
