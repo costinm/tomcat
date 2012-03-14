@@ -148,6 +148,12 @@ public abstract class SpdyConnection { // implements Runnable {
         }
     }
 
+    public SpdyConnection(SpdyContext spdyContext, CompressSupport compress) {
+        this.spdyContext = spdyContext;
+        outCondition = framerLock.newCondition();
+        setCompressSupport(compress);
+    }
+
     @Override
     public String toString() {
         return "SpdyCon open=" + channels.size() + " " + lastChannel;
