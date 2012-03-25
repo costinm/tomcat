@@ -185,7 +185,7 @@ public class AprLifecycleListener
             t = ExceptionUtils.unwrapInvocationTargetException(t);
             ExceptionUtils.handleThrowable(t);
             log.info(sm.getString("aprListener.aprInit",
-                    System.getProperty("java.library.path")));
+                    System.getProperty("java.library.path")) + " " + t);
             return;
         }
         if (apver < rqver) {

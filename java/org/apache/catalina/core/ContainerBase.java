@@ -1575,7 +1575,12 @@ public abstract class ContainerBase extends LifecycleMBeanBase
 
         @Override
         public Void call() throws LifecycleException {
+            long t0 = System.currentTimeMillis();
             child.start();
+            t0 = System.currentTimeMillis() - t0;
+            if (t0 > 100) {
+                System.err.println("Long " + child);
+            }
             return null;
         }
     }

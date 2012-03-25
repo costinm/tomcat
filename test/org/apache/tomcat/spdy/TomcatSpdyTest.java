@@ -28,13 +28,13 @@ public class TomcatSpdyTest extends TomcatBaseTest {
             connector.setPort(port);
         }
         if ("org.apache.coyote.spdy.SpdyProxyProtocol".equals(protocol)) {
-            spdyCtx = new SpdyContextProxy();
+            spdyCtx = new SpdyContext();
         } else if ("org.apache.coyote.http11.Http11AprProtocol"
                 .equals(protocol)) {
             connector.setProperty("npnHandler", 
                     "org.apache.coyote.spdy.SpdyAprNpnHandler");
             
-            spdyCtx = new SpdyContextJni();
+            spdyCtx = new SpdyContext();
             realSpdy = true;
             Tomcat tomcat = getTomcatInstance();
             TesterSupport.initSsl(tomcat);
@@ -74,18 +74,7 @@ public class TomcatSpdyTest extends TomcatBaseTest {
     }
 
     public void get() throws IOException {
-        SpdyStream stream = client.get(host, "/hello");
-        SpdyFrame f;
-        int dataLen = 0;
-        while ((f = stream.getDataFrame(to)) != null) {
-            dataLen += f.getDataSize();
-        }
-        HashMap<String, String> resHeaders = new HashMap<String, String>();
-        stream.getResponse().getHeaders(resHeaders);        
-        assertEquals(resHeaders.get("status"), "200 OK");
-        assertEquals(dataLen,
-                Integer.parseInt(resHeaders.get("content-length")));
-
+        SpdyClient.get(client, host, 0, "/hello");
     }
 
     int to = 20000;
@@ -96,16 +85,7 @@ public class TomcatSpdyTest extends TomcatBaseTest {
             streams[i] = client.get(host, "/hello");
         }
         for (int i = 0; i < n; i++) {
-            SpdyFrame f;
-            int dataLen = 0;
-            while ((f = streams[i].getDataFrame(to)) != null) {
-                dataLen += f.getDataSize();
-            }
-            HashMap<String, String> resHeaders = new HashMap<String, String>();
-            streams[i].getResponse().getHeaders(resHeaders);
-            assertEquals(resHeaders.get("status"), "200 OK");
-            assertEquals(dataLen, Integer.parseInt(resHeaders
-                    .get("content-length")));
+            SpdyClient.checkResponse(streams[i]);
         }
 
     }

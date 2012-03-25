@@ -17,21 +17,28 @@
 package org.apache.coyote.http11;
 
 import java.io.IOException;
+import java.net.Socket;
 import java.nio.channels.SocketChannel;
 import java.util.Iterator;
 
+import javax.net.ssl.SSLEngine;
+
 import org.apache.coyote.AbstractProtocol;
+import org.apache.coyote.Adapter;
 import org.apache.coyote.Processor;
 import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.coyote.http11.upgrade.UpgradeNioProcessor;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.AbstractEndpoint;
+import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.NioChannel;
 import org.apache.tomcat.util.net.NioEndpoint;
 import org.apache.tomcat.util.net.NioEndpoint.Handler;
+import org.apache.tomcat.util.net.NioEndpoint.KeyAttachment;
 import org.apache.tomcat.util.net.SSLImplementation;
 import org.apache.tomcat.util.net.SecureNioChannel;
+import org.apache.tomcat.util.net.SocketStatus;
 import org.apache.tomcat.util.net.SocketWrapper;
 
 
@@ -76,10 +83,11 @@ public class Http11NioProtocol extends AbstractHttp11JsseProtocol {
     @Override
     public void start() throws Exception {
         super.start();
-        if (getEndpoint().getNpnHandler() != null) {
-            getEndpoint().getNpnHandler().init(getEndpoint(), adapter);
+        if (npnHandler != null) {
+            npnHandler.init(getEndpoint(), 0, adapter);
         }
     }
+    
     // -------------------- Properties--------------------
 
     private Http11ConnectionHandler cHandler;
@@ -207,6 +215,17 @@ public class Http11NioProtocol extends AbstractHttp11JsseProtocol {
             }
         }
 
+        public SocketState process(SocketWrapper<NioChannel> socket,
+                SocketStatus status) {
+            if (proto.npnHandler != null) {
+                SocketState ss = proto.npnHandler.process(socket, status);
+                if (ss != SocketState.OPEN) {
+                    return ss;
+                }
+            }
+            return super.process(socket, status);
+        }
+        
 
         /**
          * Expected to be used by the handler once the processor is no longer
@@ -291,6 +310,13 @@ public class Http11NioProtocol extends AbstractHttp11JsseProtocol {
                 throws IOException {
             return new UpgradeNioProcessor(socket, inbound,
                     ((Http11NioProtocol) getProtocol()).getEndpoint().getSelectorPool());
+        }
+
+        @Override
+        public void onCreateSSLEngine(SSLEngine engine) {
+            if (proto.npnHandler != null) {
+                proto.npnHandler.onCreateEngine(engine);
+            }
         }
     }
 }

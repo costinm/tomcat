@@ -19,15 +19,21 @@ package org.apache.coyote.http11;
 import java.io.IOException;
 import java.net.Socket;
 
+import javax.net.ssl.SSLEngine;
+
 import org.apache.coyote.AbstractProtocol;
+import org.apache.coyote.Adapter;
 import org.apache.coyote.Processor;
 import org.apache.coyote.http11.upgrade.UpgradeBioProcessor;
 import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.juli.logging.Log;
 import org.apache.tomcat.util.net.AbstractEndpoint;
+import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.JIoEndpoint;
 import org.apache.tomcat.util.net.JIoEndpoint.Handler;
+import org.apache.tomcat.util.net.NioEndpoint.KeyAttachment;
 import org.apache.tomcat.util.net.SSLImplementation;
+import org.apache.tomcat.util.net.SocketStatus;
 import org.apache.tomcat.util.net.SocketWrapper;
 
 
@@ -72,11 +78,12 @@ public class Http11Protocol extends AbstractHttp11JsseProtocol {
 
     protected Http11ConnectionHandler cHandler;
 
-
     // ------------------------------------------------ HTTP specific properties
     // ------------------------------------------ managed in the ProtocolHandler
 
     private int disableKeepAlivePercentage = 75;
+
+
     public int getDisableKeepAlivePercentage() {
         return disableKeepAlivePercentage;
     }
@@ -87,6 +94,14 @@ public class Http11Protocol extends AbstractHttp11JsseProtocol {
             this.disableKeepAlivePercentage = 100;
         } else {
             this.disableKeepAlivePercentage = disableKeepAlivePercentage;
+        }
+    }
+    
+    @Override
+    public void start() throws Exception {
+        super.start();
+        if (npnHandler != null) {
+            npnHandler.init(endpoint, 0, adapter);
         }
     }
 
@@ -124,6 +139,17 @@ public class Http11Protocol extends AbstractHttp11JsseProtocol {
             return proto.sslImplementation;
         }
 
+        public SocketState process(SocketWrapper<Socket> socket,
+                SocketStatus status) {
+            if (proto.npnHandler != null) {
+                SocketState ss = proto.npnHandler.process(socket, status);
+                if (ss != SocketState.OPEN) {
+                    return ss;
+                }
+            }
+            return super.process(socket, status);
+        }
+        
         /**
          * Expected to be used by the handler once the processor is no longer
          * required.
@@ -190,6 +216,12 @@ public class Http11Protocol extends AbstractHttp11JsseProtocol {
                 SocketWrapper<Socket> socket, UpgradeInbound inbound)
                 throws IOException {
             return new UpgradeBioProcessor(socket, inbound);
+        }
+
+        public void beforeHandshake(SocketWrapper<Socket> socket) {
+            if (proto.npnHandler != null) {
+                proto.npnHandler.onCreateEngine(socket);
+            }
         }
     }
 }
