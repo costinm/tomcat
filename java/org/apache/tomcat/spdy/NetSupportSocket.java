@@ -11,6 +11,9 @@ import java.security.NoSuchAlgorithmException;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocket;
 
+    protected Socket getSocket(String host, int port) throws IOException {
+        return new Socket(host, port);
+    }
 
 public class NetSupportSocket extends SpdyContext.NetSupport {
 
