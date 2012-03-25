@@ -719,6 +719,9 @@ public class NioEndpoint extends AbstractEndpoint {
     public boolean processSocket(NioChannel socket, SocketStatus status, boolean dispatch) {
         try {
             KeyAttachment attachment = (KeyAttachment)socket.getAttachment(false);
+            if (attachment == null) {
+                return false;
+            }
             attachment.setCometNotify(false); //will get reset upon next reg
             SocketProcessor sc = processorCache.poll();
             if ( sc == null ) sc = new SocketProcessor(socket,status);
@@ -961,7 +964,6 @@ public class NioEndpoint extends AbstractEndpoint {
             // exit, otherwise parallel closure of sockets which are still
             // in the poller can cause problems
             close = true;
-            events.clear();
             selector.wakeup();
         }
 
@@ -996,6 +998,9 @@ public class NioEndpoint extends AbstractEndpoint {
             if ( r==null) r = new PollerEvent(socket,null,interestOps);
             else r.reset(socket,null,interestOps);
             addEvent(r);
+            if (close) {
+                processSocket(socket, SocketStatus.STOP, false);
+            }
         }
 
         /**
@@ -1111,12 +1116,21 @@ public class NioEndpoint extends AbstractEndpoint {
                         }
                     }
 
-                    boolean hasEvents = events();
+                    boolean hasEvents = false;
 
                     // Time to terminate?
                     if (close) {
+                        events();
                         timeout(0, false);
+                        try {
+                            selector.close();
+                        } catch (IOException ioe) {
+                            log.error(sm.getString(
+                                    "endpoint.nio.selectorCloseFail"), ioe);
+                        }
                         break;
+                    } else {
+                        hasEvents = events();
                     }
                     try {
                         if ( !close ) {
@@ -1130,8 +1144,14 @@ public class NioEndpoint extends AbstractEndpoint {
                             wakeupCounter.set(0);
                         }
                         if (close) {
+                            events();
                             timeout(0, false);
-                            selector.close();
+                            try {
+                                selector.close();
+                            } catch (IOException ioe) {
+                                log.error(sm.getString(
+                                        "endpoint.nio.selectorCloseFail"), ioe);
+                            }
                             break;
                         }
                     } catch ( NullPointerException x ) {

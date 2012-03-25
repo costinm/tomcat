@@ -17,14 +17,12 @@
 package org.apache.coyote.http11;
 
 import java.io.IOException;
-import java.net.Socket;
 import java.nio.channels.SocketChannel;
 import java.util.Iterator;
 
 import javax.net.ssl.SSLEngine;
 
 import org.apache.coyote.AbstractProtocol;
-import org.apache.coyote.Adapter;
 import org.apache.coyote.Processor;
 import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.coyote.http11.upgrade.UpgradeNioProcessor;
@@ -35,7 +33,6 @@ import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.NioChannel;
 import org.apache.tomcat.util.net.NioEndpoint;
 import org.apache.tomcat.util.net.NioEndpoint.Handler;
-import org.apache.tomcat.util.net.NioEndpoint.KeyAttachment;
 import org.apache.tomcat.util.net.SSLImplementation;
 import org.apache.tomcat.util.net.SecureNioChannel;
 import org.apache.tomcat.util.net.SocketStatus;
