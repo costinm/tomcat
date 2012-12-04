@@ -69,7 +69,7 @@ the section about Automatic Application Deployment in the latter reference.
 <section name="DriverManager, the service provider mechanism and memory leaks">
 
 <p><code>java.sql.DriverManager</code> supports the
-<a href="http://download.oracle.com/javase/6/docs/api/index.html?java/sql/DriverManager.html">service
+<a href="http://docs.oracle.com/javase/6/docs/api/index.html?java/sql/DriverManager.html">service
 provider</a> mechanism. This feature is that all the available JDBC drivers
 that announce themselves by providing a <code>META-INF/services/java.sql.Driver</code>
 file are automatically discovered, loaded and registered,
@@ -339,8 +339,8 @@ select id, foo, bar from testdata
 <p>That JSP page makes use of <a href="http://java.sun.com/products/jsp/jstl">JSTL</a>'s
 SQL and Core taglibs. You can get it from
 <a href="http://tomcat.apache.org/taglibs/standard/">Apache Tomcat Taglibs - Standard Tag Library</a>
-project &#x2014; just make sure you get a 1.1.x release. Once you have JSTL,
-copy <code>jstl.jar</code> and <code>standard.jar</code> to your web app's
+project &#x2014; just make sure you get a 1.1.x or later release. Once you have
+JSTL, copy <code>jstl.jar</code> and <code>standard.jar</code> to your web app's
 <code>WEB-INF/lib</code> directory.
 
 </p>

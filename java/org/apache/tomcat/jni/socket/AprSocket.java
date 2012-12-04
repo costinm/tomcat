@@ -56,9 +56,10 @@ import org.apache.tomcat.jni.socket.AprSocketContext.BlockingPollHandler;
  */
 public class AprSocket implements Runnable {
 
-    static final byte[][] NO_CERTS = new byte[0][];
+    private static final Logger log =
+            Logger.getLogger("org.apache.tomcat.jni.socket.AprSocket");
 
-    static Logger log = Logger.getLogger("AprSocket");
+    static final byte[][] NO_CERTS = new byte[0][];
 
     static int CONNECTING = 1;
     static int CONNECTED = 0x2;
@@ -280,9 +281,7 @@ public class AprSocket implements Runnable {
                 updatePolling();
                 return rt;
             }
-            if (context.debug) {
-                log.warning("apr.send(): Failed to send, closing " + sent);
-            }
+            log.warning("apr.send(): Failed to send, closing " + sent);
             reset();
             throw new IOException("Error sending " + sent + " " + Error.strerror(-sent));
         } else {
@@ -364,7 +363,7 @@ public class AprSocket implements Runnable {
 
      */
 
-    public void close() throws IOException {
+    public void close() {
         synchronized (this) {
             if ((status & CLOSED) != 0 || socket == 0) {
                 return;
@@ -407,7 +406,7 @@ public class AprSocket implements Runnable {
             if (context.rawDataHandler != null) {
                 context.rawDataHandler.rawData(this, false, null, -1, -1, -1, true);
             }
-            if (context.debug) {
+            if (log.isLoggable(Level.FINE)) {
                 log.info("closing: context.open=" + context.open.get() + " " + this);
             }
 
@@ -443,11 +442,7 @@ public class AprSocket implements Runnable {
      */
     public void reset() {
         setStatus(ERROR);
-        try {
-            close();
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        close();
     }
 
 
@@ -600,6 +595,7 @@ public class AprSocket implements Runnable {
             try {
                 long sa = Address.get(Socket.APR_LOCAL, socket);
                 Sockaddr addr = Address.getInfo(sa);
+                return addr.port;
             } catch (Exception ex) {
                 throw new IOException(ex);
             }
@@ -724,7 +720,7 @@ public class AprSocket implements Runnable {
                 try {
                     context.open.incrementAndGet();
 
-                    if (context.debug) {
+                    if (log.isLoggable(Level.FINE)) {
                         log.info("Accept: " + context.open.get() + " " + this + " " +
                                 getRemotePort());
                     }
@@ -794,7 +790,7 @@ public class AprSocket implements Runnable {
         }
 
         try {
-            if (context.debug) {
+            if (log.isLoggable(Level.FINE)) {
                 log.info(this + " StartSSL");
             }
 
@@ -850,7 +846,7 @@ public class AprSocket implements Runnable {
             int ticketLen = SSLExt.getTicket(socket, hostInfo.ticket);
             if (ticketLen > 0) {
                 hostInfo.ticketLen = ticketLen;
-                if (context.debug) {
+                if (log.isLoggable(Level.FINE)) {
                     log.info("Received ticket: " + ticketLen);
                 }
             }

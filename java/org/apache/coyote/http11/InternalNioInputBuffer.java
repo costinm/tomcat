@@ -169,17 +169,55 @@ public class InternalNioInputBuffer extends AbstractInputBuffer<NioChannel> {
 
     // --------------------------------------------------------- Public Methods
 
+
+    @Override
+    public boolean supportsNonBlocking() {
+        return true;
+    }
+
+
+    @Override
+    public int available() {
+
+        int available = super.available();
+        if (available>0) {
+            return available;
+        }
+
+        available = Math.max(lastValid - pos, 0);
+        if (available>0) {
+            return available;
+        }
+        try {
+            available = nbRead();
+        }catch (IOException x) {
+            //TODO SERVLET 3.1 -
+            //we should not swallow this exception
+
+            if (log.isDebugEnabled()) {
+                log.debug("Unable to issue non blocking read.", x);
+            }
+        }
+        return available;
+    }
+
+    /**
+     * Issues a non blocking read
+     * @return int - nr of bytes read
+     * @throws IOException
+     */
+    public int nbRead() throws IOException {
+        return readSocket(true,false);
+    }
+
+
+
     /**
      * Recycle the input buffer. This should be called when closing the
      * connection.
      */
     @Override
     public void recycle() {
-        // Recycle filters
-        for (int i = 0; i <= lastActiveFilter; i++) {
-            activeFilters[i].recycle();
-        }
-        // This must be after filters since it resets the lastFilterIndex
         super.recycle();
         socket = null;
         headerParsePos = HeaderParsePosition.HEADER_START;
@@ -478,10 +516,6 @@ public class InternalNioInputBuffer extends AbstractInputBuffer<NioChannel> {
 
         do {
             status = parseHeader();
-        } while ( status == HeaderParseStatus.HAVE_MORE_HEADERS );
-        if (status == HeaderParseStatus.DONE) {
-            parsingHeader = false;
-            end = pos;
             // Checking that
             // (1) Headers plus request line size does not exceed its limit
             // (2) There are enough bytes to avoid expanding the buffer when
@@ -490,11 +524,15 @@ public class InternalNioInputBuffer extends AbstractInputBuffer<NioChannel> {
             // limitation to enforce the meaning of headerBufferSize
             // From the way how buf is allocated and how blank lines are being
             // read, it should be enough to check (1) only.
-            if (end - skipBlankLinesBytes > headerBufferSize
-                    || buf.length - end < socketReadBufferSize) {
+            if (pos - skipBlankLinesBytes > headerBufferSize
+                    || buf.length - pos < socketReadBufferSize) {
                 throw new IllegalArgumentException(
                         sm.getString("iib.requestheadertoolarge.error"));
             }
+        } while ( status == HeaderParseStatus.HAVE_MORE_HEADERS );
+        if (status == HeaderParseStatus.DONE) {
+            parsingHeader = false;
+            end = pos;
             return true;
         } else {
             return false;
@@ -725,7 +763,7 @@ public class InternalNioInputBuffer extends AbstractInputBuffer<NioChannel> {
         return HeaderParseStatus.HAVE_MORE_HEADERS;
     }
 
-    private HeaderParseData headerData = new HeaderParseData();
+    private final HeaderParseData headerData = new HeaderParseData();
     public static class HeaderParseData {
         /**
          * When parsing header name: first character of the header.<br />

@@ -236,6 +236,8 @@ the host and port appropriately for your installation.</p>
     application, specify "/".  <strong>NOTE</strong> -
     It is not possible to perform administrative commands on the
     Manager application itself.</li>
+<li><strong>version</strong> - The version of this web application as used by
+    the parallel deployment feature,</li>
 <li><strong>war</strong> - URL of a web application archive (WAR) file,
     pathname of a directory which contains the web application, or a
     Context configuration ".xml" file.  You can use URLs in any of the
@@ -298,8 +300,8 @@ including a Context configuration XML file in
 <li><code>update</code>: When set to true, any existing update will be
     undeployed first. The default value is set to false.</li>
 <li><code>tag</code>: Specifying a tag name, this allows associating the
-    deployed webapp with a version number. The application version can
-    be later redeployed when needed using only the tag.</li>
+    deployed webapp with a tag or label. If the web application is undeployed,
+    it can be later redeployed when needed using only the tag.</li>
 </ul>
 
 <p><strong>NOTE</strong> - This command is the logical
@@ -344,9 +346,9 @@ This command is the logical opposite of the <code>/undeploy</code> command.</p>
 
 <p>There are a number of different ways the deploy command can be used.</p>
 
-<h3>Deploy a version of a previously deployed webapp</h3>
+<h3>Deploy a previously deployed webapp</h3>
 
-<p>This can be used to deploy a previous version of a web application, which
+<p>This can be used to deploy a previously deployed web application, which
 has been deployed using the <code>tag</code> attribute. Note that the work
 directory for the Manager webapp will contain the previously deployed WARs;
 removing it would make the deployment fail.</p>
@@ -879,6 +881,31 @@ has been reloaded several times, it may be listed several times.</p>
 
 </subsection>
 
+<subsection name="Connector SSL diagnostics">
+
+<source>
+http://localhost:8080/manager/text/sslConnectorCiphers
+</source>
+
+<p>The SSL Connector/Ciphers diagnostic lists the SSL ciphers that are currently
+configured for each connector. For BIO and NIO, the names of the individual
+cipher suites are listed. For APR, the value of SSLCipherSuite is returned.</p>
+
+<p>The response will ook something like this:</p>
+<source>
+OK - Connector / SSL Cipher information
+Connector[HTTP/1.1-8080]
+  SSL is not enabled for this connector
+Connector[HTTP/1.1-8443]
+  TLS_ECDH_RSA_WITH_3DES_EDE_CBC_SHA
+  TLS_DHE_RSA_WITH_AES_128_CBC_SHA
+  TLS_ECDH_RSA_WITH_AES_128_CBC_SHA
+  TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA
+  ...
+</source>
+
+</subsection>
+
 <subsection name="Server Status">
 
 <p>From this link , you can view information about the server.</p>
@@ -915,7 +942,7 @@ The same information is available for both of them :
         appropriate.</p></li>
         <li><p><em>"Keep-Alive"</em> : The thread keeps the connection open to
         the client in case the client sends another request. If another request
-        is recieved, the next stage will br "Parse and Prepare Requst". If no
+        is received, the next stage will br "Parse and Prepare Requst". If no
         request is received before the keep alive times out, the connection will
         be closed and the next stage will be "Ready".</p></li>
         <li><p><em>"Ready"</em> : The thread is at rest and ready to be
@@ -1344,7 +1371,6 @@ http://webserver/manager/jmxproxy/?invoke=BEANNAME&amp;op=METHODNAME&amp;ps=COMM
 http://localhost:8080/manager/jmxproxy/?invoke=Catalina%3Atype%3DService&amp;op=findConnectors&amp;ps=
 </source>
   </subsection>
-
 </section>
 
 

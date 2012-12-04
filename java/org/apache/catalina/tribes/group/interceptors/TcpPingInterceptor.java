@@ -27,6 +27,7 @@ import org.apache.catalina.tribes.ChannelMessage;
 import org.apache.catalina.tribes.Member;
 import org.apache.catalina.tribes.group.ChannelInterceptorBase;
 import org.apache.catalina.tribes.io.ChannelData;
+import org.apache.catalina.tribes.io.XByteBuffer;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 
@@ -43,7 +44,7 @@ public class TcpPingInterceptor extends ChannelInterceptorBase {
 
     private static final Log log = LogFactory.getLog(TcpPingInterceptor.class);
 
-    protected static byte[] TCP_PING_DATA = new byte[] {
+    protected static final byte[] TCP_PING_DATA = new byte[] {
         79, -89, 115, 72, 121, -33, 67, -55, -97, 111, -119, -128, -95, 91, 7, 20,
         125, -39, 82, 91, -21, -33, 67, -102, -73, 126, -66, -113, -127, 103, 30, -74,
         55, 21, -66, -121, 69, 33, 76, -88, -65, 10, 77, 19, 83, 56, 21, 50,
@@ -55,7 +56,7 @@ public class TcpPingInterceptor extends ChannelInterceptorBase {
     protected boolean staticOnly = false;
     protected volatile boolean running = true;
     protected PingThread thread = null;
-    protected static AtomicInteger cnt = new AtomicInteger(0);
+    protected static final AtomicInteger cnt = new AtomicInteger(0);
 
     WeakReference<TcpFailureDetector> failureDetector = null;
     WeakReference<StaticMembershipInterceptor> staticMembers = null;
@@ -64,7 +65,7 @@ public class TcpPingInterceptor extends ChannelInterceptorBase {
     public synchronized void start(int svc) throws ChannelException {
         super.start(svc);
         running = true;
-        if ( thread == null ) {
+        if ( thread == null && useThread) {
             thread = new PingThread();
             thread.setDaemon(true);
             thread.setName("TcpPingInterceptor.PingThread-"+cnt.addAndGet(1));
@@ -75,9 +76,9 @@ public class TcpPingInterceptor extends ChannelInterceptorBase {
         ChannelInterceptor next = getNext();
         while ( next != null ) {
             if ( next instanceof TcpFailureDetector )
-                failureDetector = new WeakReference<TcpFailureDetector>((TcpFailureDetector)next);
+                failureDetector = new WeakReference<>((TcpFailureDetector)next);
             if ( next instanceof StaticMembershipInterceptor )
-                staticMembers = new WeakReference<StaticMembershipInterceptor>((StaticMembershipInterceptor)next);
+                staticMembers = new WeakReference<>((StaticMembershipInterceptor)next);
             next = next.getNext();
         }
 
@@ -86,8 +87,10 @@ public class TcpPingInterceptor extends ChannelInterceptorBase {
     @Override
     public void stop(int svc) throws ChannelException {
         running = false;
-        if ( thread != null ) thread.interrupt();
-        thread = null;
+        if ( thread != null ) {
+            thread.interrupt();
+            thread = null;
+        }
         super.stop(svc);
     }
 
@@ -122,13 +125,17 @@ public class TcpPingInterceptor extends ChannelInterceptorBase {
     }
 
     protected void sendPing() {
-        if (failureDetector.get()!=null) {
-            //we have a reference to the failure detector
-            //piggy back on that dude
-            failureDetector.get().checkMembers(true);
-        }else {
-            if (staticOnly && staticMembers.get()!=null) {
-                sendPingMessage(staticMembers.get().getMembers());
+        TcpFailureDetector tcpFailureDetector =
+                failureDetector != null ? failureDetector.get() : null;
+        if (tcpFailureDetector != null) {
+            // We have a reference to the failure detector
+            // Piggy back on it
+            tcpFailureDetector.checkMembers(true);
+        } else {
+            StaticMembershipInterceptor smi =
+                    staticOnly && staticMembers != null ? staticMembers.get() : null;
+            if (smi != null) {
+                sendPingMessage(smi.getMembers());
             } else {
                 sendPingMessage(getMembers());
             }
@@ -141,6 +148,7 @@ public class TcpPingInterceptor extends ChannelInterceptorBase {
         data.setAddress(getLocalMember(false));
         data.setTimestamp(System.currentTimeMillis());
         data.setOptions(getOptionFlag());
+        data.setMessage(new XByteBuffer(TCP_PING_DATA, false));
         try {
             super.sendMessage(members, data, null);
         }catch (ChannelException x) {
@@ -171,7 +179,9 @@ public class TcpPingInterceptor extends ChannelInterceptorBase {
                     sleep(interval);
                     sendPing();
                 }catch ( InterruptedException ix ) {
-                    interrupted();
+                    // Ignore. Probably triggered by a call to stop().
+                    // In the highly unlikely event it was a different trigger,
+                    // simply ignore it and continue.
                 }catch ( Exception x )  {
                     log.warn("Unable to send ping from TCP ping thread.",x);
                 }

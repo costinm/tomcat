@@ -50,22 +50,20 @@ import java.util.ResourceBundle;
  * This class supports both the Version 0 (by Netscape) and Version 1 (by RFC
  * 2109) cookie specifications. By default, cookies are created using Version 0
  * to ensure the best interoperability.
- *
- * @author Various
- * @version $Version$
  */
 public class Cookie implements Cloneable, Serializable {
 
     private static final long serialVersionUID = 1L;
 
     private static final String LSTRING_FILE = "javax.servlet.http.LocalStrings";
-    private static ResourceBundle lStrings = ResourceBundle.getBundle(LSTRING_FILE);
+    private static final ResourceBundle lStrings =
+            ResourceBundle.getBundle(LSTRING_FILE);
 
     //
     // The value of the cookie itself.
     //
 
-    private String name; // NAME= ... "$Name" style is reserved
+    private final String name; // NAME= ... "$Name" style is reserved
     private String value; // value of NAME
 
     //
@@ -394,11 +392,13 @@ public class Cookie implements Cloneable, Serializable {
                         "org.apache.catalina.STRICT_SERVLET_COMPLIANCE",
                         "false")).booleanValue();
 
-        String fwdSlashIsSeparator = System.getProperty("org.apache.tomcat.util.http.ServerCookie.FWD_SLASH_IS_SEPARATOR");
+        String fwdSlashIsSeparator = System.getProperty(
+                "org.apache.tomcat.util.http.ServerCookie.FWD_SLASH_IS_SEPARATOR");
         if (fwdSlashIsSeparator == null) {
             FWD_SLASH_IS_SEPARATOR = STRICT_SERVLET_COMPLIANCE;
         } else {
-            FWD_SLASH_IS_SEPARATOR = Boolean.valueOf(fwdSlashIsSeparator).booleanValue();
+            FWD_SLASH_IS_SEPARATOR =
+                    Boolean.valueOf(fwdSlashIsSeparator).booleanValue();
         }
 
         if (FWD_SLASH_IS_SEPARATOR) {
@@ -407,7 +407,8 @@ public class Cookie implements Cloneable, Serializable {
             tspecials2 = tspecials2NoSlash;
         }
 
-        String strictNaming = System.getProperty("org.apache.tomcat.util.http.ServerCookie.STRICT_NAMING");
+        String strictNaming = System.getProperty(
+                "org.apache.tomcat.util.http.ServerCookie.STRICT_NAMING");
         if (strictNaming == null) {
             STRICT_NAMING = STRICT_SERVLET_COMPLIANCE;
         } else {
@@ -451,18 +452,26 @@ public class Cookie implements Cloneable, Serializable {
     }
 
     /**
-     * @return TODO
-     * @since Servlet 3.0 TODO SERVLET3 - Add comments
-     */
-    public boolean isHttpOnly() {
-        return httpOnly;
-    }
-
-    /**
-     * @param httpOnly
-     * @since Servlet 3.0 TODO SERVLET3 - Add comments
+     * Sets the flag that controls if this cookie will be hidden from scripts on
+     * the client side.
+     *
+     * @param httpOnly  The new value of the flag
+     *
+     * @since Servlet 3.0
      */
     public void setHttpOnly(boolean httpOnly) {
         this.httpOnly = httpOnly;
+    }
+
+    /**
+     * Gets the flag that controls if this cookie will be hidden from scripts on
+     * the client side.
+     *
+     * @return  <code>true</code> if the cookie is hidden from scripts, else
+     *          <code>false</code>
+     * @since Servlet 3.0
+     */
+    public boolean isHttpOnly() {
+        return httpOnly;
     }
 }

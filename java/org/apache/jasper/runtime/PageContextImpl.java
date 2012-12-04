@@ -28,6 +28,7 @@ import java.util.Enumeration;
 import java.util.HashMap;
 
 import javax.el.ELContext;
+import javax.el.ELException;
 import javax.el.ExpressionFactory;
 import javax.el.ValueExpression;
 import javax.servlet.RequestDispatcher;
@@ -44,16 +45,10 @@ import javax.servlet.jsp.JspException;
 import javax.servlet.jsp.JspFactory;
 import javax.servlet.jsp.JspWriter;
 import javax.servlet.jsp.PageContext;
-import javax.servlet.jsp.el.ELException;
-import javax.servlet.jsp.el.ExpressionEvaluator;
-import javax.servlet.jsp.el.VariableResolver;
 import javax.servlet.jsp.tagext.BodyContent;
 
 import org.apache.jasper.compiler.Localizer;
 import org.apache.jasper.el.ELContextImpl;
-import org.apache.jasper.el.ExpressionEvaluatorImpl;
-import org.apache.jasper.el.FunctionMapperImpl;
-import org.apache.jasper.el.VariableResolverImpl;
 import org.apache.jasper.security.SecurityUtil;
 
 /**
@@ -112,7 +107,7 @@ public class PageContextImpl extends PageContext {
      */
     PageContextImpl() {
         this.outs = new BodyContentImpl[0];
-        this.attributes = new HashMap<String, Object>(16);
+        this.attributes = new HashMap<>(16);
         this.depth = -1;
     }
 
@@ -121,14 +116,6 @@ public class PageContextImpl extends PageContext {
             ServletResponse response, String errorPageURL,
             boolean needsSession, int bufferSize, boolean autoFlush)
             throws IOException {
-
-        _initialize(servlet, request, response, errorPageURL, needsSession,
-                bufferSize, autoFlush);
-    }
-
-    private void _initialize(Servlet servlet, ServletRequest request,
-            ServletResponse response, String errorPageURL,
-            boolean needsSession, int bufferSize, boolean autoFlush) {
 
         // initialize state
         this.servlet = servlet;
@@ -687,8 +674,9 @@ public class PageContextImpl extends PageContext {
 
     @Override
     @Deprecated
-    public VariableResolver getVariableResolver() {
-        return new VariableResolverImpl(this.getELContext());
+    public javax.servlet.jsp.el.VariableResolver getVariableResolver() {
+        return new org.apache.jasper.el.VariableResolverImpl(
+                this.getELContext());
     }
 
     @Override
@@ -723,6 +711,7 @@ public class PageContextImpl extends PageContext {
         // JSP.4.5 If the buffer was flushed, throw IllegalStateException
         try {
             out.clear();
+            baseOut.clear();
         } catch (IOException ex) {
             IllegalStateException ise = new IllegalStateException(Localizer
                     .getMessage("jsp.error.attempt_to_clear_flushed_buffer"));
@@ -800,8 +789,9 @@ public class PageContextImpl extends PageContext {
      */
     @Override
     @Deprecated
-    public ExpressionEvaluator getExpressionEvaluator() {
-        return new ExpressionEvaluatorImpl(this.applicationContext.getExpressionFactory());
+    public javax.servlet.jsp.el.ExpressionEvaluator getExpressionEvaluator() {
+        return new org.apache.jasper.el.ExpressionEvaluatorImpl(
+                this.applicationContext.getExpressionFactory());
     }
 
     @Override
@@ -842,6 +832,7 @@ public class PageContextImpl extends PageContext {
 
     }
 
+    @SuppressWarnings("deprecation") // Still jave to support old JSP EL
     private void doHandlePageException(Throwable t) throws IOException,
             ServletException {
 
@@ -897,10 +888,9 @@ public class PageContextImpl extends PageContext {
                 throw (RuntimeException) t;
 
             Throwable rootCause = null;
-            if (t instanceof JspException) {
-                rootCause = ((JspException) t).getCause();
-            } else if (t instanceof ELException) {
-                rootCause = ((ELException) t).getCause();
+            if (t instanceof JspException || t instanceof ELException ||
+                    t instanceof javax.servlet.jsp.el.ELException) {
+                rootCause =t.getCause();
             }
 
             if (rootCause != null) {
@@ -912,27 +902,67 @@ public class PageContextImpl extends PageContext {
         }
     }
 
-    private static String XmlEscape(String s) {
-        if (s == null)
+    protected static String XmlEscape(String s) {
+        if (s == null) {
             return null;
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < s.length(); i++) {
+        }
+        int len = s.length();
+
+        /*
+         * Look for any "bad" characters, Escape "bad" character was found
+         */
+        // ASCII " 34 & 38 ' 39 < 60 > 62
+        for (int i = 0; i < len; i++) {
             char c = s.charAt(i);
-            if (c == '<') {
-                sb.append("&lt;");
-            } else if (c == '>') {
-                sb.append("&gt;");
-            } else if (c == '\'') {
-                sb.append("&#039;"); // &apos;
-            } else if (c == '&') {
-                sb.append("&amp;");
-            } else if (c == '"') {
-                sb.append("&#034;"); // &quot;
-            } else {
-                sb.append(c);
+            if (c >= '\"' && c <= '>' &&
+                    (c == '<' || c == '>' || c == '\'' || c == '&' || c == '"')) {
+                // need to escape them and then quote the whole string
+                StringBuilder sb = new StringBuilder((int) (len * 1.2));
+                sb.append(s, 0, i);
+                int pos = i + 1;
+                for (int j = i; j < len; j++) {
+                    c = s.charAt(j);
+                    if (c >= '\"' && c <= '>') {
+                        if (c == '<') {
+                            if (j > pos) {
+                                sb.append(s, pos, j);
+                            }
+                            sb.append("&lt;");
+                            pos = j + 1;
+                        } else if (c == '>') {
+                            if (j > pos) {
+                                sb.append(s, pos, j);
+                            }
+                            sb.append("&gt;");
+                            pos = j + 1;
+                        } else if (c == '\'') {
+                            if (j > pos) {
+                                sb.append(s, pos, j);
+                            }
+                            sb.append("&#039;"); // &apos;
+                            pos = j + 1;
+                        } else if (c == '&') {
+                            if (j > pos) {
+                                sb.append(s, pos, j);
+                            }
+                            sb.append("&amp;");
+                            pos = j + 1;
+                        } else if (c == '"') {
+                            if (j > pos) {
+                                sb.append(s, pos, j);
+                            }
+                            sb.append("&#034;"); // &quot;
+                            pos = j + 1;
+                        }
+                    }
+                }
+                if (pos < len) {
+                    sb.append(s, pos, len);
+                }
+                return sb.toString();
             }
         }
-        return sb.toString();
+        return s;
     }
 
     /**
@@ -965,7 +995,7 @@ public class PageContextImpl extends PageContext {
                             @Override
                             public Object run() throws Exception {
                                 ELContextImpl ctx = (ELContextImpl) pageContext.getELContext();
-                                ctx.setFunctionMapper(new FunctionMapperImpl(functionMap));
+                                ctx.setFunctionMapper(functionMap);
                                 ValueExpression ve = exprFactory.createValueExpression(ctx, expression, expectedType);
                                 return ve.getValue(ctx);
                             }
@@ -980,7 +1010,7 @@ public class PageContextImpl extends PageContext {
             }
         } else {
             ELContextImpl ctx = (ELContextImpl) pageContext.getELContext();
-            ctx.setFunctionMapper(new FunctionMapperImpl(functionMap));
+            ctx.setFunctionMapper(functionMap);
             ValueExpression ve = exprFactory.createValueExpression(ctx, expression, expectedType);
             retValue = ve.getValue(ctx);
         }

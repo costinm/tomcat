@@ -19,20 +19,20 @@ package org.apache.coyote;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
+import javax.management.InstanceNotFoundException;
 import javax.management.MBeanRegistration;
+import javax.management.MBeanRegistrationException;
 import javax.management.MBeanServer;
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 
-import org.apache.coyote.http11.upgrade.UpgradeInbound;
-import org.apache.coyote.http11.upgrade.UpgradeProcessor;
 import org.apache.juli.logging.Log;
 import org.apache.tomcat.util.ExceptionUtils;
+import org.apache.tomcat.util.collections.SynchronizedStack;
 import org.apache.tomcat.util.modeler.Registry;
 import org.apache.tomcat.util.net.AbstractEndpoint;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler;
@@ -149,6 +149,30 @@ public abstract class AbstractProtocol implements ProtocolHandler,
     public void setClientCertProvider(String s) { this.clientCertProvider = s; }
 
 
+    @Override
+    public boolean isAprRequired() {
+        return false;
+    }
+
+
+    @Override
+    public boolean isCometSupported() {
+        return endpoint.getUseComet();
+    }
+
+
+    @Override
+    public boolean isCometTimeoutSupported() {
+        return endpoint.getUseCometTimeout();
+    }
+
+
+    @Override
+    public boolean isSendfileSupported() {
+        return endpoint.getUseSendfile();
+    }
+
+
     // ---------------------- Properties that are passed through to the EndPoint
 
     @Override
@@ -237,6 +261,12 @@ public abstract class AbstractProtocol implements ProtocolHandler,
         setConnectionTimeout(timeout);
     }
 
+    public int getMaxHeaderCount() {
+        return endpoint.getMaxHeaderCount();
+    }
+    public void setMaxHeaderCount(int maxHeaderCount) {
+        endpoint.setMaxHeaderCount(maxHeaderCount);
+    }
 
     // ---------------------------------------------------------- Public methods
 
@@ -263,9 +293,14 @@ public abstract class AbstractProtocol implements ProtocolHandler,
         }
         int port = getPort();
         if (port == 0) {
-            // auto binding is in use so port is unknown at this point
+            // Auto binding is in use. Check if port is known
             name.append("auto-");
             name.append(getNameIndex());
+            port = getLocalPort();
+            if (port != -1) {
+                name.append('-');
+                name.append(port);
+            }
         } else {
             name.append(port);
         }
@@ -341,7 +376,7 @@ public abstract class AbstractProtocol implements ProtocolHandler,
 
     private ObjectName createObjectName() throws MalformedObjectNameException {
         // Use the same domain as the connector
-        domain = adapter.getDomain();
+        domain = getAdapter().getDomain();
 
         if (domain == null) {
             return null;
@@ -491,7 +526,19 @@ public abstract class AbstractProtocol implements ProtocolHandler,
         }
 
         if (oname != null) {
-            Registry.getRegistry(null, null).unregisterComponent(oname);
+            if (mserver == null) {
+                Registry.getRegistry(null, null).unregisterComponent(oname);
+            } else {
+                // Possibly registered with a different MBeanServer
+                try {
+                    mserver.unregisterMBean(oname);
+                } catch (MBeanRegistrationException |
+                        InstanceNotFoundException e) {
+                    getLog().info(sm.getString(
+                            "abstractProtocol.mbeanDeregistrationFailed",
+                            oname, mserver));
+                }
+            }
         }
 
         if (tpOname != null)
@@ -508,14 +555,14 @@ public abstract class AbstractProtocol implements ProtocolHandler,
 
         protected abstract Log getLog();
 
-        protected RequestGroupInfo global = new RequestGroupInfo();
-        protected AtomicLong registerCount = new AtomicLong(0);
+        protected final RequestGroupInfo global = new RequestGroupInfo();
+        protected final AtomicLong registerCount = new AtomicLong(0);
 
-        protected ConcurrentHashMap<S,Processor<S>> connections =
-            new ConcurrentHashMap<S,Processor<S>>();
+        protected final ConcurrentHashMap<S,Processor<S>> connections =
+                new ConcurrentHashMap<>();
 
-        protected RecycledProcessors<P,S> recycledProcessors =
-            new RecycledProcessors<P,S>(this);
+        protected final RecycledProcessors<P,S> recycledProcessors =
+                new RecycledProcessors<>(this);
 
 
         protected abstract AbstractProtocol getProtocol();
@@ -536,11 +583,17 @@ public abstract class AbstractProtocol implements ProtocolHandler,
                 SocketStatus status) {
             Processor<S> processor = connections.remove(socket.getSocket());
 
+            if (status == SocketStatus.DISCONNECT && processor == null) {
+                //nothing more to be done endpoint requested a close
+                //and there are no object associated with this connection
+                return SocketState.CLOSED;
+            }
+
             socket.setAsync(false);
 
             try {
                 if (processor == null) {
-                    processor = recycledProcessors.poll();
+                    processor = recycledProcessors.pop();
                 }
                 if (processor == null) {
                     processor = createProcessor();
@@ -550,12 +603,18 @@ public abstract class AbstractProtocol implements ProtocolHandler,
 
                 SocketState state = SocketState.CLOSED;
                 do {
-                    if (processor.isAsync() || state == SocketState.ASYNC_END) {
+                    if (status == SocketStatus.DISCONNECT &&
+                            !processor.isComet()) {
+                        // Do nothing here, just wait for it to get recycled
+                        // Don't do this for Comet we need to generate an end
+                        // event (see BZ 54022)
+                    } else if (processor.isAsync() ||
+                            state == SocketState.ASYNC_END) {
                         state = processor.asyncDispatch(status);
                     } else if (processor.isComet()) {
                         state = processor.event(status);
                     } else if (processor.isUpgrade()) {
-                        state = processor.upgradeDispatch();
+                        state = processor.upgradeDispatch(status);
                     } else {
                         state = processor.process(socket);
                     }
@@ -565,13 +624,14 @@ public abstract class AbstractProtocol implements ProtocolHandler,
                     }
 
                     if (state == SocketState.UPGRADING) {
-                        // Get the UpgradeInbound handler
-                        UpgradeInbound inbound = processor.getUpgradeInbound();
+                        // Get the HTTP upgrade handler
+                        javax.servlet.http.ProtocolHandler httpUpgradeHandler =
+                                processor.getHttpUpgradeHandler();
                         // Release the Http11 processor to be re-used
                         release(socket, processor, false, false);
                         // Create the light-weight upgrade processor
-                        processor = createUpgradeProcessor(socket, inbound);
-                        inbound.onUpgradeComplete();
+                        processor = createUpgradeProcessor(
+                                socket, httpUpgradeHandler);
                     }
                 } while (state == SocketState.ASYNC_END ||
                         state == SocketState.UPGRADING);
@@ -594,8 +654,9 @@ public abstract class AbstractProtocol implements ProtocolHandler,
                     // Need to keep the connection associated with the processor
                     longPoll(socket, processor);
                 } else {
-                    // Connection closed. OK to recycle the processor.
-                    if (!(processor instanceof UpgradeProcessor)) {
+                    // Connection closed. OK to recycle the processor. Upgrade
+                    // processors are not recycled.
+                    if (!processor.isUpgrade()) {
                         release(socket, processor, true, false);
                     }
                 }
@@ -603,11 +664,11 @@ public abstract class AbstractProtocol implements ProtocolHandler,
             } catch(java.net.SocketException e) {
                 // SocketExceptions are normal
                 getLog().debug(sm.getString(
-                        "ajpprotocol.proto.socketexception.debug"), e);
+                        "abstractConnectionHandler.socketexception.debug"), e);
             } catch (java.io.IOException e) {
                 // IOExceptions are normal
                 getLog().debug(sm.getString(
-                        "ajpprotocol.proto.ioexception.debug"), e);
+                        "abstractConnectionHandler.ioexception.debug"), e);
             }
             // Future developers: if you discover any other
             // rare-but-nonfatal exceptions, catch them here, and log as
@@ -617,10 +678,11 @@ public abstract class AbstractProtocol implements ProtocolHandler,
                 // any other exception or error is odd. Here we log it
                 // with "ERROR" level, so it will show up even on
                 // less-than-verbose logs.
-                getLog().error(sm.getString("ajpprotocol.proto.error"), e);
+                getLog().error(
+                        sm.getString("abstractConnectionHandler.error"), e);
             }
             // Don't try to add upgrade processors back into the pool
-            if (!(processor instanceof UpgradeProcessor)) {
+            if (processor !=null && !processor.isUpgrade()) {
                 release(socket, processor, true, false);
             }
             return SocketState.CLOSED;
@@ -636,7 +698,8 @@ public abstract class AbstractProtocol implements ProtocolHandler,
                 boolean addToPoller);
         protected abstract Processor<S> createUpgradeProcessor(
                 SocketWrapper<S> socket,
-                UpgradeInbound inbound) throws IOException;
+                javax.servlet.http.ProtocolHandler httpUpgradeProcessor)
+                        throws IOException;
 
         protected void register(AbstractProcessor<S> processor) {
             if (getProtocol().getDomain() != null) {
@@ -692,24 +755,24 @@ public abstract class AbstractProtocol implements ProtocolHandler,
     }
 
     protected static class RecycledProcessors<P extends Processor<S>, S>
-            extends ConcurrentLinkedQueue<Processor<S>> {
+            extends SynchronizedStack<Processor<S>> {
 
-        private static final long serialVersionUID = 1L;
-        private transient AbstractConnectionHandler<S,P> handler;
-        protected AtomicInteger size = new AtomicInteger(0);
+        private final transient AbstractConnectionHandler<S,P> handler;
+        protected final AtomicInteger size = new AtomicInteger(0);
 
         public RecycledProcessors(AbstractConnectionHandler<S,P> handler) {
             this.handler = handler;
         }
 
+        @SuppressWarnings("sync-override") // Size may exceed cache size a bit
         @Override
-        public boolean offer(Processor<S> processor) {
+        public boolean push(Processor<S> processor) {
             int cacheSize = handler.getProtocol().getProcessorCache();
             boolean offer = cacheSize == -1 ? true : size.get() < cacheSize;
             //avoid over growing our cache or add after we have stopped
             boolean result = false;
             if (offer) {
-                result = super.offer(processor);
+                result = super.push(processor);
                 if (result) {
                     size.incrementAndGet();
                 }
@@ -718,9 +781,10 @@ public abstract class AbstractProtocol implements ProtocolHandler,
             return result;
         }
 
+        @SuppressWarnings("sync-override") // OK if size is too big briefly
         @Override
-        public Processor<S> poll() {
-            Processor<S> result = super.poll();
+        public Processor<S> pop() {
+            Processor<S> result = super.pop();
             if (result != null) {
                 size.decrementAndGet();
             }
@@ -728,11 +792,11 @@ public abstract class AbstractProtocol implements ProtocolHandler,
         }
 
         @Override
-        public void clear() {
-            Processor<S> next = poll();
+        public synchronized void clear() {
+            Processor<S> next = pop();
             while (next != null) {
                 handler.unregister(next);
-                next = poll();
+                next = pop();
             }
             super.clear();
             size.set(0);

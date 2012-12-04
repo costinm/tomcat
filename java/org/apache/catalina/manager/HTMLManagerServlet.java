@@ -35,7 +35,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
 
 import javax.servlet.ServletException;
@@ -90,16 +89,18 @@ public final class HTMLManagerServlet extends ManagerServlet {
     protected static final String APPLICATION_MESSAGE = "message";
     protected static final String APPLICATION_ERROR = "error";
 
-    protected static final String sessionsListJspPath  = "/WEB-INF/jsp/sessionsList.jsp";
-    protected static final String sessionDetailJspPath = "/WEB-INF/jsp/sessionDetail.jsp";
+    protected static final String sessionsListJspPath  =
+            "/WEB-INF/jsp/sessionsList.jsp";
+    protected static final String sessionDetailJspPath =
+            "/WEB-INF/jsp/sessionDetail.jsp";
+    protected static final String connectorCiphersJspPath =
+            "/WEB-INF/jsp/connectorCiphers.jsp";
 
     static {
         URL_ENCODER = new URLEncoder();
         // '/' should not be encoded in context paths
         URL_ENCODER.addSafeCharacter('/');
     }
-
-    private final Random randomSource = new Random();
 
     private boolean showProxySessions = false;
 
@@ -150,6 +151,8 @@ public final class HTMLManagerServlet extends ManagerServlet {
                 message = smClient.getString("managerServlet.exception",
                         e.toString());
             }
+        } else if (command.equals("/sslConnectorCiphers")) {
+            sslConnectorCiphers(request, response);
         } else if (command.equals("/upload") || command.equals("/deploy") ||
                 command.equals("/reload") || command.equals("/undeploy") ||
                 command.equals("/expire") || command.equals("/start") ||
@@ -231,36 +234,6 @@ public final class HTMLManagerServlet extends ManagerServlet {
         }
 
         list(request, response, message, smClient);
-    }
-
-    /**
-     * Generate a once time token (nonce) for authenticating subsequent
-     * requests. This will also add the token to the session. The nonce
-     * generation is a simplified version of ManagerBase.generateSessionId().
-     *
-     */
-    protected String generateNonce() {
-        byte random[] = new byte[16];
-
-        // Render the result as a String of hexadecimal digits
-        StringBuilder buffer = new StringBuilder();
-
-        randomSource.nextBytes(random);
-
-        for (int j = 0; j < random.length; j++) {
-            byte b1 = (byte) ((random[j] & 0xf0) >> 4);
-            byte b2 = (byte) (random[j] & 0x0f);
-            if (b1 < 10)
-                buffer.append((char) ('0' + b1));
-            else
-                buffer.append((char) ('A' + (b1 - 10)));
-            if (b2 < 10)
-                buffer.append((char) ('0' + b2));
-            else
-                buffer.append((char) ('A' + (b2 - 10)));
-        }
-
-        return buffer.toString();
     }
 
     protected String upload(HttpServletRequest request, StringManager smClient)
@@ -525,7 +498,7 @@ public final class HTMLManagerServlet extends ManagerServlet {
                 }
 
                 args = new Object[7];
-                args[0] = "<a href=\"" + URL_ENCODER.encode(displayPath)
+                args[0] = "<a href=\"" + URL_ENCODER.encode(contextPath + "/")
                         + "\">" + RequestUtil.filter(displayPath) + "</a>";
                 if ("".equals(ctxt.getWebappVersion())) {
                     args[1] = noVersion;
@@ -537,7 +510,7 @@ public final class HTMLManagerServlet extends ManagerServlet {
                 } else {
                     args[2] = RequestUtil.filter(ctxt.getDisplayName());
                 }
-                args[3] = Boolean.valueOf(ctxt.getAvailable());
+                args[3] = Boolean.valueOf(ctxt.getState().isAvailable());
                 args[4] = RequestUtil.filter(response.encodeURL(request.getContextPath() +
                      "/html/sessions?" + pathVersion));
                 Manager manager = ctxt.getManager();
@@ -586,13 +559,13 @@ public final class HTMLManagerServlet extends ManagerServlet {
                 if (ctxt.getName().equals(this.context.getName())) {
                     writer.print(MessageFormat.format(
                         MANAGER_APP_ROW_BUTTON_SECTION, args));
-                } else if (ctxt.getAvailable() && isDeployed) {
+                } else if (ctxt.getState().isAvailable() && isDeployed) {
                     writer.print(MessageFormat.format(
                         STARTED_DEPLOYED_APPS_ROW_BUTTON_SECTION, args));
-                } else if (ctxt.getAvailable() && !isDeployed) {
+                } else if (ctxt.getState().isAvailable() && !isDeployed) {
                     writer.print(MessageFormat.format(
                         STARTED_NONDEPLOYED_APPS_ROW_BUTTON_SECTION, args));
-                } else if (!ctxt.getAvailable() && isDeployed) {
+                } else if (!ctxt.getState().isAvailable() && isDeployed) {
                     writer.print(MessageFormat.format(
                         STOPPED_DEPLOYED_APPS_ROW_BUTTON_SECTION, args));
                 } else {
@@ -622,13 +595,18 @@ public final class HTMLManagerServlet extends ManagerServlet {
         writer.print(MessageFormat.format(UPLOAD_SECTION, args));
 
         // Diagnostics section
-        args = new Object[5];
+        args = new Object[9];
         args[0] = smClient.getString("htmlManagerServlet.diagnosticsTitle");
         args[1] = smClient.getString("htmlManagerServlet.diagnosticsLeak");
         args[2] = response.encodeURL(
                 request.getContextPath() + "/html/findleaks");
         args[3] = smClient.getString("htmlManagerServlet.diagnosticsLeakWarning");
         args[4] = smClient.getString("htmlManagerServlet.diagnosticsLeakButton");
+        args[5] = smClient.getString("htmlManagerServlet.diagnosticsSsl");
+        args[6] = response.encodeURL(
+                request.getContextPath() + "/html/sslConnectorCiphers");
+        args[7] = smClient.getString("htmlManagerServlet.diagnosticsSslConnectorCipherButton");
+        args[8] = smClient.getString("htmlManagerServlet.diagnosticsSslConnectorCipherText");
         writer.print(MessageFormat.format(DIAGNOSTICS_SECTION, args));
 
         // Server Header Section
@@ -802,6 +780,13 @@ public final class HTMLManagerServlet extends ManagerServlet {
     }
 
 
+    protected void sslConnectorCiphers(HttpServletRequest request,
+            HttpServletResponse response) throws ServletException, IOException {
+        request.setAttribute("cipherList", getConnectorCiphers());
+        getServletContext().getRequestDispatcher(
+                connectorCiphersJspPath).forward(request, response);
+    }
+
     /**
      * @see javax.servlet.Servlet#getServletInfo()
      */
@@ -906,7 +891,7 @@ public final class HTMLManagerServlet extends ManagerServlet {
                     RequestUtil.filter(cn.getDisplayName())));
         }
         Manager manager = ctxt.getManager();
-        List<Session> sessions = new ArrayList<Session>();
+        List<Session> sessions = new ArrayList<>();
         sessions.addAll(Arrays.asList(manager.findSessions()));
         if (manager instanceof DistributedManager && showProxySessions) {
             // Add dummy proxy sessions
@@ -1105,10 +1090,10 @@ public final class HTMLManagerServlet extends ManagerServlet {
                 }
             };
         } else if ("MaxInactiveInterval".equalsIgnoreCase(sortBy)) {
-            comparator = new BaseSessionComparator<Date>() {
+            comparator = new BaseSessionComparator<Integer>() {
                 @Override
-                public Comparable<Date> getComparableObject(Session session) {
-                    return new Date(session.getMaxInactiveInterval());
+                public Comparable<Integer> getComparableObject(Session session) {
+                    return Integer.valueOf(session.getMaxInactiveInterval());
                 }
             };
         } else if ("new".equalsIgnoreCase(sortBy)) {
@@ -1374,6 +1359,25 @@ public final class HTMLManagerServlet extends ManagerServlet {
         " </td>\n" +
         " <td class=\"row-left\">\n" +
         "  <small>{3}</small>\n" +
+        " </td>\n" +
+        "</tr>\n" +
+        "</table>\n" +
+        "</form>\n" +
+        "</td>\n" +
+        "</tr>\n" +
+        "<tr>\n" +
+        " <td colspan=\"2\" class=\"header-left\"><small>{5}</small></td>\n" +
+        "</tr>\n" +
+        "<tr>\n" +
+        " <td colspan=\"2\">\n" +
+        "<form method=\"post\" action=\"{6}\">\n" +
+        "<table cellspacing=\"0\" cellpadding=\"3\">\n" +
+        "<tr>\n" +
+        " <td class=\"row-left\">\n" +
+        "  <input type=\"submit\" value=\"{7}\">\n" +
+        " </td>\n" +
+        " <td class=\"row-left\">\n" +
+        "  <small>{8}</small>\n" +
         " </td>\n" +
         "</tr>\n" +
         "</table>\n" +

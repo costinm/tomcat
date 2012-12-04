@@ -35,6 +35,7 @@ import org.apache.jasper.security.SecurityUtil;
  * @author Mark Roth
  * @author Kin-man Chung
  */
+@SuppressWarnings("deprecation") // Have to support old JSP EL API
 public final class ProtectedFunctionMapper extends javax.el.FunctionMapper
         implements FunctionMapper {
 
@@ -75,7 +76,7 @@ public final class ProtectedFunctionMapper extends javax.el.FunctionMapper
         } else {
             funcMapper = new ProtectedFunctionMapper();
         }
-        funcMapper.fnmap = new HashMap<String,Method>();
+        funcMapper.fnmap = new HashMap<>();
         return funcMapper;
     }
 

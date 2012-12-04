@@ -18,7 +18,6 @@
 package org.apache.tomcat.util.bcel.classfile;
 
 import java.io.DataInput;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.Serializable;
 
@@ -39,8 +38,6 @@ public final class StackMapType implements Cloneable, Serializable {
     private static final long serialVersionUID = 1L;
 
     private byte type;
-    private int index = -1; // Index to CONSTANT_Class or offset
-    private ConstantPool constant_pool;
 
 
     /**
@@ -48,23 +45,11 @@ public final class StackMapType implements Cloneable, Serializable {
      * @param file Input stream
      * @throws IOException
      */
-    StackMapType(DataInput file, ConstantPool constant_pool) throws IOException {
-        this(file.readByte(), -1, constant_pool);
+    StackMapType(DataInput file) throws IOException {
+        setType(file.readByte());
         if (hasIndex()) {
-            setIndex(file.readShort());
+            file.readShort();   // Unused index
         }
-        setConstantPool(constant_pool);
-    }
-
-
-    /**
-     * @param type type tag as defined in the Constants interface
-     * @param index index to constant pool, or byte code offset
-     */
-    public StackMapType(byte type, int index, ConstantPool constant_pool) {
-        setType(type);
-        setIndex(index);
-        setConstantPool(constant_pool);
     }
 
 
@@ -76,67 +61,9 @@ public final class StackMapType implements Cloneable, Serializable {
     }
 
 
-    public void setIndex( int t ) {
-        index = t;
-    }
-
-
-    /** @return index to constant pool if type == ITEM_Object, or offset
-     * in byte code, if type == ITEM_NewObject, and -1 otherwise
-     */
-    public int getIndex() {
-        return index;
-    }
-
-
-    /**
-     * Dump type entries to file.
-     *
-     * @param file Output file stream
-     * @throws IOException
-     */
-    public final void dump( DataOutputStream file ) throws IOException {
-        file.writeByte(type);
-        if (hasIndex()) {
-            file.writeShort(getIndex());
-        }
-    }
-
-
     /** @return true, if type is either ITEM_Object or ITEM_NewObject
      */
     public final boolean hasIndex() {
         return ((type == Constants.ITEM_Object) || (type == Constants.ITEM_NewObject));
-    }
-
-
-    private String printIndex() {
-        if (type == Constants.ITEM_Object) {
-            if (index < 0) {
-                return ", class=<unknown>";
-            }
-            return ", class=" + constant_pool.constantToString(index, Constants.CONSTANT_Class);
-        } else if (type == Constants.ITEM_NewObject) {
-            return ", offset=" + index;
-        } else {
-            return "";
-        }
-    }
-
-
-    /**
-     * @return String representation
-     */
-    @Override
-    public final String toString() {
-        return "(type=" + Constants.ITEM_NAMES[type] + printIndex() + ")";
-    }
-
-
-    /**
-     * @param constant_pool Constant pool to be used for this object.
-     */
-    public final void setConstantPool( ConstantPool constant_pool ) {
-        this.constant_pool = constant_pool;
     }
 }

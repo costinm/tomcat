@@ -37,10 +37,11 @@ public class SingleSignOnMessage implements ClusterMessage {
     public static final int UPDATE_SESSION = 5;
     public static final int REMOVE_SESSION = 6;
 
+    private final String ssoId;
+    private final String sessionId;
+
     private int action = -1;
-    private String ssoId = null;
     private String ctxname = null;
-    private String sessionId = null;
     private String authType = null;
     private String password = null;
     private String username = null;
@@ -116,11 +117,6 @@ public class SingleSignOnMessage implements ClusterMessage {
         return result.toString();
     }
 
-    @Override
-    public void setUniqueId(String uniqueId) {
-        this.uniqueId = uniqueId;
-    }
-
     public int getAction() {
         return action;
     }
@@ -133,10 +129,6 @@ public class SingleSignOnMessage implements ClusterMessage {
         return ssoId;
     }
 
-    public void setSsoId(String ssoId) {
-        this.ssoId = ssoId;
-    }
-
     public String getContextName() {
         return ctxname;
     }
@@ -147,10 +139,6 @@ public class SingleSignOnMessage implements ClusterMessage {
 
     public String getSessionId() {
         return sessionId;
-    }
-
-    public void setSessionId(String sessionId) {
-        this.sessionId = sessionId;
     }
 
     public String getAuthType() {

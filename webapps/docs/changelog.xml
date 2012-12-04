@@ -49,6 +49,10 @@
 <section name="Tomcat 8.0.0">
   <subsection name="Catalina">
     <changelog>
+      <add>
+        <bug>45995</bug>: Align Tomcat with Apache httpd and perform MIME type
+        mapping based on file extension in a case insensitive manner. (markt)
+      </add>
       <scode>
         Remove duplicate code that converted a Host&apos;s appBase attribute to
         a canonical file. (markt)
@@ -70,6 +74,63 @@
         <bug>52767</bug>: Remove reference to MySQL specific autoReconnect
         property in <code>JDBCAccessLogValve</code>. (markt)
       </fix>
+      <scode>
+        Make the Mapper type-safe. Hosts, Contexts and Wrappers are no
+        longer handled as plain objects, instead they keep their type.
+        Code using the Mapper doesn't need to cast objects returned by
+        the mapper. (rjung)
+      </scode>
+      <scode>
+        Move Manager, Loader and Resources from Container to Context since
+        Context is the only place they are used. The documentation already
+        states (and has done for some time) that Context is the only valid
+        location for these nested components. (markt)
+      </scode>
+      <scode>
+        Move the Mapper from the Connector to the Service since the Mapper is
+        identical for all Connectors of a given Service and it is common for
+        there to be multiple Connectors for a Service (http, https and ajp).
+        This means there is now only ever one Mapper per Service rather than
+        possibly multiple identically configured Mapper objects. (markt)
+      </scode>
+      <scode>
+        Remove the per Context Mapper objects and use the Mapper from the
+        Service. This removes the need to maintain two copies of the mappings
+        for Servlets and Filters. (markt)
+      </scode>
+      <add>
+        Implement a new Resources implementation that merges Aliases,
+        VirtualLoader, VirtualDirContext, JAR resources and external
+        repositories into a single framework rather than a separate one for each
+        feature. (markt)
+      </add>
+    </changelog>
+  </subsection>
+  <subsection name="Coyote">
+    <changelog>
+      <scode>
+        The default connector is now the Java NIO connector even when specifying
+        HTTP/1.1 as protocol (fhanik)
+      </scode>
+      <scode>
+        Update default value of pollerThreadCount for the NIO connector. The new
+        default value will never go above 2 regardless of available processors.
+        (fhanik)
+      </scode>
+      <fix>
+        <bug>54010</bug>: Remove some unnecessary code (duplicate calls to
+        configure the scheme as https for AJP requests originally received over
+        HTTPS). (markt)
+      </fix>
+    </changelog>
+  </subsection>
+  <subsection name="Web applications">
+    <changelog>
+      <add>
+        Extend the diagnostic information provided by the Manager web
+        application to include details of the configured SSL ciphers suites for
+        each connector. (markt)
+      </add>
     </changelog>
   </subsection>
   <subsection name="Tribes">
@@ -91,6 +152,16 @@
         Remove static info String and associated getInfo() method where present.
         (markt)
       </scode>
+      <update>
+        (<rev>1353242</rev>, <rev>1353410</rev>):
+        Remove Ant tasks <code>jasper2</code> and <code>jkstatus</code>.
+        The correct names are <code>jasper</code> and <code>jkupdate</code>.
+        (kkolinko)
+      </update>
+      <fix>
+        <bug>53529</bug>: Clean-up the handling of
+        <code>InterruptedException</code> throughout the code base. (markt)
+      </fix>
     </changelog>
   </subsection>
 </section>

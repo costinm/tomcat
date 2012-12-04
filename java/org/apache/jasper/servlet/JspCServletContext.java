@@ -63,19 +63,19 @@ public class JspCServletContext implements ServletContext {
     /**
      * Servlet context attributes.
      */
-    protected Hashtable<String,Object> myAttributes;
+    protected final Hashtable<String,Object> myAttributes;
 
 
     /**
      * The log writer we will write log messages to.
      */
-    protected PrintWriter myLogWriter;
+    protected final PrintWriter myLogWriter;
 
 
     /**
      * The base URL (document root) for this context.
      */
-    protected URL myResourceBaseURL;
+    protected final URL myResourceBaseURL;
 
 
     // ----------------------------------------------------------- Constructors
@@ -89,7 +89,7 @@ public class JspCServletContext implements ServletContext {
      */
     public JspCServletContext(PrintWriter aLogWriter, URL aResourceBaseURL) {
 
-        myAttributes = new Hashtable<String,Object>();
+        myAttributes = new Hashtable<>();
         myLogWriter = aLogWriter;
         myResourceBaseURL = aResourceBaseURL;
 
@@ -321,7 +321,7 @@ public class JspCServletContext implements ServletContext {
     @Override
     public Set<String> getResourcePaths(String path) {
 
-        Set<String> thePaths = new HashSet<String>();
+        Set<String> thePaths = new HashSet<>();
         if (!path.endsWith("/"))
             path += "/";
         String basePath = getRealPath(path);

@@ -18,10 +18,7 @@
 package org.apache.tomcat.util.bcel.classfile;
 
 import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
-
-import org.apache.tomcat.util.bcel.Constants;
 
 /**
  * This class is derived from <em>Attribute</em> and declares this class as
@@ -51,7 +48,7 @@ public final class Synthetic extends Attribute {
      * with.
      */
     public Synthetic(int name_index, int length, byte[] bytes, ConstantPool constant_pool) {
-        super(Constants.ATTR_SYNTHETIC, name_index, length, constant_pool);
+        super(name_index, length, constant_pool);
         this.bytes = bytes;
     }
 
@@ -72,48 +69,5 @@ public final class Synthetic extends Attribute {
             file.readFully(bytes);
             System.err.println("Synthetic attribute with length > 0");
         }
-    }
-
-
-    /**
-     * Dump source file attribute to file stream in binary format.
-     *
-     * @param file Output file stream
-     * @throws IOException
-     */
-    @Override
-    public final void dump( DataOutputStream file ) throws IOException {
-        super.dump(file);
-        if (length > 0) {
-            file.write(bytes, 0, length);
-        }
-    }
-
-
-    /**
-     * @return String representation.
-     */
-    @Override
-    public final String toString() {
-        StringBuilder buf = new StringBuilder("Synthetic");
-        if (length > 0) {
-            buf.append(" ").append(Utility.toHexString(bytes));
-        }
-        return buf.toString();
-    }
-
-
-    /**
-     * @return deep copy of this attribute
-     */
-    @Override
-    public Attribute copy( ConstantPool _constant_pool ) {
-        Synthetic c = (Synthetic) clone();
-        if (bytes != null) {
-            c.bytes = new byte[bytes.length];
-            System.arraycopy(bytes, 0, c.bytes, 0, bytes.length);
-        }
-        c.constant_pool = _constant_pool;
-        return c;
     }
 }

@@ -19,7 +19,6 @@ package org.apache.coyote.spdy;
 import java.io.IOException;
 
 import org.apache.coyote.Adapter;
-import org.apache.coyote.http11.Http11AprProtocol;
 import org.apache.coyote.http11.NpnHandler;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -59,7 +58,7 @@ import org.apache.tomcat.util.net.SocketWrapper;
  * negotiated by TLS.
  *
  */
-public class SpdyAprNpnHandler implements NpnHandler {
+public class SpdyAprNpnHandler implements NpnHandler<Long> {
 
     private static final Log log = LogFactory.getLog(AprEndpoint.class);
 
@@ -91,19 +90,17 @@ public class SpdyAprNpnHandler implements NpnHandler {
     }
 
     @Override
-    public SocketState process(SocketWrapper<?> socketO, SocketStatus status) {
+    public SocketState process(SocketWrapper<Long> socketWrapper,
+            SocketStatus status) {
 
-        SocketWrapper<Long> socketW = (SocketWrapper<Long>) socketO;
-        long socket = socketW.getSocket().longValue();
-        
-        if (! spdyContext.getNetSupport().isSpdy(socketW.getSocket())) {
-            return SocketState.OPEN;            
+        long socket = socketWrapper.getSocket().longValue();
+
+        if (! spdyContext.getNetSupport().isSpdy(socketWrapper.getSocket())) {
+            return SocketState.OPEN;
         }
 
-        try {
-            ((NetSupportOpenSSL) spdyContext.getNetSupport()).onAcceptLong(socket);
-        } catch (IOException e) {
-        }
+        ((NetSupportOpenSSL) spdyContext.getNetSupport()).onAcceptLong(socket);
+
         // No need to keep tomcat thread busy - but socket will be handled by apr socket context.
         return SocketState.LONG;
     }

@@ -18,10 +18,7 @@
 package org.apache.tomcat.util.bcel.classfile;
 
 import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
-
-import org.apache.tomcat.util.bcel.Constants;
 
 /**
  * This class is derived from <em>Attribute</em> and denotes that this is a
@@ -45,7 +42,7 @@ public final class Deprecated extends Attribute {
      * @param constant_pool Array of constants
      */
     public Deprecated(int name_index, int length, byte[] bytes, ConstantPool constant_pool) {
-        super(Constants.ATTR_DEPRECATED, name_index, length, constant_pool);
+        super(name_index, length, constant_pool);
         this.bytes = bytes;
     }
 
@@ -66,44 +63,5 @@ public final class Deprecated extends Attribute {
             file.readFully(bytes);
             System.err.println("Deprecated attribute with length > 0");
         }
-    }
-
-
-    /**
-     * Dump source file attribute to file stream in binary format.
-     *
-     * @param file Output file stream
-     * @throws IOException
-     */
-    @Override
-    public final void dump( DataOutputStream file ) throws IOException {
-        super.dump(file);
-        if (length > 0) {
-            file.write(bytes, 0, length);
-        }
-    }
-
-
-    /**
-     * @return attribute name
-     */
-    @Override
-    public final String toString() {
-        return Constants.ATTRIBUTE_NAMES[Constants.ATTR_DEPRECATED];
-    }
-
-
-    /**
-     * @return deep copy of this attribute
-     */
-    @Override
-    public Attribute copy( ConstantPool _constant_pool ) {
-        Deprecated c = (Deprecated) clone();
-        if (bytes != null) {
-            c.bytes = new byte[bytes.length];
-            System.arraycopy(bytes, 0, c.bytes, 0, bytes.length);
-        }
-        c.constant_pool = _constant_pool;
-        return c;
     }
 }

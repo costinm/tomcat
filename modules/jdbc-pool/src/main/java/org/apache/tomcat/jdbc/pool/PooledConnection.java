@@ -102,7 +102,9 @@ public class PooledConnection {
      */
     protected ConnectionPool parent;
 
-    private HashMap<Object, Object> attributes = new HashMap<Object, Object>();
+    private HashMap<Object, Object> attributes = new HashMap<>();
+
+    private volatile long connectionVersion=0;
 
     /**
      * Weak reference to cache the list of interceptors for this connection
@@ -125,6 +127,11 @@ public class PooledConnection {
     public PooledConnection(PoolConfiguration prop, ConnectionPool parent) {
         poolProperties = prop;
         this.parent = parent;
+        connectionVersion = parent.getPoolVersion();
+    }
+
+    public long getConnectionVersion() {
+        return connectionVersion;
     }
 
     public boolean checkUser(String username, String password) {
@@ -176,7 +183,8 @@ public class PooledConnection {
         }
 
         //set up the default state, unless we expect the interceptor to do it
-        if (poolProperties.getJdbcInterceptors()==null || poolProperties.getJdbcInterceptors().indexOf(ConnectionState.class.getName())<0) {
+        if (poolProperties.getJdbcInterceptors()==null || poolProperties.getJdbcInterceptors().indexOf(ConnectionState.class.getName())<0 ||
+                poolProperties.getJdbcInterceptors().indexOf(ConnectionState.class.getSimpleName())<0) {
             if (poolProperties.getDefaultTransactionIsolation()!=DataSourceFactory.UNKNOWN_TRANSACTIONISOLATION) connection.setTransactionIsolation(poolProperties.getDefaultTransactionIsolation());
             if (poolProperties.getDefaultReadOnly()!=null) connection.setReadOnly(poolProperties.getDefaultReadOnly().booleanValue());
             if (poolProperties.getDefaultAutoCommit()!=null) connection.setAutoCommit(poolProperties.getDefaultAutoCommit().booleanValue());
@@ -231,10 +239,14 @@ public class PooledConnection {
     protected void connectUsingDriver() throws SQLException {
 
         try {
-            if (driver==null)
+            if (driver==null) {
+                if (log.isDebugEnabled()) {
+                    log.debug("Instantiating driver using class: "+poolProperties.getDriverClassName()+" [url="+poolProperties.getUrl()+"]");
+                }
                 driver = (java.sql.Driver) Class.forName(poolProperties.getDriverClassName(),
                                                          true, PooledConnection.class.getClassLoader()
                                                          ).newInstance();
+            }
         } catch (java.lang.Exception cn) {
             if (log.isDebugEnabled()) {
                 log.debug("Unable to instantiate JDBC driver.", cn);
@@ -353,7 +365,6 @@ public class PooledConnection {
      * Returns true if the connection pool is configured
      * to do validation for a certain action.
      * @param action
-     * @return
      */
     private boolean doValidate(int action) {
         if (action == PooledConnection.VALIDATE_BORROW &&

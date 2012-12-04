@@ -140,7 +140,7 @@ public class ServletDef implements Serializable {
      * The set of initialization parameters for this servlet, keyed by
      * parameter name.
      */
-    private Map<String, String> parameters = new HashMap<String, String>();
+    private final Map<String, String> parameters = new HashMap<>();
 
     public Map<String, String> getParameterMap() {
 
@@ -197,8 +197,7 @@ public class ServletDef implements Serializable {
     /**
      * The set of security role references for this servlet
      */
-    private Set<SecurityRoleRef> securityRoleRefs =
-        new HashSet<SecurityRoleRef>();
+    private final Set<SecurityRoleRef> securityRoleRefs = new HashSet<>();
 
     public Set<SecurityRoleRef> getSecurityRoleRefs() {
         return (this.securityRoleRefs);
@@ -211,18 +210,6 @@ public class ServletDef implements Serializable {
     public void addSecurityRoleRef(SecurityRoleRef securityRoleRef) {
         securityRoleRefs.add(securityRoleRef);
     }
-
-    /**
-     * Add a security-role-ref to the set of security-role-refs associated
-     * with this servlet.
-     */
-    public void addSecurityRoleRef(String roleName, String roleLink) {
-        SecurityRoleRef srr = new SecurityRoleRef();
-        srr.setName(roleName);
-        srr.setLink(roleLink);
-        securityRoleRefs.add(srr);
-    }
-
 
     /**
      * The multipart configuration, if any, for this servlet

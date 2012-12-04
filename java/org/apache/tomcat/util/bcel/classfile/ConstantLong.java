@@ -18,7 +18,6 @@
 package org.apache.tomcat.util.bcel.classfile;
 
 import java.io.DataInput;
-import java.io.DataOutputStream;
 import java.io.IOException;
 
 import org.apache.tomcat.util.bcel.Constants;
@@ -59,31 +58,9 @@ public final class ConstantLong extends Constant {
 
 
     /**
-     * Dump constant long to file stream in binary format.
-     *
-     * @param file Output file stream
-     * @throws IOException
-     */
-    @Override
-    public final void dump( DataOutputStream file ) throws IOException {
-        file.writeByte(tag);
-        file.writeLong(bytes);
-    }
-
-
-    /**
      * @return data, i.e., 8 bytes.
      */
     public final long getBytes() {
         return bytes;
-    }
-
-
-    /**
-     * @return String representation.
-     */
-    @Override
-    public final String toString() {
-        return super.toString() + "(bytes = " + bytes + ")";
     }
 }

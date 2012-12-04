@@ -14,7 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.catalina.ant.jmx;
 
 /**
@@ -24,17 +23,16 @@ package org.apache.catalina.ant.jmx;
  * @since 5.5.10
  */
 public class Arg {
-    String type;
-    String value;
+
+    private String type;
+    private String value;
 
     public void setType( String type) {
         this.type=type;
     }
+
     public void setValue( String value ) {
         this.value=value;
-    }
-    public void addText( String text ) {
-        this.value=text;
     }
 
     public String getValue() {

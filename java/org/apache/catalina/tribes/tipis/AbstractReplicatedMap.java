@@ -18,8 +18,6 @@
 package org.apache.catalina.tribes.tipis;
 
 import java.io.IOException;
-import java.io.ObjectInput;
-import java.io.ObjectOutput;
 import java.io.Serializable;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
@@ -43,7 +41,6 @@ import org.apache.catalina.tribes.group.Response;
 import org.apache.catalina.tribes.group.RpcCallback;
 import org.apache.catalina.tribes.group.RpcChannel;
 import org.apache.catalina.tribes.io.XByteBuffer;
-import org.apache.catalina.tribes.membership.MemberImpl;
 import org.apache.catalina.tribes.util.Arrays;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -110,11 +107,11 @@ public abstract class AbstractReplicatedMap<K,V>
     /**
      * Simple lock object for transfers
      */
-    protected transient Object stateMutex = new Object();
+    protected final transient Object stateMutex = new Object();
     /**
      * A list of members in our map
      */
-    protected transient HashMap<Member, Long> mapMembers = new HashMap<Member, Long>();
+    protected final transient HashMap<Member, Long> mapMembers = new HashMap<>();
     /**
      * Our default send options
      */
@@ -152,8 +149,7 @@ public abstract class AbstractReplicatedMap<K,V>
 //------------------------------------------------------------------------------
 
     public static interface MapOwner {
-        // a typo, should have been "objectMadePrimary"
-        public void objectMadePrimay(Object key, Object value);
+        public void objectMadePrimary(Object key, Object value);
     }
 
 //------------------------------------------------------------------------------
@@ -177,7 +173,7 @@ public abstract class AbstractReplicatedMap<K,V>
                                  float loadFactor,
                                  int channelSendOptions,
                                  ClassLoader[] cls) {
-        innerMap = new ConcurrentHashMap<K,MapEntry<K, V>>(initialCapacity, loadFactor, 15);
+        innerMap = new ConcurrentHashMap<>(initialCapacity, loadFactor, 15);
         init(owner, channel, mapContextName, timeout, channelSendOptions, cls);
 
     }
@@ -385,7 +381,6 @@ public abstract class AbstractReplicatedMap<K,V>
 
     public Member[] getMapMembersExcl(Member[] exclude) {
         synchronized (mapMembers) {
-            @SuppressWarnings("unchecked") // mapMembers has the correct type
             HashMap<Member, Long> list = (HashMap<Member, Long>)mapMembers.clone();
             for (int i=0; i<exclude.length;i++) list.remove(exclude[i]);
             return getMapMembers(list);
@@ -407,9 +402,12 @@ public abstract class AbstractReplicatedMap<K,V>
         if ( entry == null ) return;
         if ( !entry.isSerializable() ) return;
         if (entry.isPrimary() && entry.getBackupNodes()!= null && entry.getBackupNodes().length > 0) {
-            Object value = entry.getValue();
-            //check to see if we need to replicate this object isDirty()||complete
-            boolean repl = complete || ( (value instanceof ReplicatedMapEntry) && ( (ReplicatedMapEntry) value).isDirty());
+            //check to see if we need to replicate this object isDirty()||complete || isAccessReplicate()
+            ReplicatedMapEntry rentry = null;
+            if (entry.getValue() instanceof ReplicatedMapEntry) rentry = (ReplicatedMapEntry)entry.getValue();
+            boolean isDirty = rentry != null && rentry.isDirty();
+            boolean isAccess = rentry != null && rentry.isAccessReplicate();
+            boolean repl = complete || isDirty || isAccess;
 
             if (!repl) {
                 if ( log.isTraceEnabled() )
@@ -418,10 +416,9 @@ public abstract class AbstractReplicatedMap<K,V>
                 return;
             }
             //check to see if the message is diffable
-            boolean diff = ( (value instanceof ReplicatedMapEntry) && ( (ReplicatedMapEntry) value).isDiffable());
             MapMessage msg = null;
-            if (diff) {
-                ReplicatedMapEntry rentry = (ReplicatedMapEntry)entry.getValue();
+            if (rentry != null && rentry.isDiffable() &&
+                    (isDirty || complete)) {
                 try {
                     rentry.lock();
                     //construct a diff message
@@ -438,7 +435,7 @@ public abstract class AbstractReplicatedMap<K,V>
                 }
 
             }
-            if (msg == null) {
+            if (msg == null && complete) {
                 //construct a complete
                 msg = new MapMessage(mapContextName, MapMessage.MSG_BACKUP,
                                      false, (Serializable) entry.getKey(),
@@ -446,8 +443,15 @@ public abstract class AbstractReplicatedMap<K,V>
                                      null, entry.getPrimary(),entry.getBackupNodes());
 
             }
+            if (msg == null) {
+                //construct a access message
+                msg = new MapMessage(mapContextName, MapMessage.MSG_ACCESS,
+                        false, (Serializable) entry.getKey(), null, null, entry.getPrimary(),
+                        entry.getBackupNodes());
+            }
             try {
                 if ( channel!=null && entry.getBackupNodes()!= null && entry.getBackupNodes().length > 0 ) {
+                    if (rentry != null) rentry.setLastTimeReplicated(System.currentTimeMillis());
                     channel.send(entry.getBackupNodes(), msg, channelSendOptions);
                 }
             } catch (ChannelException x) {
@@ -537,7 +541,7 @@ public abstract class AbstractReplicatedMap<K,V>
         //state transfer request
         if (mapmsg.getMsgType() == MapMessage.MSG_STATE || mapmsg.getMsgType() == MapMessage.MSG_STATE_COPY) {
             synchronized (stateMutex) { //make sure we dont do two things at the same time
-                ArrayList<MapMessage> list = new ArrayList<MapMessage>();
+                ArrayList<MapMessage> list = new ArrayList<>();
                 Iterator<Map.Entry<K,MapEntry<K,V>>> i = innerMap.entrySet().iterator();
                 while (i.hasNext()) {
                     Map.Entry<?,?> e = i.next();
@@ -618,18 +622,16 @@ public abstract class AbstractReplicatedMap<K,V>
         if (mapmsg.getMsgType() == MapMessage.MSG_PROXY) {
             MapEntry<K,V> entry = innerMap.get(mapmsg.getKey());
             if ( entry==null ) {
-                entry = new MapEntry<K,V>((K) mapmsg.getKey(), (V) mapmsg.getValue());
-                entry.setBackup(false);
-                entry.setProxy(true);
-                entry.setBackupNodes(mapmsg.getBackupNodes());
-                entry.setPrimary(mapmsg.getPrimary());
-                innerMap.put(entry.getKey(), entry);
-            } else {
-                entry.setProxy(true);
-                entry.setBackup(false);
-                entry.setBackupNodes(mapmsg.getBackupNodes());
-                entry.setPrimary(mapmsg.getPrimary());
+                entry = new MapEntry<>((K) mapmsg.getKey(), (V) mapmsg.getValue());
+                MapEntry<K,V> old = innerMap.putIfAbsent(entry.getKey(), entry);
+                if (old != null) {
+                    entry = old;
+                }
             }
+            entry.setProxy(true);
+            entry.setBackup(false);
+            entry.setBackupNodes(mapmsg.getBackupNodes());
+            entry.setPrimary(mapmsg.getPrimary());
         }
 
         if (mapmsg.getMsgType() == MapMessage.MSG_REMOVE) {
@@ -639,7 +641,7 @@ public abstract class AbstractReplicatedMap<K,V>
         if (mapmsg.getMsgType() == MapMessage.MSG_BACKUP || mapmsg.getMsgType() == MapMessage.MSG_COPY) {
             MapEntry<K,V> entry = innerMap.get(mapmsg.getKey());
             if (entry == null) {
-                entry = new MapEntry<K,V>((K) mapmsg.getKey(), (V) mapmsg.getValue());
+                entry = new MapEntry<>((K) mapmsg.getKey(), (V) mapmsg.getValue());
                 entry.setBackup(mapmsg.getMsgType() == MapMessage.MSG_BACKUP);
                 entry.setProxy(false);
                 entry.setBackupNodes(mapmsg.getBackupNodes());
@@ -677,6 +679,17 @@ public abstract class AbstractReplicatedMap<K,V>
             } //end if
             innerMap.put(entry.getKey(), entry);
         } //end if
+
+        if (mapmsg.getMsgType() == MapMessage.MSG_ACCESS) {
+            MapEntry<K, V> entry = innerMap.get(mapmsg.getKey());
+            if (entry != null) {
+                entry.setBackupNodes(mapmsg.getBackupNodes());
+                entry.setPrimary(mapmsg.getPrimary());
+                if (entry.getValue() instanceof ReplicatedMapEntry) {
+                    ((ReplicatedMapEntry) entry.getValue()).accessEntry();
+                }
+            }
+        }
     }
 
     @Override
@@ -730,7 +743,7 @@ public abstract class AbstractReplicatedMap<K,V>
     }
 
     public Member[] excludeFromSet(Member[] mbrs, Member[] set) {
-        ArrayList<Member> result = new ArrayList<Member>();
+        ArrayList<Member> result = new ArrayList<>();
         for (int i=0; i<set.length; i++ ) {
             boolean include = true;
             for (int j=0; j<mbrs.length; j++ )
@@ -795,7 +808,7 @@ public abstract class AbstractReplicatedMap<K,V>
                     entry.setProxy(false);
                     Member[] backup = publishEntryInfo(entry.getKey(), entry.getValue());
                     entry.setBackupNodes(backup);
-                    if ( mapOwner!=null ) mapOwner.objectMadePrimay(entry.getKey(),entry.getValue());
+                    if ( mapOwner!=null ) mapOwner.objectMadePrimary(entry.getKey(),entry.getValue());
 
                 } catch (ChannelException x) {
                     log.error("Unable to relocate[" + entry.getKey() + "] to a new backup node", x);
@@ -915,7 +928,7 @@ public abstract class AbstractReplicatedMap<K,V>
                 entry.setBackupNodes(backup);
                 entry.setBackup(false);
                 entry.setProxy(false);
-                if ( getMapOwner()!=null ) getMapOwner().objectMadePrimay(key, entry.getValue());
+                if ( getMapOwner()!=null ) getMapOwner().objectMadePrimary(key, entry.getValue());
 
             } catch (Exception x) {
                 log.error("Unable to replicate out data for a LazyReplicatedMap.get operation", x);
@@ -968,7 +981,7 @@ public abstract class AbstractReplicatedMap<K,V>
     }
 
     public V put(K key, V value, boolean notify) {
-        MapEntry<K,V> entry = new MapEntry<K,V>(key,value);
+        MapEntry<K,V> entry = new MapEntry<>(key, value);
         entry.setBackup(false);
         entry.setProxy(false);
         entry.setPrimary(channel.getLocalMember(false));
@@ -998,7 +1011,6 @@ public abstract class AbstractReplicatedMap<K,V>
     public void putAll(Map<? extends K, ? extends V> m) {
         Iterator<?> i = m.entrySet().iterator();
         while ( i.hasNext() ) {
-            @SuppressWarnings("unchecked")
             Map.Entry<K,V> entry = (Map.Entry<K,V>) i.next();
             put(entry.getKey(),entry.getValue());
         }
@@ -1022,17 +1034,16 @@ public abstract class AbstractReplicatedMap<K,V>
 
     @Override
     public boolean containsValue(Object value) {
-        if ( value == null ) {
-            return innerMap.containsValue(value);
-        } else {
-            Iterator<Map.Entry<K,MapEntry<K,V>>> i = innerMap.entrySet().iterator();
-            while (i.hasNext()) {
-                Map.Entry<K,MapEntry<K,V>> e = i.next();
-                MapEntry<K,V> entry = innerMap.get(e.getKey());
-                if (entry!=null && entry.isActive() && value.equals(entry.getValue())) return true;
-            }//while
-            return false;
-        }//end if
+        if (value == null) {
+            throw new NullPointerException();
+        }
+        Iterator<Map.Entry<K,MapEntry<K,V>>> i = innerMap.entrySet().iterator();
+        while (i.hasNext()) {
+            Map.Entry<K,MapEntry<K,V>> e = i.next();
+            MapEntry<K,V> entry = innerMap.get(e.getKey());
+            if (entry!=null && entry.isActive() && value.equals(entry.getValue())) return true;
+        }
+        return false;
     }
 
     @Override
@@ -1060,7 +1071,7 @@ public abstract class AbstractReplicatedMap<K,V>
 
     @Override
     public Set<Map.Entry<K,V>> entrySet() {
-        LinkedHashSet<Map.Entry<K,V>> set = new LinkedHashSet<Map.Entry<K,V>>(innerMap.size());
+        LinkedHashSet<Map.Entry<K,V>> set = new LinkedHashSet<>(innerMap.size());
         Iterator<Map.Entry<K,MapEntry<K,V>>> i = innerMap.entrySet().iterator();
         while ( i.hasNext() ) {
             Map.Entry<?,?> e = i.next();
@@ -1077,7 +1088,7 @@ public abstract class AbstractReplicatedMap<K,V>
     public Set<K> keySet() {
         //todo implement
         //should only return keys where this is active.
-        LinkedHashSet<K> set = new LinkedHashSet<K>(innerMap.size());
+        LinkedHashSet<K> set = new LinkedHashSet<>(innerMap.size());
         Iterator<Map.Entry<K,MapEntry<K,V>>> i = innerMap.entrySet().iterator();
         while ( i.hasNext() ) {
             Map.Entry<K,MapEntry<K,V>> e = i.next();
@@ -1113,7 +1124,7 @@ public abstract class AbstractReplicatedMap<K,V>
 
     @Override
     public Collection<V> values() {
-        ArrayList<V> values = new ArrayList<V>();
+        ArrayList<V> values = new ArrayList<>();
         Iterator<Map.Entry<K,MapEntry<K,V>>> i = innerMap.entrySet().iterator();
         while ( i.hasNext() ) {
             Map.Entry<K,MapEntry<K,V>> e = i.next();
@@ -1240,7 +1251,6 @@ public abstract class AbstractReplicatedMap<K,V>
          * @throws IOException
          * @throws ClassNotFoundException
          */
-        @SuppressWarnings("unchecked")
         public void apply(byte[] data, int offset, int length, boolean diff) throws IOException, ClassNotFoundException {
             if (isDiffable() && diff) {
                 ReplicatedMapEntry rentry = (ReplicatedMapEntry) value;
@@ -1287,16 +1297,17 @@ public abstract class AbstractReplicatedMap<K,V>
         public static final int MSG_INIT = 8;
         public static final int MSG_COPY = 9;
         public static final int MSG_STATE_COPY = 10;
+        public static final int MSG_ACCESS = 11;
 
-        private byte[] mapId;
-        private int msgtype;
-        private boolean diff;
+        private final byte[] mapId;
+        private final int msgtype;
+        private final boolean diff;
         private transient Serializable key;
         private transient Serializable value;
         private byte[] valuedata;
         private byte[] keydata;
-        private byte[] diffvalue;
-        private Member[] nodes;
+        private final byte[] diffvalue;
+        private final Member[] nodes;
         private Member primary;
 
         @Override
@@ -1324,11 +1335,10 @@ public abstract class AbstractReplicatedMap<K,V>
                 case MSG_INIT: return "MSG_INIT";
                 case MSG_STATE_COPY: return "MSG_STATE_COPY";
                 case MSG_COPY: return "MSG_COPY";
+                case MSG_ACCESS: return "MSG_ACCESS";
                 default : return "UNKNOWN";
             }
         }
-
-        public MapMessage() {}
 
         public MapMessage(byte[] mapId,int msgtype, boolean diff,
                           Serializable key, Serializable value,
@@ -1437,30 +1447,6 @@ public abstract class AbstractReplicatedMap<K,V>
                 throw new RuntimeException(x);
             }
         }
-
-        protected Member[] readMembers(ObjectInput in) throws IOException {
-            int nodecount = in.readInt();
-            Member[] members = new Member[nodecount];
-            for ( int i=0; i<members.length; i++ ) {
-                byte[] d = new byte[in.readInt()];
-                in.readFully(d);
-                if (d.length > 0) members[i] = MemberImpl.getMember(d);
-            }
-            return members;
-        }
-
-        protected void writeMembers(ObjectOutput out,Member[] members) throws IOException {
-            if ( members == null ) members = new Member[0];
-            out.writeInt(members.length);
-            for (int i=0; i<members.length; i++ ) {
-                if ( members[i] != null ) {
-                    byte[] d = members[i] != null ? ( (MemberImpl)members[i]).getData(false) : new byte[0];
-                    out.writeInt(d.length);
-                    out.write(d);
-                }
-            }
-        }
-
 
         /**
          * shallow clone

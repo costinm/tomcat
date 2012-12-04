@@ -20,7 +20,6 @@ import java.beans.PropertyChangeListener;
 import java.io.File;
 
 import javax.management.ObjectName;
-import javax.naming.directory.DirContext;
 
 import org.apache.catalina.connector.Request;
 import org.apache.catalina.connector.Response;
@@ -115,43 +114,11 @@ public interface Container extends Lifecycle {
     // ------------------------------------------------------------- Properties
 
     /**
-     * Return the Loader with which this Container is associated.  If there is
-     * no associated Loader, return the Loader associated with our parent
-     * Container (if any); otherwise, return <code>null</code>.
-     */
-    public Loader getLoader();
-
-
-    /**
-     * Set the Loader with which this Container is associated.
-     *
-     * @param loader The newly associated loader
-     */
-    public void setLoader(Loader loader);
-
-
-    /**
      * Return the Logger with which this Container is associated.  If there is
      * no associated Logger, return the Logger associated with our parent
      * Container (if any); otherwise return <code>null</code>.
      */
     public Log getLogger();
-
-
-    /**
-     * Return the Manager with which this Container is associated.  If there is
-     * no associated Manager, return the Manager associated with our parent
-     * Container (if any); otherwise return <code>null</code>.
-     */
-    public Manager getManager();
-
-
-    /**
-     * Set the Manager with which this Container is associated.
-     *
-     * @param manager The newly associated Manager
-     */
-    public void setManager(Manager manager);
 
 
     /**
@@ -298,22 +265,6 @@ public interface Container extends Lifecycle {
      * @param realm The newly associated Realm
      */
     public void setRealm(Realm realm);
-
-
-    /**
-     * Return the Resources with which this Container is associated.  If there
-     * is no associated Resources object, return the Resources associated with
-     * our parent Container (if any); otherwise return <code>null</code>.
-     */
-    public DirContext getResources();
-
-
-    /**
-     * Set the Resources object with which this Container is associated.
-     *
-     * @param resources The newly associated Resources
-     */
-    public void setResources(DirContext resources);
 
 
     // --------------------------------------------------------- Public Methods

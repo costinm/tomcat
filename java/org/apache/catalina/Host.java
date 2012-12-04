@@ -86,6 +86,12 @@ public interface Host extends Container {
     public void setXmlBase(String xmlBase);
 
     /**
+     * Return a default configuration path of this Host. The file will be
+     * canonical if possible.
+     */
+    public File getConfigBaseFile();
+
+    /**
      * Return the application root for this Host.  This can be an absolute
      * pathname, a relative pathname, or a URL.
      */
@@ -189,6 +195,37 @@ public interface Host extends Container {
     public ExecutorService getStartStopExecutor();
 
 
+    /**
+     * Returns true if the Host will attempt to create directories for appBase and xmlBase
+     * unless they already exist.
+     * @return true if the Host will attempt to create directories
+     */
+    public boolean getCreateDirs();
+
+
+    /**
+     * Set to true if the Host should attempt to create directories for xmlBase and appBase upon startup
+     * @param createDirs
+     */
+    public void setCreateDirs(boolean createDirs);
+
+
+    /**
+     * Returns true of the Host is configured to automatically undeploy old
+     * versions of applications deployed using parallel deployment. This only
+     * takes effect is {@link #getAutoDeploy()} also returns true.
+     */
+    public boolean getUndeployOldVersions();
+
+
+    /**
+     * Set to true if the Host should automatically undeploy old versions of
+     * applications deployed using parallel deployment. This only takes effect
+     * if {@link #getAutoDeploy()} returns true.
+     */
+    public void setUndeployOldVersions(boolean undeployOldVersions);
+
+
     // --------------------------------------------------------- Public Methods
 
     /**
@@ -212,17 +249,4 @@ public interface Host extends Container {
      * @param alias Alias name to be removed
      */
     public void removeAlias(String alias);
-
-    /**
-     * Returns true if the Host will attempt to create directories for appBase and xmlBase
-     * unless they already exist.
-     * @return true if the Host will attempt to create directories
-     */
-    public boolean getCreateDirs();
-    /**
-     * Set to true if the Host should attempt to create directories for xmlBase and appBase upon startup
-     * @param createDirs
-     */
-    public void setCreateDirs(boolean createDirs);
-
 }

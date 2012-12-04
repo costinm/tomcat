@@ -17,21 +17,26 @@
 package org.apache.tomcat.jdbc.pool;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.sql.SQLException;
 
 /**
- * A DisposableConnectionFacade object is the top most interceptor that wraps an object of type
- * {@link PooledConnection}. The ProxyCutOffConnection intercepts two methods:
+ * A DisposableConnectionFacade object is the top most interceptor that wraps an
+ * object of type {@link PooledConnection}. The ProxyCutOffConnection intercepts
+ * two methods:
  * <ul>
- *   <li>{@link java.sql.Connection#close()} - returns the connection to the pool then breaks the link between cutoff and the next interceptor. May be called multiple times.</li>
- *   <li>{@link java.lang.Object#toString()} - returns a custom string for this object</li>
+ *   <li>{@link java.sql.Connection#close()} - returns the connection to the
+ *       pool then breaks the link between cutoff and the next interceptor.
+ *       May be called multiple times.</li>
+ *   <li>{@link java.lang.Object#toString()} - returns a custom string for this
+ *       object</li>
  * </ul>
- * By default method comparisons is done on a String reference level, unless the {@link PoolConfiguration#setUseEquals(boolean)} has been called
- * with a <code>true</code> argument.
- * @author Kevin Grainer
+ * By default method comparisons is done on a String reference level, unless the
+ * {@link PoolConfiguration#setUseEquals(boolean)} has been called with a
+ * <code>true</code> argument.
  */
 public class DisposableConnectionFacade extends JdbcInterceptor {
-    protected DisposableConnectionFacade(JdbcInterceptor interceptor) throws SQLException {
+    protected DisposableConnectionFacade(JdbcInterceptor interceptor) {
         setUseEquals(interceptor.isUseEquals());
         setNext(interceptor);
     }
@@ -40,13 +45,36 @@ public class DisposableConnectionFacade extends JdbcInterceptor {
     public void reset(ConnectionPool parent, PooledConnection con) {
     }
 
+
+
     @Override
-    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-        if (compare(ISCLOSED_VAL, method) && getNext() == null) {
-            return Boolean.TRUE;
-        }
-        if (compare(CLOSE_VAL, method) && getNext() == null) {
-            return null;
+    public int hashCode() {
+        return System.identityHashCode(this);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        return this==obj;
+    }
+
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args)
+            throws Throwable {
+        if (compare(EQUALS_VAL, method)) {
+            return Boolean.valueOf(
+                    this.equals(Proxy.getInvocationHandler(args[0])));
+        } else if (compare(HASHCODE_VAL, method)) {
+            return Integer.valueOf(this.hashCode());
+        } else if (getNext()==null) {
+            if (compare(ISCLOSED_VAL, method)) {
+                return Boolean.TRUE;
+            }
+            else if (compare(CLOSE_VAL, method)) {
+                return null;
+            }
+            else if (compare(ISVALID_VAL, method)) {
+                return Boolean.FALSE;
+            }
         }
 
         try {
@@ -56,7 +84,8 @@ public class DisposableConnectionFacade extends JdbcInterceptor {
                 if (compare(TOSTRING_VAL, method)) {
                     return "DisposableConnectionFacade[null]";
                 }
-                throw new SQLException("Connection has already been closed.");
+                throw new SQLException(
+                        "PooledConnection has already been closed.");
             }
 
             throw e;

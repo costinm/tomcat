@@ -17,6 +17,7 @@
 package org.apache.catalina;
 
 import java.net.URL;
+import java.util.Locale;
 import java.util.Set;
 
 import javax.servlet.ServletContainerInitializer;
@@ -33,9 +34,7 @@ import org.apache.catalina.deploy.FilterMap;
 import org.apache.catalina.deploy.LoginConfig;
 import org.apache.catalina.deploy.NamingResources;
 import org.apache.catalina.deploy.SecurityConstraint;
-import org.apache.catalina.util.CharsetMapper;
 import org.apache.tomcat.JarScanner;
-import org.apache.tomcat.util.http.mapper.Mapper;
 
 /**
  * A <b>Context</b> is a Container that represents a servlet context, and
@@ -61,12 +60,6 @@ public interface Context extends Container {
 
     // ----------------------------------------------------- Manifest Constants
 
-
-    /**
-     * The LifecycleEvent type sent when a context is reloaded.
-     */
-    public static final String RELOAD_EVENT = "reload";
-
     /**
      * Container event for adding a welcome file.
      */
@@ -86,6 +79,7 @@ public interface Context extends Container {
      * Container event for changing the ID of a session.
      */
     public static final String CHANGE_SESSION_ID_EVENT = "changeSessionId";
+
 
     // ------------------------------------------------------------- Properties
 
@@ -155,23 +149,11 @@ public interface Context extends Container {
 
 
     /**
-     * Return the application available flag for this Context.
+     * Obtain the character set name to use with the given Locale. Note that
+     * different Contexts may have different mappings of Locale to character
+     * set.
      */
-    public boolean getAvailable();
-
-
-    /**
-     * Return the Locale to character set mapper for this Context.
-     */
-    public CharsetMapper getCharsetMapper();
-
-
-    /**
-     * Set the Locale to character set mapper for this Context.
-     *
-     * @param mapper The new mapper
-     */
-    public void setCharsetMapper(CharsetMapper mapper);
+    public String getCharset(Locale locale);
 
 
     /**
@@ -420,12 +402,6 @@ public interface Context extends Container {
      * @param config The new login configuration
      */
     public void setLoginConfig(LoginConfig config);
-
-
-    /**
-     * Get the request dispatcher mapper.
-     */
-    public Mapper getMapper();
 
 
     /**
@@ -1279,14 +1255,6 @@ public interface Context extends Container {
 
 
     /**
-     * Add a URL for a JAR that contains static resources in a
-     * META-INF/resources directory that should be included in the static
-     * resources for this context.
-     */
-    public void addResourceJarUrl(URL url);
-
-
-    /**
      * Add a ServletContainerInitializer instance to this web application.
      *
      * @param sci       The instance to add
@@ -1394,9 +1362,63 @@ public interface Context extends Container {
     public void setSendRedirectBody(boolean enable);
 
     /**
-     * Dtermines if the context is configured to included a response body as
+     * Determines if the context is configured to include a response body as
      * part of a redirect response.
      */
     public boolean getSendRedirectBody();
+
+    /**
+     * Return the Loader with which this Context is associated.
+     */
+    public Loader getLoader();
+
+    /**
+     * Set the Loader with which this Context is associated.
+     *
+     * @param loader The newly associated loader
+     */
+    public void setLoader(Loader loader);
+
+    /**
+     * Return the Resources with which this Context is associated.
+     */
+    public WebResourceRoot getResources();
+
+    /**
+     * Set the Resources object with which this Context is associated.
+     *
+     * @param resources The newly associated Resources
+     */
+    public void setResources(WebResourceRoot resources);
+
+    /**
+     * Return the Manager with which this Context is associated.  If there is
+     * no associated Manager, return <code>null</code>.
+     */
+    public Manager getManager();
+
+
+    /**
+     * Set the Manager with which this Context is associated.
+     *
+     * @param manager The newly associated Manager
+     */
+    public void setManager(Manager manager);
+
+    /**
+     * Sets the flag that indicates if /WEB-INF/classes should be treated like
+     * an exploded JAR and JAR resources made available as if they were in a
+     * JAR.
+     *
+     * @param addWebinfClassesResources The new value for the flag
+     */
+    public void setAddWebinfClassesResources(boolean addWebinfClassesResources);
+
+    /**
+     * Gets the flag that indicates if /WEB-INF/classes should be treated like
+     * an exploded JAR and JAR resources made available as if they were in a
+     * JAR.
+     */
+    public boolean getAddWebinfClassesResources();
 }
 

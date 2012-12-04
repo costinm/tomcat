@@ -95,6 +95,13 @@
       By default, DNS lookups are disabled.</p>
     </attribute>
 
+    <attribute name="maxHeaderCount" required="false">
+      <p>The maximum number of headers in a request that are allowed by the
+      container. A request that contains more headers than the specified limit
+      will be rejected. A value of less than 0 means no limit.
+      If not specified, a default of 100 is used.</p>
+    </attribute>
+
     <attribute name="maxParameterCount" required="false">
       <p>The maximum number of parameter and value pairs (GET plus POST) which
       will be automatically parsed by the container. Parameter and value pairs
@@ -319,7 +326,8 @@
     <attribute name="connectionTimeout" required="false">
       <p>The number of milliseconds this <strong>Connector</strong> will wait,
       after accepting a connection, for the request URI line to be
-      presented.  The default value is 60000 (i.e. 60 seconds).</p>
+      presented.  The default value for AJP protocol connectors
+      is <code>-1</code> (i.e. infinite).</p>
     </attribute>
 
     <attribute name="executor" required="false">
@@ -345,11 +353,15 @@
       falls below this value. The operating system may still accept
       connections based on the <code>acceptCount</code> setting. Default value
       varies by connector type. For BIO the default is the value of
-      <strong>maxThreads</strong>. For NIO the default is <code>10000</code>.
+      <strong>maxThreads</strong> unless an <a href="executor.html">Executor</a>
+      is used in which case the default will be the value of maxThreads from the
+      executor. For NIO the default is <code>10000</code>.
       For APR/native, the default is <code>8192</code>.</p>
       <p>Note that for APR/native on Windows, the configured value will be
       reduced to the highest multiple of 1024 that is less than or equal to
-      maxConnections. This is done for performance reasons.</p>
+      maxConnections. This is done for performance reasons.<br/>
+      If set to a value of -1, the maxConnections feature is disabled
+      and connections are not counted.</p>
     </attribute>
 
     <attribute name="maxThreads" required="false">
@@ -467,29 +479,21 @@
         <p>This is equivalent to standard attribute
         <strong>connectionTimeout</strong>.</p>
       </attribute>
-      <attribute name="socket.soTrafficClass" required="false">
-        <p>(byte)Value between <code>0</code> and <code>255</code> for the
-        traffic class on the socket. JVM default used if not set.</p>
-        <p><strong>Note:</strong> On some JDK versions, setting
-        <strong>soTrafficClass</strong> causes a problem. A work around for this
-        is to add the <code>-Djava.net.preferIPv4Stack=true</code> value to your
-        JVM options.</p>
-      </attribute>
       <attribute name="socket.performanceConnectionTime" required="false">
         <p>(int)The first value for the performance settings. See
-        <a href="http://download.oracle.com/javase/6/docs/api/java/net/Socket.html#setPerformancePreferences(int,%20int,%20int)">Socket Performance Options</a>
+        <a href="http://docs.oracle.com/javase/6/docs/api/java/net/Socket.html#setPerformancePreferences(int,%20int,%20int)">Socket Performance Options</a>
         All three performance attributes must be set else the JVM defaults will
         be used for all three.</p>
       </attribute>
       <attribute name="socket.performanceLatency" required="false">
         <p>(int)The second value for the performance settings. See
-        <a href="http://download.oracle.com/javase/6/docs/api/java/net/Socket.html#setPerformancePreferences(int,%20int,%20int)">Socket Performance Options</a>
+        <a href="http://docs.oracle.com/javase/6/docs/api/java/net/Socket.html#setPerformancePreferences(int,%20int,%20int)">Socket Performance Options</a>
         All three performance attributes must be set else the JVM defaults will
         be used for all three.</p>
       </attribute>
       <attribute name="socket.performanceBandwidth" required="false">
         <p>(int)The third value for the performance settings. See
-        <a href="http://download.oracle.com/javase/6/docs/api/java/net/Socket.html#setPerformancePreferences(int,%20int,%20int)">Socket Performance Options</a>
+        <a href="http://docs.oracle.com/javase/6/docs/api/java/net/Socket.html#setPerformancePreferences(int,%20int,%20int)">Socket Performance Options</a>
         All three performance attributes must be set else the JVM defaults will
         be used for all three.</p>
       </attribute>

@@ -34,12 +34,12 @@ import java.util.BitSet;
  * @author Remy Maucherat
  */
 public class URLEncoder {
-    protected static final char[] hexadecimal =
+    private static final char[] hexadecimal =
     {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
      'A', 'B', 'C', 'D', 'E', 'F'};
 
     //Array containing the safe characters set.
-    protected BitSet safeCharacters = new BitSet(256);
+    protected final BitSet safeCharacters = new BitSet(256);
 
     public URLEncoder() {
         for (char i = 'a'; i <= 'z'; i++) {

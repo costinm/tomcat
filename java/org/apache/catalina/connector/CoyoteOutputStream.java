@@ -19,6 +19,7 @@ package org.apache.catalina.connector;
 import java.io.IOException;
 
 import javax.servlet.ServletOutputStream;
+import javax.servlet.WriteListener;
 
 /**
  * Coyote implementation of the servlet output stream.
@@ -106,6 +107,17 @@ public class CoyoteOutputStream
     public void close()
         throws IOException {
         ob.close();
+    }
+
+    @Override
+    public boolean canWrite() {
+        return ob.canWrite();
+    }
+
+
+    @Override
+    public void setWriteListener(WriteListener listener) {
+        ob.setWriteListener(listener);
     }
 
 

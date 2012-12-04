@@ -196,7 +196,8 @@ public class SmapUtil {
 
         static void install(File classFile, byte[] smap) throws IOException {
             File tmpFile = new File(classFile.getPath() + "tmp");
-            new SDEInstaller(classFile, smap, tmpFile);
+            SDEInstaller installer = new SDEInstaller(classFile, smap);
+            installer.install(tmpFile);
             if (!classFile.delete()) {
                 throw new IOException("classFile.delete() failed");
             }
@@ -205,7 +206,7 @@ public class SmapUtil {
             }
         }
 
-        SDEInstaller(File inClassFile, byte[] sdeAttr, File outClassFile)
+        SDEInstaller(File inClassFile, byte[] sdeAttr)
             throws IOException {
             if (!inClassFile.exists()) {
                 throw new FileNotFoundException("no such file: " + inClassFile);
@@ -215,7 +216,9 @@ public class SmapUtil {
             // get the bytes
             orig = readWhole(inClassFile);
             gen = new byte[orig.length + sdeAttr.length + 100];
+        }
 
+        void install(File outClassFile) throws IOException {
             // do it
             addSDE();
 
@@ -226,13 +229,13 @@ public class SmapUtil {
         }
 
         static byte[] readWhole(File input) throws IOException {
-            FileInputStream inStream = new FileInputStream(input);
             int len = (int)input.length();
             byte[] bytes = new byte[len];
-            if (inStream.read(bytes, 0, len) != len) {
-                throw new IOException("expected size: " + len);
+            try (FileInputStream inStream = new FileInputStream(input)) {
+                if (inStream.read(bytes, 0, len) != len) {
+                    throw new IOException("expected size: " + len);
+                }
             }
-            inStream.close();
             return bytes;
         }
 
@@ -684,7 +687,7 @@ public class SmapUtil {
 
     private static class PreScanVisitor extends Node.Visitor {
 
-        HashMap<String, SmapStratum> map = new HashMap<String, SmapStratum>();
+        HashMap<String, SmapStratum> map = new HashMap<>();
 
         @Override
         public void doVisit(Node n) {

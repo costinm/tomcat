@@ -23,13 +23,15 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import javax.servlet.http.ProtocolHandler;
 
-import org.apache.catalina.connector.RequestFacade;
 import org.apache.catalina.util.Base64;
 import org.apache.tomcat.util.buf.B2CConverter;
 
@@ -45,19 +47,8 @@ public abstract class WebSocketServlet extends HttpServlet {
             "258EAFA5-E914-47DA-95CA-C5AB0DC85B11".getBytes(
                     B2CConverter.ISO_8859_1);
 
-    private MessageDigest sha1Helper;
-
-
-    @Override
-    public void init() throws ServletException {
-        super.init();
-
-        try {
-            sha1Helper = MessageDigest.getInstance("SHA1");
-        } catch (NoSuchAlgorithmException e) {
-            throw new ServletException(e);
-        }
-    }
+    private final Queue<MessageDigest> sha1Helpers =
+            new ConcurrentLinkedQueue<>();
 
 
     @Override
@@ -98,7 +89,7 @@ public abstract class WebSocketServlet extends HttpServlet {
         }
 
         List<String> subProtocols = getTokensFromHeader(req,
-                "Sec-WebSocket-Protocol-Client");
+                "Sec-WebSocket-Protocol");
         if (!subProtocols.isEmpty()) {
             subProtocol = selectSubProtocol(subProtocols);
 
@@ -111,8 +102,8 @@ public abstract class WebSocketServlet extends HttpServlet {
         //      data present when the frame is fragmented.
 
         // If we got this far, all is good. Accept the connection.
-        resp.setHeader("upgrade", "websocket");
-        resp.setHeader("connection", "upgrade");
+        resp.setHeader("Upgrade", "websocket");
+        resp.setHeader("Connection", "upgrade");
         resp.setHeader("Sec-WebSocket-Accept", getWebSocketAccept(key));
         if (subProtocol != null) {
             resp.setHeader("Sec-WebSocket-Protocol", subProtocol);
@@ -121,9 +112,12 @@ public abstract class WebSocketServlet extends HttpServlet {
             // TODO
         }
 
-        // Small hack until the Servlet API provides a way to do this.
-        StreamInbound inbound = createWebSocketInbound(subProtocol);
-        ((RequestFacade) req).doUpgrade(inbound);
+        WsHttpServletRequestWrapper wrapper = new WsHttpServletRequestWrapper(req);
+        ProtocolHandler wsHandler =
+                createWebSocketHandler(subProtocol, wrapper);
+        wrapper.invalidate();
+
+        req.upgrade(wsHandler);
     }
 
 
@@ -143,7 +137,7 @@ public abstract class WebSocketServlet extends HttpServlet {
                 }
             }
         }
-        return true;
+        return false;
     }
 
 
@@ -153,7 +147,7 @@ public abstract class WebSocketServlet extends HttpServlet {
      */
     private List<String> getTokensFromHeader(HttpServletRequest req,
             String headerName) {
-        List<String> result = new ArrayList<String>();
+        List<String> result = new ArrayList<>();
 
         Enumeration<String> headers = req.getHeaders(headerName);
         while (headers.hasMoreElements()) {
@@ -167,12 +161,24 @@ public abstract class WebSocketServlet extends HttpServlet {
     }
 
 
-    private String getWebSocketAccept(String key) {
-        synchronized (sha1Helper) {
-            sha1Helper.reset();
-            sha1Helper.update(key.getBytes(B2CConverter.ISO_8859_1));
-            return Base64.encode(sha1Helper.digest(WS_ACCEPT));
+    private String getWebSocketAccept(String key) throws ServletException {
+
+        MessageDigest sha1Helper = sha1Helpers.poll();
+        if (sha1Helper == null) {
+            try {
+                sha1Helper = MessageDigest.getInstance("SHA1");
+            } catch (NoSuchAlgorithmException e) {
+                throw new ServletException(e);
+            }
         }
+
+        sha1Helper.reset();
+        sha1Helper.update(key.getBytes(B2CConverter.ISO_8859_1));
+        String result = Base64.encode(sha1Helper.digest(WS_ACCEPT));
+
+        sha1Helpers.add(sha1Helper);
+
+        return result;
     }
 
 
@@ -215,6 +221,13 @@ public abstract class WebSocketServlet extends HttpServlet {
      *
      * @param subProtocol   The sub-protocol agreed between the client and
      *                      server or <code>null</code> if none was agreed
+     * @param request       The HTTP request that initiated this WebSocket
+     *                      connection. Note that this object is <b>only</b>
+     *                      valid inside this method. You must not retain a
+     *                      reference to it outside the execution of this
+     *                      method. If Tomcat detects such access, it will throw
+     *                      an IllegalStateException
      */
-    protected abstract StreamInbound createWebSocketInbound(String subProtocol);
+    protected abstract ProtocolHandler createWebSocketHandler(
+            String subProtocol, HttpServletRequest request);
 }

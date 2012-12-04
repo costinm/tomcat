@@ -14,10 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-
 package org.apache.catalina.core;
-
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -30,7 +27,7 @@ import java.security.PrivilegedAction;
 import java.security.PrivilegedActionException;
 import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -51,6 +48,7 @@ import javax.xml.ws.WebServiceRef;
 import org.apache.catalina.ContainerServlet;
 import org.apache.catalina.Globals;
 import org.apache.catalina.security.SecurityUtil;
+import org.apache.catalina.util.Introspection;
 import org.apache.tomcat.InstanceManager;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.res.StringManager;
@@ -60,17 +58,27 @@ import org.apache.tomcat.util.res.StringManager;
  */
 public class DefaultInstanceManager implements InstanceManager {
 
+    // Used when there are no annotations in a class
+    private static final AnnotationCacheEntry[] ANNOTATIONS_EMPTY
+        = new AnnotationCacheEntry[0];
+
+    /**
+     * The string manager for this package.
+     */
+    protected static final StringManager sm =
+        StringManager.getManager(Constants.Package);
+
     private final Context context;
     private final Map<String, Map<String, String>> injectionMap;
     protected final ClassLoader classLoader;
     protected final ClassLoader containerClassLoader;
-    protected boolean privileged;
-    protected boolean ignoreAnnotations;
+    protected final boolean privileged;
+    protected final boolean ignoreAnnotations;
     private final Properties restrictedFilters = new Properties();
     private final Properties restrictedListeners = new Properties();
     private final Properties restrictedServlets = new Properties();
-    private final Map<Class<?>,List<AnnotationCacheEntry>> annotationCache =
-        new WeakHashMap<Class<?>, List<AnnotationCacheEntry>>();
+    private final Map<Class<?>, AnnotationCacheEntry[]> annotationCache =
+        new WeakHashMap<>();
 
     public DefaultInstanceManager(Context context, Map<String, Map<String, String>> injectionMap, org.apache.catalina.Context catalinaContext, ClassLoader containerClassLoader) {
         classLoader = catalinaContext.getLoader().getClassLoader();
@@ -139,12 +147,25 @@ public class DefaultInstanceManager implements InstanceManager {
 
     private Object newInstance(Object instance, Class<?> clazz) throws IllegalAccessException, InvocationTargetException, NamingException {
         if (!ignoreAnnotations) {
-            Map<String, String> injections = injectionMap.get(clazz.getName());
+            Map<String, String> injections = assembleInjectionsFromClassHierarchy(clazz);
             populateAnnotationsCache(clazz, injections);
             processAnnotations(instance, injections);
             postConstruct(instance, clazz);
         }
         return instance;
+    }
+
+    private Map<String, String> assembleInjectionsFromClassHierarchy(Class<?> clazz) {
+        Map<String, String> injections = new HashMap<>();
+        Map<String, String> currentInjections = null;
+        while (clazz != null) {
+            currentInjections = this.injectionMap.get(clazz.getName());
+            if (currentInjections != null) {
+                injections.putAll(currentInjections);
+            }
+            clazz = clazz.getSuperclass();
+        }
+        return injections;
     }
 
     @Override
@@ -177,7 +198,7 @@ public class DefaultInstanceManager implements InstanceManager {
 
         // At the end the postconstruct annotated
         // method is invoked
-        List<AnnotationCacheEntry> annotations;
+        AnnotationCacheEntry[] annotations;
         synchronized (annotationCache) {
             annotations = annotationCache.get(clazz);
         }
@@ -213,7 +234,7 @@ public class DefaultInstanceManager implements InstanceManager {
 
         // At the end the postconstruct annotated
         // method is invoked
-        List<AnnotationCacheEntry> annotations = null;
+        AnnotationCacheEntry[] annotations = null;
         synchronized (annotationCache) {
             annotations = annotationCache.get(clazz);
         }
@@ -251,30 +272,24 @@ public class DefaultInstanceManager implements InstanceManager {
             Map<String, String> injections) throws IllegalAccessException,
             InvocationTargetException, NamingException {
 
+        List<AnnotationCacheEntry> annotations = null;
+
         while (clazz != null) {
-            List<AnnotationCacheEntry> annotations = null;
+            AnnotationCacheEntry[] annotationsArray = null;
             synchronized (annotationCache) {
-                annotations = annotationCache.get(clazz);
+                annotationsArray = annotationCache.get(clazz);
             }
-            if (annotations == null) {
-                annotations = new ArrayList<AnnotationCacheEntry>();
+            if (annotationsArray == null) {
+                if (annotations == null) {
+                    annotations = new ArrayList<>();
+                } else {
+                    annotations.clear();
+                }
 
                 if (context != null) {
                     // Initialize fields annotations for resource injection if
                     // JNDI is enabled
-                    Field[] fields = null;
-                    if (Globals.IS_SECURITY_ENABLED) {
-                        final Class<?> clazz2 = clazz;
-                        fields = AccessController.doPrivileged(
-                                new PrivilegedAction<Field[]>(){
-                            @Override
-                            public Field[] run(){
-                                return clazz2.getDeclaredFields();
-                            }
-                        });
-                    } else {
-                        fields = clazz.getDeclaredFields();
-                    }
+                    Field[] fields = Introspection.getDeclaredFields(clazz);
                     for (Field field : fields) {
                         if (injections != null && injections.containsKey(field.getName())) {
                             annotations.add(new AnnotationCacheEntry(
@@ -314,27 +329,15 @@ public class DefaultInstanceManager implements InstanceManager {
                 }
 
                 // Initialize methods annotations
-                Method[] methods = null;
-                if (Globals.IS_SECURITY_ENABLED) {
-                    final Class<?> clazz2 = clazz;
-                    methods = AccessController.doPrivileged(
-                            new PrivilegedAction<Method[]>(){
-                        @Override
-                        public Method[] run(){
-                            return clazz2.getDeclaredMethods();
-                        }
-                    });
-                } else {
-                    methods = clazz.getDeclaredMethods();
-                }
+                Method[] methods = Introspection.getDeclaredMethods(clazz);
                 Method postConstruct = null;
                 Method preDestroy = null;
                 for (Method method : methods) {
-                    String methodName = method.getName();
                     if (context != null) {
                         // Resource injection only if JNDI is enabled
-                        if (injections != null && methodName.startsWith("set") && methodName.length() > 3) {
-                            String fieldName = Character.toLowerCase(methodName.charAt(3)) + methodName.substring(4);
+                        if (injections != null &&
+                                Introspection.isValidSetter(method)) {
+                            String fieldName = Introspection.getPropertyName(method);
                             if (injections.containsKey(fieldName)) {
                                 annotations.add(new AnnotationCacheEntry(
                                         method.getName(),
@@ -421,12 +424,15 @@ public class DefaultInstanceManager implements InstanceManager {
                             preDestroy.getParameterTypes(), null,
                             AnnotationCacheEntryType.PRE_DESTROY));
                 }
-                if (annotations.size() == 0) {
-                    // Use common empty list to save memory
-                    annotations = Collections.emptyList();
+                if (annotations.isEmpty()) {
+                    // Use common object to save memory
+                    annotationsArray = ANNOTATIONS_EMPTY;
+                } else {
+                    annotationsArray = annotations.toArray(
+                            new AnnotationCacheEntry[annotations.size()]);
                 }
                 synchronized (annotationCache) {
-                    annotationCache.put(clazz, annotations);
+                    annotationCache.put(clazz, annotationsArray);
                 }
             }
             clazz = clazz.getSuperclass();
@@ -455,7 +461,7 @@ public class DefaultInstanceManager implements InstanceManager {
         Class<?> clazz = instance.getClass();
 
         while (clazz != null) {
-            List<AnnotationCacheEntry> annotations;
+            AnnotationCacheEntry[] annotations;
             synchronized (annotationCache) {
                 annotations = annotationCache.get(clazz);
             }
@@ -604,11 +610,9 @@ public class DefaultInstanceManager implements InstanceManager {
             Object instance, Method method, String name, Class<?> clazz)
             throws NamingException, IllegalAccessException, InvocationTargetException {
 
-        if (!method.getName().startsWith("set")
-                || method.getName().length() < 4
-                || method.getParameterTypes().length != 1
-                || !method.getReturnType().getName().equals("void")) {
-            throw new IllegalArgumentException("Invalid method resource injection annotation");
+        if (!Introspection.isValidSetter(method)) {
+            throw new IllegalArgumentException(
+                    sm.getString("defaultInstanceManager.invalidInjection"));
         }
 
         Object lookedupResource;
@@ -620,7 +624,7 @@ public class DefaultInstanceManager implements InstanceManager {
             lookedupResource = context.lookup(normalizedName);
         } else {
             lookedupResource = context.lookup(
-                    clazz.getName() + "/" + getName(method));
+                    clazz.getName() + "/" + Introspection.getPropertyName(method));
         }
 
         synchronized (method) {
@@ -629,18 +633,6 @@ public class DefaultInstanceManager implements InstanceManager {
             method.invoke(instance, lookedupResource);
             method.setAccessible(accessibility);
         }
-    }
-
-    public static String getName(Method setter) {
-        StringBuilder name = new StringBuilder(setter.getName());
-
-        // remove 'set'
-        name.delete(0, 3);
-
-        // lowercase first char
-        name.setCharAt(0, Character.toLowerCase(name.charAt(0)));
-
-        return name.toString();
     }
 
     private static String normalize(String jndiName){

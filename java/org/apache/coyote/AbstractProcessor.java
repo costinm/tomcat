@@ -19,7 +19,6 @@ package org.apache.coyote;
 import java.io.IOException;
 import java.util.concurrent.Executor;
 
-import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.tomcat.util.net.AbstractEndpoint;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SocketStatus;
@@ -32,10 +31,10 @@ import org.apache.tomcat.util.net.SocketWrapper;
 public abstract class AbstractProcessor<S> implements ActionHook, Processor<S> {
 
     protected Adapter adapter;
-    protected AsyncStateMachine<S> asyncStateMachine;
-    protected AbstractEndpoint endpoint;
-    protected Request request;
-    protected Response response;
+    protected final AsyncStateMachine<S> asyncStateMachine;
+    protected final AbstractEndpoint endpoint;
+    protected final Request request;
+    protected final Response response;
 
 
     /**
@@ -43,12 +42,15 @@ public abstract class AbstractProcessor<S> implements ActionHook, Processor<S> {
      * initialise the request, response, etc.
      */
     protected AbstractProcessor() {
-        // NOOP
+        asyncStateMachine = null;
+        endpoint = null;
+        request = null;
+        response = null;
     }
 
     public AbstractProcessor(AbstractEndpoint endpoint) {
         this.endpoint = endpoint;
-        asyncStateMachine = new AsyncStateMachine<S>(this);
+        asyncStateMachine = new AsyncStateMachine<>(this);
 
         request = new Request();
 
@@ -128,7 +130,7 @@ public abstract class AbstractProcessor<S> implements ActionHook, Processor<S> {
      */
     @Override
     public abstract SocketState process(SocketWrapper<S> socket)
-        throws IOException;
+            throws IOException;
 
     /**
      * Process in-progress Comet requests. These will start as HTTP requests.
@@ -148,8 +150,9 @@ public abstract class AbstractProcessor<S> implements ActionHook, Processor<S> {
      * upgrade.
      */
     @Override
-    public abstract SocketState upgradeDispatch() throws IOException;
+    public abstract SocketState upgradeDispatch(SocketStatus status)
+            throws IOException;
 
     @Override
-    public abstract UpgradeInbound getUpgradeInbound();
+    public abstract javax.servlet.http.ProtocolHandler getHttpUpgradeHandler();
 }

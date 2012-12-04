@@ -113,6 +113,11 @@ public class ServletRequestWrapper implements ServletRequest {
         return this.request.getContentLength();
     }
 
+    @Override
+    public long getContentLengthLong() {
+        return this.request.getContentLengthLong();
+    }
+
     /**
      * The default behavior of this method is to return getContentType() on the
      * wrapped request object.
@@ -360,7 +365,7 @@ public class ServletRequestWrapper implements ServletRequest {
      * @since Servlet 3.0
      */
     @Override
-    public AsyncContext startAsync() {
+    public AsyncContext startAsync() throws IllegalStateException {
         return request.startAsync();
     }
 

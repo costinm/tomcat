@@ -23,7 +23,11 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
@@ -44,8 +48,10 @@ import org.apache.catalina.Engine;
 import org.apache.catalina.Host;
 import org.apache.catalina.Manager;
 import org.apache.catalina.Server;
+import org.apache.catalina.Service;
 import org.apache.catalina.Session;
 import org.apache.catalina.Wrapper;
+import org.apache.catalina.connector.Connector;
 import org.apache.catalina.core.StandardHost;
 import org.apache.catalina.core.StandardServer;
 import org.apache.catalina.util.ContextName;
@@ -188,21 +194,9 @@ public class ManagerServlet extends HttpServlet implements ContainerServlet {
 
 
     /**
-     * Path used to store context descriptors.
-     */
-    protected File contextDescriptors = null;
-
-
-    /**
      * The associated host.
      */
     protected transient Host host = null;
-
-
-    /**
-     * The host appBase.
-     */
-    protected File appBase = null;
 
 
     /**
@@ -372,6 +366,8 @@ public class ManagerServlet extends HttpServlet implements ContainerServlet {
             undeploy(writer, cn, smClient);
         } else if (command.equals("/findleaks")) {
             findleaks(statusLine, writer, smClient);
+        } else if (command.equals("/sslConnectorCiphers")) {
+            sslConnectorCiphers(writer);
         } else {
             writer.println(smClient.getString("managerServlet.unknownCommand",
                     command));
@@ -532,6 +528,19 @@ public class ManagerServlet extends HttpServlet implements ContainerServlet {
             }
         } else if (statusLine) {
             writer.println(smClient.getString("managerServlet.findleaksNone"));
+        }
+    }
+
+
+    protected void sslConnectorCiphers(PrintWriter writer) {
+        writer.println("OK - Connector / SSL Cipher information");
+        Map<String,Set<String>> connectorCiphers = getConnectorCiphers();
+        for (Map.Entry<String,Set<String>> entry : connectorCiphers.entrySet()) {
+            writer.println(entry.getKey());
+            for (String cipher : entry.getValue()) {
+                writer.print("  ");
+                writer.println(cipher);
+            }
         }
     }
 
@@ -850,10 +859,11 @@ public class ManagerServlet extends HttpServlet implements ContainerServlet {
                 }
             }
             context = (Context) host.findChild(name);
-            if (context != null && context.getConfigured() && context.getAvailable()) {
+            if (context != null && context.getConfigured() &&
+                    context.getState().isAvailable()) {
                 writer.println(smClient.getString(
                         "managerServlet.deployed", displayPath));
-            } else if (context!=null && !context.getAvailable()) {
+            } else if (context!=null && !context.getState().isAvailable()) {
                 writer.println(smClient.getString(
                         "managerServlet.deployedButNotStarted", displayPath));
             } else {
@@ -891,7 +901,7 @@ public class ManagerServlet extends HttpServlet implements ContainerServlet {
                 String displayPath = context.getPath();
                 if( displayPath.equals("") )
                     displayPath = "/";
-                if (context.getAvailable()) {
+                if (context.getState().isAvailable()) {
                     writer.println(smClient.getString("managerServlet.listitem",
                             displayPath,
                             "running",
@@ -1176,20 +1186,6 @@ public class ManagerServlet extends HttpServlet implements ContainerServlet {
 
 
     /**
-     * Session information for the web application at the specified context path.
-     * Displays a profile of session thisAccessedTime listing number
-     * of sessions for each 10 minute interval up to 10 hours.
-     *
-     * @param writer Writer to render to
-     * @param cn Name of the application to list session information for
-     */
-    protected void sessions(PrintWriter writer, ContextName cn,
-            StringManager smClient) {
-        sessions(writer, cn, -1, smClient);
-    }
-
-
-    /**
      *
      * Extract the expiration request parameter
      *
@@ -1236,7 +1232,7 @@ public class ManagerServlet extends HttpServlet implements ContainerServlet {
                 return;
             }
             context.start();
-            if (context.getAvailable())
+            if (context.getState().isAvailable())
                 writer.println(smClient.getString("managerServlet.started",
                         displayPath));
             else
@@ -1647,8 +1643,28 @@ public class ManagerServlet extends HttpServlet implements ContainerServlet {
             }
         }
         return result;
-
     }
 
 
+    protected Map<String,Set<String>> getConnectorCiphers() {
+        Map<String,Set<String>> result = new HashMap<>();
+
+        Engine e = (Engine) host.getParent();
+        Service s = e.getService();
+        Connector connectors[] = s.findConnectors();
+        for (Connector connector : connectors) {
+            Set<String> cipherList = new HashSet<>();
+            if (Boolean.TRUE.equals(connector.getProperty("SSLEnabled"))) {
+                String[] ciphersUsed =
+                        (String[]) connector.getProperty("ciphersUsed");
+                for (String cipherUsed : ciphersUsed) {
+                    cipherList.add(cipherUsed);
+                }
+            } else {
+                cipherList.add(sm.getString("managerServlet.notSslConnector"));
+            }
+            result.put(connector.toString(), cipherList);
+        }
+        return result;
+    }
 }

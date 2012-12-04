@@ -74,7 +74,7 @@ public class AjpNioProtocol extends AbstractAjpProtocol {
     /**
      * Connection handler for AJP.
      */
-    private AjpConnectionHandler cHandler;
+    private final AjpConnectionHandler cHandler;
 
 
     // ----------------------------------------------------- JMX related methods
@@ -92,7 +92,7 @@ public class AjpNioProtocol extends AbstractAjpProtocol {
             extends AbstractAjpConnectionHandler<NioChannel, AjpNioProcessor>
             implements Handler {
 
-        protected AjpNioProtocol proto;
+        protected final AjpNioProtocol proto;
 
         public AjpConnectionHandler(AjpNioProtocol proto) {
             this.proto = proto;
@@ -121,7 +121,7 @@ public class AjpNioProtocol extends AbstractAjpProtocol {
         @Override
         public void release(SocketChannel socket) {
             if (log.isDebugEnabled())
-                log.debug("Iterating through our connections to release a socket channel:"+socket);
+                log.debug(sm.getString("ajpnioprotocol.releaseStart", socket));
             boolean released = false;
             Iterator<java.util.Map.Entry<NioChannel, Processor<NioChannel>>> it = connections.entrySet().iterator();
             while (it.hasNext()) {
@@ -136,7 +136,8 @@ public class AjpNioProtocol extends AbstractAjpProtocol {
                 }
             }
             if (log.isDebugEnabled())
-                log.debug("Done iterating through our connections to release a socket channel:"+socket +" released:"+released);
+                log.debug(sm.getString("ajpnioprotocol.releaseEnd",
+                        socket, Boolean.valueOf(released)));
         }
 
         /**
@@ -148,7 +149,7 @@ public class AjpNioProtocol extends AbstractAjpProtocol {
             Processor<NioChannel> processor = connections.remove(socket);
             if (processor != null) {
                 processor.recycle(true);
-                recycledProcessors.offer(processor);
+                recycledProcessors.push(processor);
             }
         }
 
@@ -161,7 +162,7 @@ public class AjpNioProtocol extends AbstractAjpProtocol {
                 Processor<NioChannel> processor, boolean isSocketClosing,
                 boolean addToPoller) {
             processor.recycle(isSocketClosing);
-            recycledProcessors.offer(processor);
+            recycledProcessors.push(processor);
             if (addToPoller) {
                 socket.getSocket().getPoller().add(socket.getSocket());
             }
@@ -171,7 +172,7 @@ public class AjpNioProtocol extends AbstractAjpProtocol {
         @Override
         protected AjpNioProcessor createProcessor() {
             AjpNioProcessor processor = new AjpNioProcessor(proto.packetSize, (NioEndpoint)proto.endpoint);
-            processor.setAdapter(proto.adapter);
+            processor.setAdapter(proto.getAdapter());
             processor.setTomcatAuthentication(proto.tomcatAuthentication);
             processor.setRequiredSecret(proto.requiredSecret);
             processor.setClientCertProvider(proto.getClientCertProvider());

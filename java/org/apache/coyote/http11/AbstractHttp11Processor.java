@@ -23,6 +23,8 @@ import java.util.StringTokenizer;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
+import javax.servlet.http.ProtocolHandler;
+
 import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.ActionCode;
 import org.apache.coyote.AsyncContextCallback;
@@ -36,7 +38,6 @@ import org.apache.coyote.http11.filters.IdentityOutputFilter;
 import org.apache.coyote.http11.filters.SavedRequestInputFilter;
 import org.apache.coyote.http11.filters.VoidInputFilter;
 import org.apache.coyote.http11.filters.VoidOutputFilter;
-import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.juli.logging.Log;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.buf.Ascii;
@@ -159,42 +160,6 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
     protected int keepAliveTimeout = -1;
 
     /**
-     * Remote Address associated with the current connection.
-     */
-    protected String remoteAddr = null;
-
-
-    /**
-     * Remote Host associated with the current connection.
-     */
-    protected String remoteHost = null;
-
-
-    /**
-     * Local Host associated with the current connection.
-     */
-    protected String localName = null;
-
-
-    /**
-     * Local port to which the socket is connected
-     */
-    protected int localPort = -1;
-
-
-    /**
-     * Remote port to which the socket is connected
-     */
-    protected int remotePort = -1;
-
-
-    /**
-     * The local Host address.
-     */
-    protected String localAddr = null;
-
-
-    /**
      * Maximum timeout on uploads. 5 minutes as in Apache HTTPD server.
      */
     protected int connectionUploadTimeout = 300000;
@@ -255,10 +220,10 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
 
 
     /**
-     * Listener to which data available events are passed once the associated
-     * connection has completed the HTTP upgrade process.
+     * Instance of the new protocol to use after the HTTP connection has been
+     * upgraded.
      */
-    protected UpgradeInbound upgradeInbound = null;
+    protected ProtocolHandler httpUpgradeHandler = null;
 
 
     public AbstractHttp11Processor(AbstractEndpoint endpoint) {
@@ -767,6 +732,7 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
                 // Set error flag
                 error = true;
             }
+
         } else if (actionCode == ActionCode.ACK) {
             // Acknowledge request
             // Send a 100 status back if it makes sense (response not committed
@@ -811,7 +777,6 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
             InputFilter savedBody = new SavedRequestInputFilter(body);
             savedBody.setRequest(request);
 
-            @SuppressWarnings("unchecked")
             AbstractInputBuffer<S> internalBuffer = (AbstractInputBuffer<S>)
                 request.getInputBuffer();
             internalBuffer.addActiveFilter(savedBody);
@@ -832,10 +797,14 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
             ((AtomicBoolean) param).set(asyncStateMachine.isAsyncDispatching());
         } else if (actionCode == ActionCode.ASYNC_IS_ASYNC) {
             ((AtomicBoolean) param).set(asyncStateMachine.isAsync());
+        } else if (actionCode == ActionCode.ASYNC_IS_ASYNC_OPERATION) {
+            ((AtomicBoolean) param).set(asyncStateMachine.isAsyncOperation());
         } else if (actionCode == ActionCode.ASYNC_IS_TIMINGOUT) {
             ((AtomicBoolean) param).set(asyncStateMachine.isAsyncTimingOut());
+        } else if (actionCode == ActionCode.ASYNC_IS_ERROR) {
+            ((AtomicBoolean) param).set(asyncStateMachine.isAsyncError());
         } else if (actionCode == ActionCode.UPGRADE) {
-            upgradeInbound = (UpgradeInbound) param;
+            httpUpgradeHandler = (ProtocolHandler) param;
             // Stop further HTTP output
             getOutputBuffer().finished = true;
         } else {
@@ -913,7 +882,7 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
         }
 
         while (!error && keepAlive && !comet && !isAsync() &&
-                upgradeInbound == null && !endpoint.isPaused()) {
+                httpUpgradeHandler == null && !endpoint.isPaused()) {
 
             // Parsing the request header
             try {
@@ -932,6 +901,8 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
                 } else {
                     request.setStartTime(System.currentTimeMillis());
                     keptAlive = true;
+                    // Set this every time in case limit has been changed via JMX
+                    request.getMimeHeaders().setLimit(endpoint.getMaxHeaderCount());
                     // Currently only NIO will ever return false here
                     if (!getInputBuffer().parseHeaders()) {
                         // We've read part of the request, don't recycle it
@@ -959,7 +930,7 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
                 }
                 // 400 - Bad Request
                 response.setStatus(400);
-                adapter.log(request, response, 0);
+                getAdapter().log(request, response, 0);
                 error = true;
             }
 
@@ -976,7 +947,7 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
                     }
                     // 400 - Internal Server Error
                     response.setStatus(400);
-                    adapter.log(request, response, 0);
+                    getAdapter().log(request, response, 0);
                     error = true;
                 }
             }
@@ -992,7 +963,7 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
             if (!error) {
                 try {
                     rp.setStage(org.apache.coyote.Constants.STAGE_SERVICE);
-                    adapter.service(request, response);
+                    getAdapter().service(request, response);
                     // Handle when the response was committed before a serious
                     // error occurred.  Throwing a ServletException should both
                     // set the status to 500 and set the errorException.
@@ -1006,13 +977,22 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
                     setCometTimeouts(socketWrapper);
                 } catch (InterruptedIOException e) {
                     error = true;
+                } catch (HeadersTooLargeException e) {
+                    error = true;
+                    // The response should not have been committed but check it
+                    // anyway to be safe
+                    if (!response.isCommitted()) {
+                        response.reset();
+                        response.setStatus(500);
+                        response.setHeader("Connection", "close");
+                    }
                 } catch (Throwable t) {
                     ExceptionUtils.handleThrowable(t);
                     getLog().error(sm.getString(
                             "http11processor.request.process"), t);
                     // 500 - Internal Server Error
                     response.setStatus(500);
-                    adapter.log(request, response, 0);
+                    getAdapter().log(request, response, 0);
                     error = true;
                 }
             }
@@ -1131,7 +1111,7 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
         MimeHeaders headers = request.getMimeHeaders();
 
         // Check connection header
-        MessageBytes connectionValueMB = headers.getValue("connection");
+        MessageBytes connectionValueMB = headers.getValue(Constants.CONNECTION);
         if (connectionValueMB != null) {
             ByteChunk connectionValueBC = connectionValueMB.getByteChunk();
             if (findBytes(connectionValueBC, Constants.CLOSE_BYTES) != -1) {
@@ -1266,28 +1246,8 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
             contentDelimitation = true;
         }
 
-        // Advertise sendfile support through a request attribute
-        if (endpoint.getUseSendfile()) {
-            request.setAttribute(
-                    org.apache.coyote.Constants.SENDFILE_SUPPORTED_ATTR,
-                    Boolean.TRUE);
-        }
-
-        // Advertise comet support through a request attribute
-        if (endpoint.getUseComet()) {
-            request.setAttribute(
-                    org.apache.coyote.Constants.COMET_SUPPORTED_ATTR,
-                    Boolean.TRUE);
-        }
-        // Advertise comet timeout support
-        if (endpoint.getUseCometTimeout()) {
-            request.setAttribute(
-                    org.apache.coyote.Constants.COMET_TIMEOUT_SUPPORTED_ATTR,
-                    Boolean.TRUE);
-        }
-
         if (error) {
-            adapter.log(request, response, 0);
+            getAdapter().log(request, response, 0);
         }
     }
 
@@ -1317,8 +1277,8 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
         }
 
         int statusCode = response.getStatus();
-        if ((statusCode == 204) || (statusCode == 205)
-            || (statusCode == 304)) {
+        if (statusCode < 200 || statusCode == 204 || statusCode == 205 ||
+                statusCode == 304) {
             // No entity body
             getOutputBuffer().addActiveFilter
                 (outputFilters[Constants.VOID_FILTER]);
@@ -1370,13 +1330,17 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
         }
 
         long contentLength = response.getContentLengthLong();
+        boolean connectionClosePresent = false;
         if (contentLength != -1) {
             headers.setValue("Content-Length").setLong(contentLength);
             getOutputBuffer().addActiveFilter
                 (outputFilters[Constants.IDENTITY_FILTER]);
             contentDelimitation = true;
         } else {
-            if (entityBody && http11) {
+            // If the response code supports an entity body and we're on
+            // HTTP 1.1 then we chunk unless we have a Connection: close header
+            connectionClosePresent = isConnectionClose(headers);
+            if (entityBody && http11 && !connectionClosePresent) {
                 getOutputBuffer().addActiveFilter
                     (outputFilters[Constants.CHUNKED_FILTER]);
                 contentDelimitation = true;
@@ -1422,7 +1386,11 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
         // Connection: close header.
         keepAlive = keepAlive && !statusDropsConnection(statusCode);
         if (!keepAlive) {
-            headers.addValue(Constants.CONNECTION).setString(Constants.CLOSE);
+            // Avoid adding the close header twice
+            if (!connectionClosePresent) {
+                headers.addValue(Constants.CONNECTION).setString(
+                        Constants.CLOSE);
+            }
         } else if (!http11 && !error) {
             headers.addValue(Constants.CONNECTION).setString(Constants.KEEPALIVE);
         }
@@ -1445,6 +1413,14 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
         }
         getOutputBuffer().endHeaders();
 
+    }
+
+    private boolean isConnectionClose(MimeHeaders headers) {
+        MessageBytes connection = headers.getValue(Constants.CONNECTION);
+        if (connection == null) {
+            return false;
+        }
+        return connection.equals(Constants.CLOSE);
     }
 
     abstract boolean prepareSendfile(OutputFilter[] outputFilters);
@@ -1525,7 +1501,7 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
         RequestInfo rp = request.getRequestProcessor();
         try {
             rp.setStage(org.apache.coyote.Constants.STAGE_SERVICE);
-            error = !adapter.asyncDispatch(request, response, status);
+            error = !getAdapter().asyncDispatch(request, response, status);
             resetTimeouts();
         } catch (InterruptedIOException e) {
             error = true;
@@ -1537,7 +1513,7 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
             if (error) {
                 // 500 - Internal Server Error
                 response.setStatus(500);
-                adapter.log(request, response, 0);
+                getAdapter().log(request, response, 0);
             }
         }
 
@@ -1567,13 +1543,13 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
 
     @Override
     public boolean isUpgrade() {
-        return upgradeInbound != null;
+        return httpUpgradeHandler != null;
     }
 
 
 
     @Override
-    public SocketState upgradeDispatch() throws IOException {
+    public SocketState upgradeDispatch(SocketStatus status) throws IOException {
         // Should never reach this code but in case we do...
         // TODO
         throw new IOException(
@@ -1582,8 +1558,8 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
 
 
     @Override
-    public UpgradeInbound getUpgradeInbound() {
-        return upgradeInbound;
+    public ProtocolHandler getHttpUpgradeHandler() {
+        return httpUpgradeHandler;
     }
 
 
@@ -1652,13 +1628,8 @@ public abstract class AbstractHttp11Processor<S> extends AbstractProcessor<S> {
         if (asyncStateMachine != null) {
             asyncStateMachine.recycle();
         }
-        upgradeInbound = null;
-        remoteAddr = null;
-        remoteHost = null;
-        localAddr = null;
-        localName = null;
-        remotePort = -1;
-        localPort = -1;
+        httpUpgradeHandler = null;
+        comet = false;
         recycleInternal();
     }
 

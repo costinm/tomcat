@@ -14,10 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-
 package org.apache.catalina.core;
-
 
 import javax.servlet.DispatcherType;
 import javax.servlet.Servlet;
@@ -38,22 +35,10 @@ import org.apache.tomcat.util.ExceptionUtils;
  * @author Remy Maucherat
  * @version $Revision: 1.0
  */
-
 public final class ApplicationFilterFactory {
-
-
-    // -------------------------------------------------------------- Constants
-
-
-    public static final String DISPATCHER_TYPE_ATTR =
-        Globals.DISPATCHER_TYPE_ATTR;
-    public static final String DISPATCHER_REQUEST_PATH_ATTR =
-        Globals.DISPATCHER_REQUEST_PATH_ATTR;
 
     private static ApplicationFilterFactory factory = null;
 
-
-    // ----------------------------------------------------------- Constructors
 
     private ApplicationFilterFactory() {
         // Prevent instantiation outside of the getInstanceMethod().
@@ -87,11 +72,13 @@ public final class ApplicationFilterFactory {
 
         // get the dispatcher type
         DispatcherType dispatcher = null;
-        if (request.getAttribute(DISPATCHER_TYPE_ATTR) != null) {
-            dispatcher = (DispatcherType) request.getAttribute(DISPATCHER_TYPE_ATTR);
+        if (request.getAttribute(Globals.DISPATCHER_TYPE_ATTR) != null) {
+            dispatcher = (DispatcherType) request.getAttribute(
+                    Globals.DISPATCHER_TYPE_ATTR);
         }
         String requestPath = null;
-        Object attribute = request.getAttribute(DISPATCHER_REQUEST_PATH_ATTR);
+        Object attribute = request.getAttribute(
+                Globals.DISPATCHER_REQUEST_PATH_ATTR);
 
         if (attribute != null){
             requestPath = attribute.toString();

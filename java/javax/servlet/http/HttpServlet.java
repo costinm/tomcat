@@ -52,7 +52,7 @@ import javax.servlet.ServletResponse;
  * <p>There's almost no reason to override the <code>service</code>
  * method. <code>service</code> handles standard HTTP
  * requests by dispatching them to the handler methods
- * for each HTTP request type (the <code>do</code><i>XXX</i>
+ * for each HTTP request type (the <code>do</code><i>Method</i>
  * methods listed above).
  *
  * <p>Likewise, there's almost no reason to override the
@@ -90,7 +90,7 @@ public abstract class HttpServlet extends GenericServlet {
 
     private static final String LSTRING_FILE =
         "javax.servlet.http.LocalStrings";
-    private static ResourceBundle lStrings =
+    private static final ResourceBundle lStrings =
         ResourceBundle.getBundle(LSTRING_FILE);
 
 
@@ -586,7 +586,7 @@ public abstract class HttpServlet extends GenericServlet {
     /**
      * Receives standard HTTP requests from the public
      * <code>service</code> method and dispatches
-     * them to the <code>do</code><i>XXX</i> methods defined in
+     * them to the <code>do</code><i>Method</i> methods defined in
      * this class. This method is an HTTP-specific version of the
      * {@link javax.servlet.Servlet#service} method. There's no
      * need to override this method.
@@ -620,7 +620,13 @@ public abstract class HttpServlet extends GenericServlet {
                 // to go through further expensive logic
                 doGet(req, resp);
             } else {
-                long ifModifiedSince = req.getDateHeader(HEADER_IFMODSINCE);
+                long ifModifiedSince;
+                try {
+                    ifModifiedSince = req.getDateHeader(HEADER_IFMODSINCE);
+                } catch (IllegalArgumentException iae) {
+                    // Invalid date header - proceed as if none was set
+                    ifModifiedSince = -1;
+                }
                 if (ifModifiedSince < (lastModified / 1000 * 1000)) {
                     // If the servlet mod time is later, call doGet()
                     // Round down to the nearest second for a proper compare
@@ -732,9 +738,9 @@ public abstract class HttpServlet extends GenericServlet {
  */
 // file private
 class NoBodyResponse extends HttpServletResponseWrapper {
-    private NoBodyOutputStream                noBody;
-    private PrintWriter                        writer;
-    private boolean                        didSetContentLength;
+    private final NoBodyOutputStream noBody;
+    private PrintWriter writer;
+    private boolean didSetContentLength;
 
     // file private
     NoBodyResponse(HttpServletResponse r) {
@@ -755,6 +761,42 @@ class NoBodyResponse extends HttpServletResponseWrapper {
     public void setContentLength(int len) {
         super.setContentLength(len);
         didSetContentLength = true;
+    }
+
+    @Override
+    public void setContentLengthLong(long len) {
+        super.setContentLengthLong(len);
+        didSetContentLength = true;
+    }
+
+    @Override
+    public void setHeader(String name, String value) {
+        super.setHeader(name, value);
+        checkHeader(name);
+    }
+
+    @Override
+    public void addHeader(String name, String value) {
+        super.addHeader(name, value);
+        checkHeader(name);
+    }
+
+    @Override
+    public void setIntHeader(String name, int value) {
+        super.setIntHeader(name, value);
+        checkHeader(name);
+    }
+
+    @Override
+    public void addIntHeader(String name, int value) {
+        super.addIntHeader(name, value);
+        checkHeader(name);
+    }
+
+    private void checkHeader(String name) {
+        if ("content-length".equalsIgnoreCase(name)) {
+            didSetContentLength = true;
+        }
     }
 
     @Override
@@ -785,10 +827,10 @@ class NoBodyOutputStream extends ServletOutputStream {
 
     private static final String LSTRING_FILE =
         "javax.servlet.http.LocalStrings";
-    private static ResourceBundle lStrings =
+    private static final ResourceBundle lStrings =
         ResourceBundle.getBundle(LSTRING_FILE);
 
-    private int                contentLength = 0;
+    private int contentLength = 0;
 
     // file private
     NoBodyOutputStream() {
@@ -806,17 +848,33 @@ class NoBodyOutputStream extends ServletOutputStream {
     }
 
     @Override
-    public void write(byte buf[], int offset, int len)
-        throws IOException
-    {
-        if (len >= 0) {
-            contentLength += len;
-        } else {
-            // XXX
-            // isn't this really an IllegalArgumentException?
-
-            String msg = lStrings.getString("err.io.negativelength");
-            throw new IOException(msg);
+    public void write(byte buf[], int offset, int len) throws IOException {
+        if (buf == null) {
+            throw new NullPointerException(
+                    lStrings.getString("err.io.nullArray"));
         }
+
+        if (offset < 0 || len < 0 || offset+len > buf.length) {
+            String msg = lStrings.getString("err.io.indexOutOfBounds");
+            Object[] msgArgs = new Object[3];
+            msgArgs[0] = Integer.valueOf(offset);
+            msgArgs[1] = Integer.valueOf(len);
+            msgArgs[2] = Integer.valueOf(buf.length);
+            msg = MessageFormat.format(msg, msgArgs);
+            throw new IndexOutOfBoundsException(msg);
+        }
+
+        contentLength += len;
+    }
+
+    @Override
+    public boolean canWrite() {
+        // TODO SERVLET 3.1
+        return false;
+    }
+
+    @Override
+    public void setWriteListener(javax.servlet.WriteListener listener) {
+        // TODO SERVLET 3.1
     }
 }

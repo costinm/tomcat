@@ -52,9 +52,9 @@
     <Bug code="IS"/>
   </Match>
   <Match>
-    <Class name="org.apache.catalina.authenticator.DigestAuthenticator"/>
-    <Field name="cnonces"/>
-    <Bug code="IS"/>
+    <!-- Method is synchronized therefore not an issue -->
+    <Class name="org.apache.catalina.authenticator.DigestAuthenticator$NonceInfo"/>
+    <Bug code="VO"/>
   </Match>
   <Match>
     <Class name="org.apache.catalina.connector.CoyoteReader"/>
@@ -71,6 +71,18 @@
     <Class name="org.apache.catalina.core.StandardHost" />
     <Method name="findReloadedContextMemoryLeaks" />
     <Bug code="Dm" />
+  </Match>
+  <Match>
+    <!-- Sleep is of short duration and lock is required -->
+    <Class name="org.apache.catalina.core.StandardWrapper" />
+    <Method name="unload" />
+    <Bug code="SWL" />
+  </Match>
+  <Match>
+    <!-- shost will not be null in normal usage -->
+    <Class name="org.apache.catalina.ha.backend.CollectedInfo" />
+    <Method name="init" />
+    <Bug code="NP" />
   </Match>
   <Match>
     <!-- Field is only modified during Servlet load -->
@@ -113,6 +125,24 @@
     <Bug code="SWL" />
   </Match>
   <Match>
+    <!-- context is never null -->
+    <Class name="org.apache.catalina.startup.HostConfig" />
+    <Method name="deployDescriptor" />
+    <Bug code="NP" />
+  </Match>
+  <Match>
+    <!-- context is never null -->
+    <Class name="org.apache.catalina.startup.HostConfig" />
+    <Method name="deployDirectory" />
+    <Bug code="NP" />
+  </Match>
+  <Match>
+    <!-- context is never null -->
+    <Class name="org.apache.catalina.startup.HostConfig" />
+    <Method name="deployWAR" />
+    <Bug code="NP" />
+  </Match>
+  <Match>
     <Class name="org.apache.catalina.tribes.group.interceptors.TcpFailureDetector"/>
     <Method name="memberAlive"/>
     <Bug code="DE"/>
@@ -133,6 +163,12 @@
     <Bug code="NS"/>
   </Match>
   <Match>
+    <!-- Intentional in case thread is waiting -->
+    <Class name="org.apache.catalina.tribes.transport.RxTaskPool"/>
+    <Method name="returnWorker"/>
+    <Bug code="NN"/>
+  </Match>
+  <Match>
     <Class name="org.apache.catalina.util.LifecycleBase" />
     <Method name="getState"/>
     <Bug code="UG" />
@@ -148,6 +184,19 @@
     <Class name="org.apache.jasper.JspC"/>
     <Method name="setValidateXml"/>
     <Bug code="ST" />
+  </Match>
+  <Match>
+    <!-- Node constructors add node to parent. Local variable is used to
+         silence an Eclipse warning -->
+    <Class name="org.apache.jasper.compiler.ELFunctionMapper"/>
+    <Method name="map"/>
+    <Bug code="DLS"/>
+  </Match>
+  <Match>
+    <!-- Node constructors add node to parent. Local variable is used to
+         silence an Eclipse warning -->
+    <Class name="org.apache.jasper.compiler.Parser"/>
+    <Bug code="DLS"/>
   </Match>
   <Match>
     <!-- Simpler to catch Exception than to create dummy implementations of the
@@ -169,9 +218,15 @@
     <Bug code="Nm" />
   </Match>
   <Match>
-    <!-- Class has to implement clone since its superclass does but fakes it -->
-    <Class name="org.apache.naming.resources.ResourceAttributes" />
-    <Bug code="CN" />
+    <!-- Use of == is deliberate -->
+    <Class name="org.apache.tomcat.jdbc.pool.JdbcInterceptor" />
+    <Method name="compare" />
+    <Bug code="ES" />
+  </Match>
+  <Match>
+    <Class name="org.apache.tomcat.util.IntrospectionUtils" />
+    <Method name="findMethod"/>
+    <Bug code="NP" />
   </Match>
   <Match>
     <!-- Class name is appropriate -->
@@ -190,6 +245,18 @@
   </Match>
   <Match>
     <!-- Returning null here is fine -->
+    <Class name="org.apache.tomcat.util.buf.ByteChunk"/>
+    <Method name="toString"/>
+    <Bug code="NP" />
+  </Match>
+  <Match>
+    <!-- Returning null here is fine -->
+    <Class name="org.apache.tomcat.util.buf.CharChunk"/>
+    <Method name="toString"/>
+    <Bug code="NP" />
+  </Match>
+  <Match>
+    <!-- Returning null here is fine -->
     <Class name="org.apache.tomcat.util.buf.MessageBytes"/>
     <Method name="toString"/>
     <Bug code="NP" />
@@ -201,6 +268,12 @@
     <Bug code="ST" />
   </Match>
   <Match>
+    <!-- NPE is desired as it indicates an error condition -->
+    <Class name="org.apache.tomcat.util.digester.CallMethodRule"/>
+    <Method name="end"/>
+    <Bug code="NP" />
+  </Match>
+  <Match>
     <!-- Test really is for the same object rather than equality -->
     <Class name="org.apache.tomcat.util.digester.Digester"/>
     <Or>
@@ -208,6 +281,12 @@
       <Method name="updateAttributes"/>
     </Or>
     <Bug code="ES" />
+  </Match>
+  <Match>
+    <!-- Hiding of field in superclass is deliberate -->
+    <Class name="org.apache.tomcat.util.modeler.NotificationInfo"/>
+    <Field name="info" />
+    <Bug code="MF" />
   </Match>
   <Match>
     <!-- addCount is modified in other threads -->
@@ -228,6 +307,18 @@
     <Bug code="ML" />
   </Match>
   <Match>
+    <!-- Object is only ever set to null, sync therefore is still valid -->
+    <Class name="org.apache.tomcat.util.net.AprEndpoint$SocketProcessor"/>
+    <Method name="run"/>
+    <Bug code="ML"/>
+  </Match>
+  <Match>
+    <!-- Object is only ever set to null, sync therefore is still valid -->
+    <Class name="org.apache.tomcat.util.net.NioEndpoint$SocketProcessor"/>
+    <Method name="run"/>
+    <Bug code="ML"/>
+  </Match>
+  <Match>
     <Class name="org.apache.tomcat.util.net.SecureNioChannel"/>
     <Method name="rehandshake"/>
     <Bug code="DE" />
@@ -243,6 +334,7 @@
     <Class name="org.apache.tomcat.util.threads.ThreadPoolExecutor" />
     <Bug code="Nm" />
   </Match>
+
   <!--  Generated code -->
   <Match>
     <Class name="org.apache.el.parser.ELParserTokenManager" />
@@ -361,6 +453,12 @@
     <Class name="org.apache.catalina.tribes.test.transport.SocketValidateReceive$1" />
     <Method name="run" />
     <Bug code="DE" />
+  </Match>
+  <Match>
+    <!-- Use of statics is unavoidable in all cases -->
+    <!-- Better to use it consistently rather than only where necessary -->
+    <Class name="org.apache.tomcat.jdbc.pool.interceptor.TestInterceptor" />
+    <Bug code="ST" />
   </Match>
   <Match>
     <Class name="org.apache.tomcat.util.net.TestSsl" />

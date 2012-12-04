@@ -14,13 +14,11 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
-
 package org.apache.coyote;
 
 import java.io.IOException;
 import java.util.concurrent.Executor;
 
-import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.net.SocketStatus;
@@ -40,8 +38,8 @@ public interface Processor<S> {
     SocketState asyncDispatch(SocketStatus status);
     SocketState asyncPostProcess();
 
-    UpgradeInbound getUpgradeInbound();
-    SocketState upgradeDispatch() throws IOException;
+    javax.servlet.http.ProtocolHandler getHttpUpgradeHandler();
+    SocketState upgradeDispatch(SocketStatus status) throws IOException;
 
     boolean isComet();
     boolean isAsync();

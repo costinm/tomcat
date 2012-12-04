@@ -61,7 +61,7 @@ public class BeanELResolver extends ELResolver {
     private final boolean readOnly;
 
     private final ConcurrentCache<String, BeanProperties> cache =
-        new ConcurrentCache<String, BeanProperties>(CACHE_SIZE);
+        new ConcurrentCache<>(CACHE_SIZE);
 
     public BeanELResolver() {
         this.readOnly = false;
@@ -218,7 +218,7 @@ public class BeanELResolver extends ELResolver {
 
         public BeanProperties(Class<?> type) throws ELException {
             this.type = type;
-            this.properties = new HashMap<String, BeanProperty>();
+            this.properties = new HashMap<>();
             try {
                 BeanInfo info = Introspector.getBeanInfo(this.type);
                 PropertyDescriptor[] pds = info.getPropertyDescriptors();
@@ -292,7 +292,7 @@ public class BeanELResolver extends ELResolver {
                 if (this.write == null) {
                     throw new PropertyNotFoundException(message(ctx,
                             "propertyNotWritable", new Object[] {
-                                    type.getName(), descriptor.getName() }));
+                                    owner.getName(), descriptor.getName() }));
                 }
             }
             return this.write;
@@ -304,7 +304,7 @@ public class BeanELResolver extends ELResolver {
                 if (this.read == null) {
                     throw new PropertyNotFoundException(message(ctx,
                             "propertyNotReadable", new Object[] {
-                                    type.getName(), descriptor.getName() }));
+                                    owner.getName(), descriptor.getName() }));
                 }
             }
             return this.read;
@@ -365,8 +365,8 @@ public class BeanELResolver extends ELResolver {
 
         public ConcurrentCache(int size) {
             this.size = size;
-            this.eden = new ConcurrentHashMap<K,V>(size);
-            this.longterm = new WeakHashMap<K,V>(size);
+            this.eden = new ConcurrentHashMap<>(size);
+            this.longterm = new WeakHashMap<>(size);
         }
 
         public V get(K key) {

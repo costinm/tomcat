@@ -64,7 +64,7 @@ public class AjpMessage {
     /**
      * Fixed size buffer.
      */
-    protected byte buf[] = null;
+    protected final byte buf[];
 
 
     /**
@@ -355,7 +355,7 @@ public class AjpMessage {
 
 
     public int getHeaderLength() {
-        return 4;
+        return Constants.H_SIZE;
     }
 
 

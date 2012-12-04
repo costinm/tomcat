@@ -88,7 +88,7 @@ public class TagPluginManager {
                          TAG_PLUGINS_ROOT_ELEM);
         }
 
-        tagPlugins = new HashMap<String, TagPlugin>();
+        tagPlugins = new HashMap<>();
         Iterator<TreeNode> pluginList = root.findChildren("tag-plugin");
         while (pluginList.hasNext()) {
             TreeNode pluginNode = pluginList.next();
@@ -151,7 +151,7 @@ public class TagPluginManager {
             curNodes = new Node.Nodes();
             n.setAtSTag(curNodes);
             n.setUseTagPlugin(true);
-            pluginAttributes = new HashMap<String, Object>();
+            pluginAttributes = new HashMap<>();
         }
 
         @Override
@@ -241,6 +241,11 @@ public class TagPluginManager {
             // except for the fact that it lets us put the Java sources the
             // plugins produce in the correct order (w.r.t the body).
             curNodes = node.getAtETag();
+        }
+
+        @Override
+        public boolean isTagFile() {
+            return pageInfo.isTagFile();
         }
 
         private Node.JspAttribute getNodeAttribute(String attribute) {

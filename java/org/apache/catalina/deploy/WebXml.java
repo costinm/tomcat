@@ -26,7 +26,6 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
@@ -79,13 +78,13 @@ public class WebXml {
     private Set<String> absoluteOrdering = null;
     public void addAbsoluteOrdering(String fragmentName) {
         if (absoluteOrdering == null) {
-            absoluteOrdering = new LinkedHashSet<String>();
+            absoluteOrdering = new LinkedHashSet<>();
         }
         absoluteOrdering.add(fragmentName);
     }
     public void addAbsoluteOrderingOthers() {
         if (absoluteOrdering == null) {
-            absoluteOrdering = new LinkedHashSet<String>();
+            absoluteOrdering = new LinkedHashSet<>();
         }
         absoluteOrdering.add(ORDER_OTHERS);
     }
@@ -95,7 +94,7 @@ public class WebXml {
 
     // web-fragment.xml only elements
     // Relative ordering
-    private Set<String> after = new LinkedHashSet<String>();
+    private final Set<String> after = new LinkedHashSet<>();
     public void addAfterOrdering(String fragmentName) {
         after.add(fragmentName);
     }
@@ -108,7 +107,7 @@ public class WebXml {
     }
     public Set<String> getAfterOrdering() { return after; }
 
-    private Set<String> before = new LinkedHashSet<String>();
+    private final Set<String> before = new LinkedHashSet<>();
     public void addBeforeOrdering(String fragmentName) {
         before.add(fragmentName);
     }
@@ -265,7 +264,7 @@ public class WebXml {
 
     // context-param
     // TODO: description (multiple with language) is ignored
-    private Map<String,String> contextParams = new HashMap<String,String>();
+    private final Map<String,String> contextParams = new HashMap<>();
     public void addContextParam(String param, String value) {
         contextParams.put(param, value);
     }
@@ -276,8 +275,7 @@ public class WebXml {
     // TODO: Should support multiple display-name elements with language
     // TODO: Should support multiple icon elements
     // TODO: Description for init-param is ignored
-    private Map<String,FilterDef> filters =
-        new LinkedHashMap<String,FilterDef>();
+    private final Map<String,FilterDef> filters = new LinkedHashMap<>();
     public void addFilter(FilterDef filter) {
         if (filters.containsKey(filter.getFilterName())) {
             // Filter names must be unique within a web(-fragment).xml
@@ -290,8 +288,8 @@ public class WebXml {
     public Map<String,FilterDef> getFilters() { return filters; }
 
     // filter-mapping
-    private Set<FilterMap> filterMaps = new LinkedHashSet<FilterMap>();
-    private Set<String> filterMappingNames = new HashSet<String>();
+    private final Set<FilterMap> filterMaps = new LinkedHashSet<>();
+    private final Set<String> filterMappingNames = new HashSet<>();
     public void addFilterMapping(FilterMap filterMap) {
         filterMaps.add(filterMap);
         filterMappingNames.add(filterMap.getFilterName());
@@ -302,7 +300,7 @@ public class WebXml {
     // TODO: description (multiple with language) is ignored
     // TODO: display-name (multiple with language) is ignored
     // TODO: icon (multiple) is ignored
-    private Set<String> listeners = new LinkedHashSet<String>();
+    private final Set<String> listeners = new LinkedHashSet<>();
     public void addListener(String className) {
         listeners.add(className);
     }
@@ -314,7 +312,7 @@ public class WebXml {
     // TODO: icon (multiple) is ignored
     // TODO: init-param/description (multiple with language) is ignored
     // TODO: security-role-ref/description (multiple with language) is ignored
-    private Map<String,ServletDef> servlets = new HashMap<String,ServletDef>();
+    private final Map<String,ServletDef> servlets = new HashMap<>();
     public void addServlet(ServletDef servletDef) {
         servlets.put(servletDef.getServletName(), servletDef);
         if (overridable) {
@@ -324,8 +322,8 @@ public class WebXml {
     public Map<String,ServletDef> getServlets() { return servlets; }
 
     // servlet-mapping
-    private Map<String,String> servletMappings = new HashMap<String,String>();
-    private Set<String> servletMappingNames = new HashSet<String>();
+    private final Map<String,String> servletMappings = new HashMap<>();
+    private final Set<String> servletMappingNames = new HashSet<>();
     public void addServletMapping(String urlPattern, String servletName) {
         servletMappings.put(urlPattern, servletName);
         servletMappingNames.add(servletName);
@@ -341,7 +339,7 @@ public class WebXml {
     public SessionConfig getSessionConfig() { return sessionConfig; }
 
     // mime-mapping
-    private Map<String,String> mimeMappings = new HashMap<String,String>();
+    private final Map<String,String> mimeMappings = new HashMap<>();
     public void addMimeMapping(String extension, String mimeType) {
         mimeMappings.put(extension, mimeType);
     }
@@ -366,7 +364,7 @@ public class WebXml {
     }
 
     // welcome-file-list
-    private Set<String> welcomeFiles = new LinkedHashSet<String>();
+    private final Set<String> welcomeFiles = new LinkedHashSet<>();
     public void addWelcomeFile(String welcomeFile) {
         if (replaceWelcomeFiles) {
             welcomeFiles.clear();
@@ -377,7 +375,7 @@ public class WebXml {
     public Set<String> getWelcomeFiles() { return welcomeFiles; }
 
     // error-page
-    private Map<String,ErrorPage> errorPages = new HashMap<String,ErrorPage>();
+    private final Map<String,ErrorPage> errorPages = new HashMap<>();
     public void addErrorPage(ErrorPage errorPage) {
         errorPages.put(errorPage.getName(), errorPage);
     }
@@ -385,7 +383,7 @@ public class WebXml {
 
     // Digester will check there is only one jsp-config
     // jsp-config/taglib or taglib (2.3 and earlier)
-    private Map<String,String> taglibs = new HashMap<String,String>();
+    private final Map<String,String> taglibs = new HashMap<>();
     public void addTaglib(String uri, String location) {
         if (taglibs.containsKey(uri)) {
             // Taglib URIs must be unique within a web(-fragment).xml
@@ -397,8 +395,7 @@ public class WebXml {
     public Map<String,String> getTaglibs() { return taglibs; }
 
     // jsp-config/jsp-property-group
-    private Set<JspPropertyGroup> jspPropertyGroups =
-        new LinkedHashSet<JspPropertyGroup>();
+    private final Set<JspPropertyGroup> jspPropertyGroups = new LinkedHashSet<>();
     public void addJspPropertyGroup(JspPropertyGroup propertyGroup) {
         jspPropertyGroups.add(propertyGroup);
     }
@@ -409,8 +406,7 @@ public class WebXml {
     // security-constraint
     // TODO: Should support multiple display-name elements with language
     // TODO: Should support multiple description elements with language
-    private Set<SecurityConstraint> securityConstraints =
-        new HashSet<SecurityConstraint>();
+    private final Set<SecurityConstraint> securityConstraints = new HashSet<>();
     public void addSecurityConstraint(SecurityConstraint securityConstraint) {
         securityConstraints.add(securityConstraint);
     }
@@ -428,7 +424,7 @@ public class WebXml {
 
     // security-role
     // TODO: description (multiple with language) is ignored
-    private Set<String> securityRoles = new HashSet<String>();
+    private final Set<String> securityRoles = new HashSet<>();
     public void addSecurityRole(String securityRole) {
         securityRoles.add(securityRole);
     }
@@ -436,8 +432,7 @@ public class WebXml {
 
     // env-entry
     // TODO: Should support multiple description elements with language
-    private Map<String,ContextEnvironment> envEntries =
-        new HashMap<String,ContextEnvironment>();
+    private final Map<String,ContextEnvironment> envEntries = new HashMap<>();
     public void addEnvEntry(ContextEnvironment envEntry) {
         if (envEntries.containsKey(envEntry.getName())) {
             // env-entry names must be unique within a web(-fragment).xml
@@ -451,7 +446,7 @@ public class WebXml {
 
     // ejb-ref
     // TODO: Should support multiple description elements with language
-    private Map<String,ContextEjb> ejbRefs = new HashMap<String,ContextEjb>();
+    private final Map<String,ContextEjb> ejbRefs = new HashMap<>();
     public void addEjbRef(ContextEjb ejbRef) {
         ejbRefs.put(ejbRef.getName(),ejbRef);
     }
@@ -459,8 +454,7 @@ public class WebXml {
 
     // ejb-local-ref
     // TODO: Should support multiple description elements with language
-    private Map<String,ContextLocalEjb> ejbLocalRefs =
-        new HashMap<String,ContextLocalEjb>();
+    private final Map<String,ContextLocalEjb> ejbLocalRefs = new HashMap<>();
     public void addEjbLocalRef(ContextLocalEjb ejbLocalRef) {
         ejbLocalRefs.put(ejbLocalRef.getName(),ejbLocalRef);
     }
@@ -472,8 +466,7 @@ public class WebXml {
     // TODO: Should support multiple description elements with language
     // TODO: Should support multiple display-names elements with language
     // TODO: Should support multiple icon elements ???
-    private Map<String,ContextService> serviceRefs =
-        new HashMap<String,ContextService>();
+    private final Map<String,ContextService> serviceRefs = new HashMap<>();
     public void addServiceRef(ContextService serviceRef) {
         serviceRefs.put(serviceRef.getName(), serviceRef);
     }
@@ -481,8 +474,7 @@ public class WebXml {
 
     // resource-ref
     // TODO: Should support multiple description elements with language
-    private Map<String,ContextResource> resourceRefs =
-        new HashMap<String,ContextResource>();
+    private final Map<String,ContextResource> resourceRefs = new HashMap<>();
     public void addResourceRef(ContextResource resourceRef) {
         if (resourceRefs.containsKey(resourceRef.getName())) {
             // resource-ref names must be unique within a web(-fragment).xml
@@ -498,8 +490,7 @@ public class WebXml {
 
     // resource-env-ref
     // TODO: Should support multiple description elements with language
-    private Map<String,ContextResourceEnvRef> resourceEnvRefs =
-        new HashMap<String,ContextResourceEnvRef>();
+    private final Map<String,ContextResourceEnvRef> resourceEnvRefs = new HashMap<>();
     public void addResourceEnvRef(ContextResourceEnvRef resourceEnvRef) {
         if (resourceEnvRefs.containsKey(resourceEnvRef.getName())) {
             // resource-env-ref names must be unique within a web(-fragment).xml
@@ -515,8 +506,8 @@ public class WebXml {
 
     // message-destination-ref
     // TODO: Should support multiple description elements with language
-    private Map<String,MessageDestinationRef> messageDestinationRefs =
-        new HashMap<String,MessageDestinationRef>();
+    private final Map<String,MessageDestinationRef> messageDestinationRefs =
+        new HashMap<>();
     public void addMessageDestinationRef(
             MessageDestinationRef messageDestinationRef) {
         if (messageDestinationRefs.containsKey(
@@ -538,8 +529,8 @@ public class WebXml {
     // TODO: Should support multiple description elements with language
     // TODO: Should support multiple display-names elements with language
     // TODO: Should support multiple icon elements ???
-    private Map<String,MessageDestination> messageDestinations =
-        new HashMap<String,MessageDestination>();
+    private final Map<String,MessageDestination> messageDestinations =
+            new HashMap<>();
     public void addMessageDestination(
             MessageDestination messageDestination) {
         if (messageDestinations.containsKey(
@@ -557,9 +548,8 @@ public class WebXml {
         return messageDestinations;
     }
 
-    // locale-encoging-mapping-list
-    private Map<String,String> localeEncodingMappings =
-        new HashMap<String,String>();
+    // locale-encoding-mapping-list
+    private final Map<String,String> localeEncodingMappings = new HashMap<>();
     public void addLocaleEncodingMapping(String locale, String encoding) {
         localeEncodingMappings.put(locale, encoding);
     }
@@ -610,7 +600,8 @@ public class WebXml {
         sb.append("         xmlns:xsi=");
         sb.append("\"http://www.w3.org/2001/XMLSchema-instance\"\n");
         sb.append("         xsi:schemaLocation=");
-        sb.append("\"http://java.sun.com/xml/ns/javaee/web-app_3_0.xsd\"\n");
+        sb.append("\"http://java.sun.com/xml/ns/javaee" +
+                  " http://java.sun.com/xml/ns/javaee/web-app_3_0.xsd\"\n");
         sb.append("         version=\"");
         sb.append(getVersion());
         sb.append("\"\n");
@@ -625,7 +616,7 @@ public class WebXml {
         for (Map.Entry<String, String> entry : contextParams.entrySet()) {
             sb.append("  <context-param>\n");
             appendElement(sb, INDENT4, "param-name", entry.getKey());
-            appendElement(sb, INDENT4, "param-valuee", entry.getValue());
+            appendElement(sb, INDENT4, "param-value", entry.getValue());
             sb.append("  </context-param>\n");
         }
         sb.append('\n');
@@ -810,19 +801,21 @@ public class WebXml {
             }
             for (JspPropertyGroup jpg : jspPropertyGroups) {
                 sb.append("    <jsp-property-group>\n");
-                appendElement(sb, INDENT6, "url-pattern", jpg.getUrlPattern());
+                for (String urlPattern : jpg.getUrlPatterns()) {
+                    appendElement(sb, INDENT6, "url-pattern", urlPattern);
+                }
                 appendElement(sb, INDENT6, "el-ignored", jpg.getElIgnored());
-                appendElement(sb, INDENT6, "scripting-invalid",
-                        jpg.getScriptingInvalid());
                 appendElement(sb, INDENT6, "page-encoding",
                         jpg.getPageEncoding());
+                appendElement(sb, INDENT6, "scripting-invalid",
+                        jpg.getScriptingInvalid());
+                appendElement(sb, INDENT6, "is-xml", jpg.getIsXml());
                 for (String prelude : jpg.getIncludePreludes()) {
                     appendElement(sb, INDENT6, "include-prelude", prelude);
                 }
                 for (String coda : jpg.getIncludeCodas()) {
                     appendElement(sb, INDENT6, "include-coda", coda);
                 }
-                appendElement(sb, INDENT6, "is-xml", jpg.getIsXml());
                 appendElement(sb, INDENT6, "deferred-syntax-allowed-as-literal",
                         jpg.getDeferredSyntax());
                 appendElement(sb, INDENT6, "trim-directive-whitespaces",
@@ -1354,12 +1347,16 @@ public class WebXml {
                 jspServletName = "jsp";
             }
             if (context.findChild(jspServletName) != null) {
-                context.addServletMapping(jspPropertyGroup.getUrlPattern(),
-                        jspServletName, true);
+                for (String urlPattern : jspPropertyGroup.getUrlPatterns()) {
+                    context.addServletMapping(urlPattern, jspServletName, true);
+                }
             } else {
-                if(log.isDebugEnabled())
-                    log.debug("Skiping " + jspPropertyGroup.getUrlPattern() +
-                            " , no servlet " + jspServletName);
+                if(log.isDebugEnabled()) {
+                    for (String urlPattern : jspPropertyGroup.getUrlPatterns()) {
+                        log.debug("Skiping " + urlPattern + " , no servlet " +
+                                jspServletName);
+                    }
+                }
             }
         }
     }
@@ -1449,7 +1446,7 @@ public class WebXml {
         // As per 'clarification' from the Servlet EG, filter definitions in the
         // main web.xml override those in fragments and those in fragments
         // override those in annotations
-        List<FilterMap> filterMapsToAdd = new ArrayList<FilterMap>();
+        List<FilterMap> filterMapsToAdd = new ArrayList<>();
         for (WebXml fragment : fragments) {
             for (FilterMap filterMap : fragment.getFilterMappings()) {
                 if (!filterMappingNames.contains(filterMap.getFilterName())) {
@@ -1598,8 +1595,7 @@ public class WebXml {
         // fragments override those in annotations
         // Skip servlet definitions and mappings from fragments that are
         // defined in web.xml
-        List<Map.Entry<String,String>> servletMappingsToAdd =
-            new ArrayList<Map.Entry<String,String>>();
+        List<Map.Entry<String,String>> servletMappingsToAdd = new ArrayList<>();
         for (WebXml fragment : fragments) {
             for (Map.Entry<String,String> servletMap :
                     fragment.getServletMappings().entrySet()) {
@@ -2094,7 +2090,7 @@ public class WebXml {
     public static Set<WebXml> orderWebFragments(WebXml application,
             Map<String,WebXml> fragments) {
 
-        Set<WebXml> orderedFragments = new LinkedHashSet<WebXml>();
+        Set<WebXml> orderedFragments = new LinkedHashSet<>();
 
         boolean absoluteOrdering =
             (application.getAbsoluteOrdering() != null);
@@ -2124,75 +2120,152 @@ public class WebXml {
                 }
             }
         } else {
-            List<String> order = new LinkedList<String>();
-            // Start by adding all fragments - order doesn't matter
-            order.addAll(fragments.keySet());
-
-            // Now go through and move elements to start/end depending on if
-            // they specify others
+            // Stage 1. Make all dependencies bi-directional - this makes the
+            //          next stage simpler.
             for (WebXml fragment : fragments.values()) {
-                String name = fragment.getName();
-                if (fragment.getBeforeOrdering().contains(WebXml.ORDER_OTHERS)) {
-                    // Move to beginning
-                    order.remove(name);
-                    order.add(0, name);
-                } else if (fragment.getAfterOrdering().contains(WebXml.ORDER_OTHERS)) {
-                    // Move to end
-                    order.remove(name);
-                    order.add(name);
+                Iterator<String> before =
+                        fragment.getBeforeOrdering().iterator();
+                while (before.hasNext()) {
+                    String beforeEntry = before.next();
+                    if (!beforeEntry.equals(ORDER_OTHERS)) {
+                        WebXml beforeFragment = fragments.get(beforeEntry);
+                        if (beforeFragment == null) {
+                            before.remove();
+                        } else {
+                            beforeFragment.addAfterOrdering(fragment.getName());
+                        }
+                    }
+                }
+                Iterator<String> after = fragment.getAfterOrdering().iterator();
+                while (after.hasNext()) {
+                    String afterEntry = after.next();
+                    if (!afterEntry.equals(ORDER_OTHERS)) {
+                        WebXml afterFragment = fragments.get(afterEntry);
+                        if (afterFragment == null) {
+                            after.remove();
+                        } else {
+                            afterFragment.addBeforeOrdering(fragment.getName());
+                        }
+                    }
                 }
             }
 
-            // Now apply remaining ordering
+            // Stage 2. Make all fragments that are implicitly before/after
+            //          others explicitly so. This is iterative so the next
+            //          stage doesn't have to be.
             for (WebXml fragment : fragments.values()) {
-                String name = fragment.getName();
-                for (String before : fragment.getBeforeOrdering()) {
-                    if (!before.equals(WebXml.ORDER_OTHERS) &&
-                            order.contains(before) &&
-                            order.indexOf(before) < order.indexOf(name)) {
-                        order.remove(name);
-                        order.add(order.indexOf(before), name);
-                    }
+                if (fragment.getBeforeOrdering().contains(ORDER_OTHERS)) {
+                    makeBeforeOthersExplicit(fragment.getAfterOrdering(), fragments);
                 }
-                for (String after : fragment.getAfterOrdering()) {
-                    if (!after.equals(WebXml.ORDER_OTHERS) &&
-                            order.contains(after) &&
-                            order.indexOf(after) > order.indexOf(name)) {
-                        order.remove(name);
-                        order.add(order.indexOf(after) + 1, name);
-                    }
+                if (fragment.getAfterOrdering().contains(ORDER_OTHERS)) {
+                    makeAfterOthersExplicit(fragment.getBeforeOrdering(), fragments);
                 }
             }
 
-            // Finally check ordering was applied correctly - if there are
-            // errors then that indicates circular references
+            // Stage 3. Separate into three groups
+            Set<WebXml> beforeSet = new HashSet<>();
+            Set<WebXml> othersSet = new HashSet<>();
+            Set<WebXml> afterSet = new HashSet<>();
+
             for (WebXml fragment : fragments.values()) {
-                String name = fragment.getName();
-                for (String before : fragment.getBeforeOrdering()) {
-                    if (!before.equals(WebXml.ORDER_OTHERS) &&
-                            order.contains(before) &&
-                            order.indexOf(before) < order.indexOf(name)) {
-                        throw new IllegalArgumentException(
-                                sm.getString("webXml.mergeConflictOrder"));
-                    }
-                }
-                for (String after : fragment.getAfterOrdering()) {
-                    if (!after.equals(WebXml.ORDER_OTHERS) &&
-                            order.contains(after) &&
-                            order.indexOf(after) > order.indexOf(name)) {
-                        throw new IllegalArgumentException(
-                                sm.getString("webXml.mergeConflictOrder"));
-                    }
+                if (fragment.getBeforeOrdering().contains(ORDER_OTHERS)) {
+                    beforeSet.add(fragment);
+                    fragment.getBeforeOrdering().remove(ORDER_OTHERS);
+                } else if (fragment.getAfterOrdering().contains(ORDER_OTHERS)) {
+                    afterSet.add(fragment);
+                    fragment.getAfterOrdering().remove(ORDER_OTHERS);
+                } else {
+                    othersSet.add(fragment);
                 }
             }
 
-            // Build the ordered list
-            for (String name : order) {
-                orderedFragments.add(fragments.get(name));
-            }
+            // Stage 4. Decouple the groups so the ordering requirements for
+            //          each fragment in the group only refer to other fragments
+            //          in the group. Ordering requirements outside the group
+            //          will be handled by processing the groups in order.
+            //          Note: Only after ordering requirements are considered.
+            //                This is OK because of the processing in stage 1.
+            decoupleOtherGroups(beforeSet);
+            decoupleOtherGroups(othersSet);
+            decoupleOtherGroups(afterSet);
+
+            // Stage 5. Order each group
+            //          Note: Only after ordering requirements are considered.
+            //                This is OK because of the processing in stage 1.
+            orderFragments(orderedFragments, beforeSet);
+            orderFragments(orderedFragments, othersSet);
+            orderFragments(orderedFragments, afterSet);
         }
 
         return orderedFragments;
     }
 
+    private static void decoupleOtherGroups(Set<WebXml> group) {
+        Set<String> names = new HashSet<>();
+        for (WebXml fragment : group) {
+            names.add(fragment.getName());
+        }
+        for (WebXml fragment : group) {
+            Iterator<String> after = fragment.getAfterOrdering().iterator();
+            while (after.hasNext()) {
+                String entry = after.next();
+                if (!names.contains(entry)) {
+                    after.remove();
+                }
+            }
+        }
+    }
+    private static void orderFragments(Set<WebXml> orderedFragments,
+            Set<WebXml> unordered) {
+        Set<WebXml> addedThisRound = new HashSet<>();
+        Set<WebXml> addedLastRound = new HashSet<>();
+        while (unordered.size() > 0) {
+            Iterator<WebXml> source = unordered.iterator();
+            while (source.hasNext()) {
+                WebXml fragment = source.next();
+                for (WebXml toRemove : addedLastRound) {
+                    fragment.getAfterOrdering().remove(toRemove.getName());
+                }
+                if (fragment.getAfterOrdering().isEmpty()) {
+                    addedThisRound.add(fragment);
+                    orderedFragments.add(fragment);
+                    source.remove();
+                }
+            }
+            if (addedThisRound.size() == 0) {
+                // Circular
+                throw new IllegalArgumentException(
+                        sm.getString("webXml.mergeConflictOrder"));
+            }
+            addedLastRound.clear();
+            addedLastRound.addAll(addedThisRound);
+            addedThisRound.clear();
+        }
+    }
+
+    private static void makeBeforeOthersExplicit(Set<String> beforeOrdering,
+            Map<String, WebXml> fragments) {
+        for (String before : beforeOrdering) {
+            if (!before.equals(ORDER_OTHERS)) {
+                WebXml webXml = fragments.get(before);
+                if (!webXml.getBeforeOrdering().contains(ORDER_OTHERS)) {
+                    webXml.addBeforeOrderingOthers();
+                    makeBeforeOthersExplicit(webXml.getAfterOrdering(), fragments);
+                }
+            }
+        }
+    }
+
+    private static void makeAfterOthersExplicit(Set<String> afterOrdering,
+            Map<String, WebXml> fragments) {
+        for (String after : afterOrdering) {
+            if (!after.equals(ORDER_OTHERS)) {
+                WebXml webXml = fragments.get(after);
+                if (!webXml.getAfterOrdering().contains(ORDER_OTHERS)) {
+                    webXml.addAfterOrderingOthers();
+                    makeAfterOthersExplicit(webXml.getBeforeOrdering(), fragments);
+                }
+            }
+        }
+    }
 }

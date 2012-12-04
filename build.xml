@@ -47,6 +47,7 @@
   <property name="servlet.revision" value="FR" />
   <property name="jsp.revision" value="FR" />
   <property name="el.revision" value="FR" />
+  <property name="websocket.revision" value="FR" />
 
   <!-- Release artifact base names -->
   <property name="final.name"            value="${project}-${version}" />
@@ -74,9 +75,9 @@
   <!-- build output directory for jdbc-pool -->
   <property name="tomcat.pool"           value="${tomcat.output}/jdbc-pool"/>
 
-  <!-- Servlet 3.0 spec requires 1.6+ -->
-  <property name="compile.source" value="1.6"/>
-  <property name="compile.target" value="1.6"/>
+  <!-- Servlet 3.1 spec requires 1.7+ -->
+  <property name="compile.source" value="1.7"/>
+  <property name="compile.target" value="1.7"/>
 
   <!-- Locations to create the JAR artifacts -->
   <!-- Standard JARs -->
@@ -87,6 +88,8 @@
   <property name="servlet-api.jar" value="${tomcat.build}/lib/servlet-api.jar"/>
   <property name="jsp-api.jar" value="${tomcat.build}/lib/jsp-api.jar"/>
   <property name="el-api.jar" value="${tomcat.build}/lib/el-api.jar"/>
+  <property name="websocket-api.jar" value="${tomcat.build}/lib/websocket-api.jar"/>
+  <property name="tomcat-websocket.jar" value="${tomcat.build}/lib/tomcat-websocket.jar"/>
   <property name="catalina.jar" value="${tomcat.build}/lib/catalina.jar"/>
   <property name="catalina-tribes.jar" value="${tomcat.build}/lib/catalina-tribes.jar"/>
   <property name="catalina-ha.jar" value="${tomcat.build}/lib/catalina-ha.jar"/>
@@ -111,6 +114,8 @@
   <property name="servlet-api-src.jar" value="${tomcat.src.jars}/servlet-api-src.jar"/>
   <property name="jsp-api-src.jar" value="${tomcat.src.jars}/jsp-api-src.jar"/>
   <property name="el-api-src.jar" value="${tomcat.src.jars}/el-api-src.jar"/>
+  <property name="websocket-api-src.jar" value="${tomcat.src.jars}/websocket-api-src.jar"/>
+  <property name="tomcat-websocket-src.jar" value="${tomcat.src.jars}/tomcat-websocket-src.jar"/>
   <property name="catalina-src.jar" value="${tomcat.src.jars}/catalina-src.jar"/>
   <property name="catalina-tribes-src.jar" value="${tomcat.src.jars}/catalina-tribes-src.jar"/>
   <property name="catalina-ha-src.jar" value="${tomcat.src.jars}/catalina-ha-src.jar"/>
@@ -163,11 +168,12 @@
   <defaultexcludes remove="**/.gitignore" />
   <!--<defaultexcludes echo="true" />-->
 
+  <available file="${npn.jar}" property="npn.exists" />
+
   <!-- Classpaths -->
   <path id="compile.classpath">
-      <pathelement location="${jdt.jar}"/>
-      <pathelement location="${jzlib.jar}"/>
-      <pathelement location="${npn.jar}"/>
+    <pathelement location="${jdt.jar}"/>
+    <pathelement location="${npn.jar}"/>
   </path>
 
   <path id="tomcat.classpath">
@@ -230,6 +236,7 @@
     <include name="**/*.license"/>
     <include name="**/*.manifest"/>
     <include name="**/*.mdl"/>
+    <include name="**/*.MF"/>
     <include name="**/*.notice"/>
     <include name="**/*.nsi"/>
     <include name="**/*.pl"/>
@@ -274,6 +281,14 @@
 
   <patternset id="files.el-api">
     <include name="javax/el/*" />
+  </patternset>
+
+  <patternset id="files.websocket-api">
+    <include name="javax/websocket/**" />
+  </patternset>
+
+  <patternset id="files.tomcat-websocket">
+    <include name="org/apache/tomcat/websocket/**" />
   </patternset>
 
   <patternset id="files.bootstrap">
@@ -325,11 +340,11 @@
     <include name="org/apache/catalina/ant/jmx/*" />
     <include name="org/apache/catalina/util/Base64.*" />
   </patternset>
-  
+
   <patternset id="files.tomcat-jni">
-	<include name="org/apache/tomcat/jni/**" />
+    <include name="org/apache/tomcat/jni/**" />
   </patternset>
-  	
+
   <patternset id="files.tomcat-coyote">
     <include name="org/apache/coyote/**" />
     <include name="org/apache/jk/**" />
@@ -338,13 +353,12 @@
     <exclude name="org/apache/tomcat/util/file/**" />
     <exclude name="org/apache/tomcat/util/res/**" />
     <exclude name="org/apache/tomcat/util/scan/**" />
-  	<!-- tomcat-spdy.jar - can be used in tomcat7 -->
-    <exclude name="org/apache/coyote/spdy/**" />    
+    <exclude name="org/apache/coyote/spdy/**" />
   </patternset>
 
   <patternset id="files.tomcat-spdy">
-  	<include name="org/apache/coyote/spdy/**" />
-	<include name="org/apache/tomcat/spdy/**" />
+    <include name="org/apache/coyote/spdy/**" />
+    <include name="org/apache/tomcat/spdy/**" />
   </patternset>
 
   <patternset id="files.jasper">
@@ -367,6 +381,8 @@
     <patternset refid="files.catalina" />
     <patternset refid="files.el-api" />
     <patternset refid="files.servlet-api" />
+    <patternset refid="files.websocket-api" />
+    <patternset refid="files.tomcat-websocket" />
     <patternset refid="files.tomcat-api" />
     <!-- These pattern sets conflict so include files directly
       <patternset refid="files.tomcat-coyote" />
@@ -449,7 +465,9 @@
 
   </target>
 
-  <target name="validate" depends="download-validate" if="${execute.validate}">
+  <target name="validate" if="${execute.validate}"
+    depends="build-prepare,compile-prepare,download-validate"
+    description="Uses Checkstyle tool to perform style check for the source code">
     <!-- Required so we can cache checkstyle results -->
     <mkdir dir="${tomcat.output}/res/checkstyle"/>
 
@@ -470,7 +488,6 @@
         <!-- Exclude auto-generated files -->
         <exclude name="java/org/apache/el/parser/ELParser*.java" />
         <exclude name="java/org/apache/el/parser/Node.java" />
-        <exclude name="java/org/apache/tomcat/util/http/parser/HttpParser*.java" />
         <exclude name="java/org/apache/**/parser/JJT*ParserState.java" />
         <exclude name="java/org/apache/**/parser/ParseException.java" />
         <exclude name="java/org/apache/**/parser/SimpleCharStream.java" />
@@ -478,9 +495,14 @@
         <!-- Exclude these else Gump runs validate on them -->
         <exclude name="**/org/apache/tomcat/dbcp/**"/>
         <exclude name="**/tomcat-deps/**"/>
+        <!-- Exclude simple test files -->
+        <exclude name="test/webapp-3.0/bug53257/**/*.txt"/>
+        <exclude name="test/webapp-3.0-fragments/WEB-INF/classes/*.txt"/>
+        <exclude name="test/webresources/**"/>
       </fileset>
       <fileset dir="modules/jdbc-pool" >
         <exclude name=".*/**"/>
+        <exclude name="**/MANIFEST.MF"/>
         <patternset refid="text.files" />
       </fileset>
     </checkstyle>
@@ -573,7 +595,9 @@
       -->
       <classpath refid="compile.classpath" />
         <exclude name="org/apache/naming/factory/webservices/**" />
-        <exclude name="org/apache/tomcat/spdy/CompressDeflater7.java" />
+        <exclude name="org/apache/tomcat/spdy/NetSupportJava7*" unless="npn.exists"/>
+        <exclude name="org/apache/coyote/spdy/*Nio*" unless="npn.exists"/>
+        <exclude name="org/apache/coyote/spdy/SpdyNpnHandler*" unless="npn.exists"/>
     </javac>
     <!-- Copy static resource files -->
     <copy todir="${tomcat.classes}" encoding="ISO-8859-1">
@@ -599,16 +623,13 @@
     <filter token="servlet.revision" value="${servlet.revision}"/>
     <filter token="jsp.revision" value="${jsp.revision}"/>
     <filter token="el.revision" value="${el.revision}"/>
+    <filter token="websocket.revision" value="${websocket.revision}"/>
 
     <mkdir dir="${tomcat.manifests}" />
     <copy todir="${tomcat.manifests}" overwrite="yes" filtering="yes"
       encoding="ISO-8859-1">
       <filterset refid="version.filters"/>
-      <fileset dir="${tomcat.home}/res/META-INF" >
-        <include name="*.manifest" />
-        <include name="*.license" />
-        <include name="*.notice" />
-      </fileset>
+      <fileset dir="${tomcat.home}/res/META-INF" />
     </copy>
 
   </target>
@@ -641,6 +662,18 @@
       filesDir="${tomcat.classes}"
       filesId="files.el-api"
       manifest="${tomcat.manifests}/el-api.jar.manifest" />
+
+    <!-- WebSocket 1.0 API JAR File -->
+    <jarIt jarfile="${websocket-api.jar}"
+      filesDir="${tomcat.classes}"
+      filesId="files.websocket-api"
+      manifest="${tomcat.manifests}/websocket-api.jar.manifest" />
+
+    <!-- WebSocket 1.0 implementation JAR File -->
+    <jarIt jarfile="${tomcat-websocket.jar}"
+      filesDir="${tomcat.classes}"
+      filesId="files.tomcat-websocket"
+      meta-inf="${tomcat.manifests}/tomcat-websocket.jar"/>
 
     <!-- Bootstrap JAR File -->
     <jarIt jarfile="${bootstrap.jar}"
@@ -1189,6 +1222,8 @@
         <jvmarg value="${test.jvmarg.egd}"/>
         <jvmarg value="-Djava.library.path=${test.apr.loc}"/>
         <jvmarg value="${test.formatter}"/>
+        <jvmarg value="-Djava.net.preferIPv4Stack=${java.net.preferIPv4Stack}"/>
+        <jvmarg value="-Dorg.apache.tomcat.util.net.NioSelectorShared=${org.apache.tomcat.util.net.NioSelectorShared}"/>
 
         <classpath refid="tomcat.test.classpath" />
 
@@ -1560,8 +1595,8 @@
     <!-- tc native -->
     <copy todir="${tomcat.dist}/bin">
       <fileset dir="${tomcat-native.home}/bin">
-        <exclude name="*.exe"/>
-        <exclude name="*.pdb"/>
+        <include name="*.dll"/>
+        <include name="**/*.dll"/>
       </fileset>
     </copy>
 
@@ -1629,6 +1664,23 @@ Apache Tomcat ${version} native binaries for Win64 AMD64/EMT64 platform.
         <path location="${ant.core.lib}"/>
       </classpath>
     </javadoc>
+    <javadoc packagenames="javax.websocket.*"
+      sourcepath="${tomcat.dist}/src/java"
+      destdir="${tomcat.dist}/webapps/docs/websocketapi"
+      version="true"
+      windowtitle="WebSocket 1.0 API Documentation - Apache Tomcat ${version}"
+      doctitle="WebSocket 1.0 API - Apache Tomcat ${version}"
+      header="&lt;b&gt;WebSocket 1.0 - Apache Tomcat ${version}&lt;/b&gt;"
+      bottom="Copyright &amp;#169; 2000-${year} Apache Software Foundation. All Rights Reserved."
+      encoding="ISO-8859-1"
+      additionalparam="-breakiterator"
+      maxmemory="256m" >
+      <classpath>
+        <path refid="compile.classpath"/>
+        <path refid="tomcat.webservices.classpath"/>
+        <path location="${ant.core.lib}"/>
+      </classpath>
+    </javadoc>
     <javadoc packagenames="org.apache.*"
       destdir="${tomcat.dist}/webapps/docs/api"
       version="true"
@@ -1647,6 +1699,7 @@ Apache Tomcat ${version} native binaries for Win64 AMD64/EMT64 platform.
       <link href="../servletapi"/>
       <link href="../jspapi"/>
       <link href="../elapi"/>
+      <link href="../websocketapi"/>
       <link href="http://docs.oracle.com/javase/6/docs/api/"/>
       <link href="http://commons.apache.org/io/api-release/"/>
       <link href="http://docs.oracle.com/javaee/6/api/"/>
@@ -1670,6 +1723,8 @@ Apache Tomcat ${version} native binaries for Win64 AMD64/EMT64 platform.
         <include name="jasper.jar"/>
         <include name="jasper-el.jar"/>
         <include name="servlet-api.jar"/>
+        <include name="websocket-api.jar"/>
+        <include name="tomcat-websocket.jar"/>
         <include name="tomcat-coyote.jar"/>
         <include name="tomcat-util.jar"/>
       </fileset>
@@ -1708,7 +1763,7 @@ Apache Tomcat ${version} native binaries for Win64 AMD64/EMT64 platform.
 
   </target>
 
-  <target name="dist-source">
+  <target name="dist-source" depends="compile-prepare">
 
     <mkdir dir="${tomcat.dist}/src"/>
 
@@ -1719,6 +1774,7 @@ Apache Tomcat ${version} native binaries for Win64 AMD64/EMT64 platform.
           <or>
             <filename name="**/.settings/**" />
             <filename name="**/.classpath"/>
+            <filename name="**/.checkstyle"/>
             <filename name="**/.project"/>
             <filename name="**/output/**"/>
             <!-- Commented out, because
@@ -1731,12 +1787,15 @@ Apache Tomcat ${version} native binaries for Win64 AMD64/EMT64 platform.
             <filename name="**/*.iml" />
             <filename name="**/*.asc" />
             <filename name="**/*.tmp" />
+            <filename name="**/*.jj" />
             <filename name="**/maven-ant-tasks-*.jar" />
             <filename name="**/thumbs.db" />
             <filename name="**/Thumbs.db" />
             <filename name="*.launch"/>
             <filename name="bin/setenv.*" />
+            <filename name="java/org/apache/catalina/startup/catalina.properties" />
             <filename name="logs/**" />
+            <filename name="webapps/docs/jdbc-pool.xml" />
             <filename name="work/**" />
             <filename name="modules/jdbc-pool/bin/**" />
             <filename name="modules/jdbc-pool/includes/**" />
@@ -2195,6 +2254,17 @@ Apache Tomcat ${version} native binaries for Win64 AMD64/EMT64 platform.
       filesId="files.el-api"
       manifest="${tomcat.manifests}/el-api.jar.manifest" />
 
+    <!-- WebSocket 1.0 API JAR File -->
+    <jarIt jarfile="${websocket-api-src.jar}"
+      filesDir="java"
+      filesId="files.websocket-api"
+      manifest="${tomcat.manifests}/websocket-api.jar.manifest" />
+
+    <!-- WebSocket 1.0 implementation JAR File -->
+    <jarIt jarfile="${tomcat-websocket-src.jar}"
+      filesDir="java"
+      filesId="files.tomcat-websocket" />
+
     <!-- Bootstrap JAR File -->
     <jarIt jarfile="${bootstrap-src.jar}"
       filesDir="java"
@@ -2349,12 +2419,15 @@ Apache Tomcat ${version} native binaries for Win64 AMD64/EMT64 platform.
       <param name="destdir" value="${jdt.home}"/>
     </antcall>
 
-  	<antcall target="downloadfile">
+  </target>
+
+  <target name="download-npn"
+          description="Download optional NPN" >
+    <antcall target="downloadfile">
      <param name="sourcefile" value="${npn.loc}"/>
      <param name="destfile" value="${npn.jar}"/>
      <param name="destdir" value="${npn.home}"/>
     </antcall>
-  
   </target>
 
   <target name="download-test-compile"
@@ -2374,7 +2447,7 @@ Apache Tomcat ${version} native binaries for Win64 AMD64/EMT64 platform.
     <antcall target="downloadzip-2">
       <param name="sourcefile.1" value="${tomcat-native.win.1}"/>
       <param name="sourcefile.2" value="${tomcat-native.win.2}"/>
-      <param name="destfile" value="${tomcat-native.home}/VERSIONS"/>
+      <param name="destfile" value="${tomcat-native.home}/LICENSE"/>
       <param name="destdir" value="${tomcat-native.home}"/>
     </antcall>
 
@@ -2409,6 +2482,12 @@ Apache Tomcat ${version} native binaries for Win64 AMD64/EMT64 platform.
         <exclude name="**/managed/**" />
       </fileset>
     </copy>
+
+    <patch patchfile="${basedir}/res/dbcp/dbcp-java-7.patch"
+           dir="${tomcat-dbcp.home}"
+           ignorewhitespace="true"
+           strip="0"/>
+
     <replace dir="${tomcat-dbcp.home}/src/java/org/apache/commons"
         encoding="ISO-8859-1">
       <replacefilter token="org.apache.commons"
@@ -2584,6 +2663,8 @@ Read the Building page on the Apache Tomcat documentation site for details on ho
                default="${tomcat.manifests}/default.notice" />
     <attribute name="license" description="the NOTICE file to use"
                default="${tomcat.manifests}/default.license" />
+    <attribute name="meta-inf" description="additional contents for META-INF"
+               default="${tomcat.manifests}/default" />
     <sequential>
       <jar jarfile="@{jarfile}" manifest="@{manifest}">
         <fileset dir="@{filesDir}">
@@ -2592,6 +2673,7 @@ Read the Building page on the Apache Tomcat documentation site for details on ho
           <exclude name="**/package.html" />
           <exclude name="**/LocalStrings_*" />
         </fileset>
+        <zipfileset dir="@{meta-inf}" prefix="META-INF/" />
         <zipfileset file="@{notice}" fullpath="META-INF/NOTICE" />
         <zipfileset file="@{license}" fullpath="META-INF/LICENSE" />
       </jar>

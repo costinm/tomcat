@@ -43,8 +43,8 @@ import java.util.TimeZone;
  * @version $Id$
  */
 public class Strftime {
-    protected static Properties translate;
-    protected SimpleDateFormat simpleDateFormat;
+    protected static final Properties translate;
+    protected final SimpleDateFormat simpleDateFormat;
 
     /**
      * Initialize our pattern translation
@@ -106,16 +106,6 @@ public class Strftime {
         translate.put("%","%");
     }
 
-
-    /**
-     * Create an instance of this date formatting class
-     *
-     * @see #Strftime( String, Locale )
-     */
-    public Strftime( String origFormat ) {
-        String convertedFormat = convertDateFormat( origFormat );
-        simpleDateFormat = new SimpleDateFormat( convertedFormat );
-    }
 
     /**
      * Create an instance of this date formatting class

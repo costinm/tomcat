@@ -29,6 +29,7 @@ import java.util.logging.Logger;
 
 import javax.servlet.Servlet;
 import javax.servlet.ServletException;
+import javax.servlet.annotation.WebServlet;
 
 import org.apache.catalina.Container;
 import org.apache.catalina.Context;
@@ -138,11 +139,9 @@ public class Tomcat {
     protected String hostname = "localhost";
     protected String basedir;
 
-    private final Map<String, String> userPass = new HashMap<String, String>();
-    private final Map<String, List<String>> userRoles =
-        new HashMap<String, List<String>>();
-    private final Map<String, Principal> userPrincipals =
-        new HashMap<String, Principal>();
+    private final Map<String, String> userPass = new HashMap<>();
+    private final Map<String, List<String>> userRoles = new HashMap<>();
+    private final Map<String, Principal> userPrincipals = new HashMap<>();
 
     public Tomcat() {
         // NOOP
@@ -363,7 +362,7 @@ public class Tomcat {
     public void addRole(String user, String role) {
         List<String> roles = userRoles.get(user);
         if (roles == null) {
-            roles = new ArrayList<String>();
+            roles = new ArrayList<>();
             userRoles.put(user, roles);
         }
         roles.add(role);
@@ -717,12 +716,14 @@ public class Tomcat {
         Wrapper servlet = addServlet(
                 ctx, "default", "org.apache.catalina.servlets.DefaultServlet");
         servlet.setLoadOnStartup(1);
+        servlet.setOverridable(true);
 
         // JSP servlet (by class name - to avoid loading all deps)
         servlet = addServlet(
                 ctx, "jsp", "org.apache.jasper.servlet.JspServlet");
         servlet.addInitParameter("fork", "false");
         servlet.setLoadOnStartup(3);
+        servlet.setOverridable(true);
 
         // Servlet mappings
         ctx.addServletMapping("/", "default");
@@ -797,16 +798,28 @@ public class Tomcat {
      */
     public static class ExistingStandardWrapper extends StandardWrapper {
         private final Servlet existing;
-        boolean init = false;
 
         @SuppressWarnings("deprecation")
         public ExistingStandardWrapper( Servlet existing ) {
             this.existing = existing;
             if (existing instanceof javax.servlet.SingleThreadModel) {
                 singleThreadModel = true;
-                instancePool = new Stack<Servlet>();
+                instancePool = new Stack<>();
             }
+            this.asyncSupported = hasAsync();
         }
+
+        public boolean hasAsync() {
+            if (isAsyncSupported()) return true;
+            boolean result = false;
+            Class<?> clazz = existing.getClass();
+            if (clazz.isAnnotationPresent(WebServlet.class)) {
+                WebServlet ws = clazz.getAnnotation(WebServlet.class);
+                result = ws.asyncSupported();
+            }
+            return result;
+        }
+
         @Override
         public synchronized Servlet loadServlet() throws ServletException {
             if (singleThreadModel) {
@@ -821,9 +834,9 @@ public class Tomcat {
                 instance.init(facade);
                 return instance;
             } else {
-                if (!init) {
+                if (!instanceInitialized) {
                     existing.init(facade);
-                    init = true;
+                    instanceInitialized = true;
                 }
                 return existing;
             }

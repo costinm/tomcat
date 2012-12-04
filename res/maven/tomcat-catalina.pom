@@ -21,6 +21,14 @@
   <artifactId>tomcat-catalina</artifactId>
   <version>@MAVEN.DEPLOY.VERSION@</version>
   <description>Tomcat Servlet Engine Core Classes and Standard implementations</description>
+  <url>http://tomcat.apache.org/</url>
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
   <dependencies>
     <dependency>
       <groupId>org.apache.tomcat</groupId>
@@ -43,6 +51,12 @@
     <dependency>
       <groupId>org.apache.tomcat</groupId>
       <artifactId>tomcat-api</artifactId>
+      <version>@MAVEN.DEPLOY.VERSION@</version>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.tomcat</groupId>
+      <artifactId>tomcat-jni</artifactId>
       <version>@MAVEN.DEPLOY.VERSION@</version>
       <scope>compile</scope>
     </dependency>

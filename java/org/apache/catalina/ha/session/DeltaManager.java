@@ -80,7 +80,7 @@ public class DeltaManager extends ClusterManagerBase{
     /**
      * The descriptive name of this Manager implementation (for logging).
      */
-    protected static String managerName = "DeltaManager";
+    protected static final String managerName = "DeltaManager";
     protected String name = null;
 
     /**
@@ -101,8 +101,8 @@ public class DeltaManager extends ClusterManagerBase{
      * wait time between send session block (default 2 sec)
      */
     private int sendAllSessionsWaitTime = 2 * 1000 ;
-    private ArrayList<SessionMessage> receivedMessageQueue =
-        new ArrayList<SessionMessage>() ;
+    private final ArrayList<SessionMessage> receivedMessageQueue =
+            new ArrayList<>();
     private boolean receiverQueue = false ;
     private boolean stateTimestampDrop = true ;
     private long stateTransferCreateSendTime;
@@ -740,8 +740,8 @@ public class DeltaManager extends ClusterManagerBase{
             // stop remove cluster binding
             //wow, how many nested levels of if statements can we have ;)
             if(cluster == null) {
-                Container context = getContainer() ;
-                if(context != null && context instanceof Context) {
+                Context context = getContext() ;
+                if (context != null) {
                      Container host = context.getParent() ;
                      if(host != null && host instanceof Host) {
                          cluster = host.getCluster();
@@ -849,7 +849,9 @@ public class DeltaManager extends ClusterManagerBase{
      */
     protected void registerSessionAtReplicationValve(DeltaSession session) {
         if(replicationValve == null) {
-            if(container instanceof StandardContext && ((StandardContext)container).getCrossContext()) {
+            Context context = getContext();
+            if(context instanceof StandardContext &&
+                    ((StandardContext)context).getCrossContext()) {
                 CatalinaCluster cluster = getCluster() ;
                 if(cluster != null) {
                     Valve[] valves = cluster.getValves();
@@ -1463,7 +1465,7 @@ public class DeltaManager extends ClusterManagerBase{
             session.setPrimarySession(false);
             session.setId(newSessionID, false);
             if (notifyContainerListenersOnReplication) {
-                getContainer().fireContainerEvent(Context.CHANGE_SESSION_ID_EVENT,
+                getContext().fireContainerEvent(Context.CHANGE_SESSION_ID_EVENT,
                         new String[] {msg.getSessionID(), newSessionID});
             }
         }

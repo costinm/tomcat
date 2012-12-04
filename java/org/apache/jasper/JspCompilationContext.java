@@ -62,38 +62,38 @@ public class JspCompilationContext {
 
     private final Log log = LogFactory.getLog(JspCompilationContext.class); // must not be static
 
-    protected Map<String, JarResource> tagFileJarUrls;
+    protected final Map<String, JarResource> tagFileJarUrls;
 
     protected String className;
-    protected String jspUri;
+    protected final String jspUri;
     protected String basePackageName;
     protected String derivedPackageName;
     protected String servletJavaFileName;
     protected String javaPath;
     protected String classFileName;
     protected ServletWriter writer;
-    protected Options options;
-    protected JspServletWrapper jsw;
+    protected final Options options;
+    protected final JspServletWrapper jsw;
     protected Compiler jspCompiler;
     protected String classPath;
 
-    protected String baseURI;
+    protected final String baseURI;
     protected String outputDir;
-    protected ServletContext context;
+    protected final ServletContext context;
     protected ClassLoader loader;
 
-    protected JspRuntimeContext rctxt;
+    protected final JspRuntimeContext rctxt;
 
-    protected volatile int removed = 0;
+    protected volatile boolean removed = false;
 
     protected URLClassLoader jspLoader;
     protected URL baseUrl;
     protected Class<?> servletClass;
 
-    protected boolean isTagFile;
+    protected final boolean isTagFile;
     protected boolean protoTypeMode;
     protected TagInfo tagInfo;
-    protected JarResource tagJarResource;
+    protected final JarResource tagJarResource;
 
     // jspURI _must_ be relative to the context
     public JspCompilationContext(String jspUri,
@@ -102,12 +102,35 @@ public class JspCompilationContext {
                                  JspServletWrapper jsw,
                                  JspRuntimeContext rctxt) {
 
+        this(jspUri, null, options, context, jsw, rctxt, null, false);
+    }
+
+    public JspCompilationContext(String tagfile,
+                                 TagInfo tagInfo,
+                                 Options options,
+                                 ServletContext context,
+                                 JspServletWrapper jsw,
+                                 JspRuntimeContext rctxt,
+                                 JarResource tagJarResource) {
+        this(tagfile, tagInfo, options, context, jsw, rctxt, tagJarResource,
+                true);
+    }
+
+    private JspCompilationContext(String jspUri,
+            TagInfo tagInfo,
+            Options options,
+            ServletContext context,
+            JspServletWrapper jsw,
+            JspRuntimeContext rctxt,
+            JarResource tagJarResource,
+            boolean isTagFile) {
+
         this.jspUri = canonicalURI(jspUri);
         this.options = options;
         this.jsw = jsw;
         this.context = context;
 
-        this.baseURI = jspUri.substring(0, jspUri.lastIndexOf('/') + 1);
+        String baseURI = jspUri.substring(0, jspUri.lastIndexOf('/') + 1);
         // hack fix for resolveRelativeURI
         if (baseURI == null) {
             baseURI = "/";
@@ -119,24 +142,17 @@ public class JspCompilationContext {
         if (baseURI.charAt(baseURI.length() - 1) != '/') {
             baseURI += '/';
         }
+        this.baseURI = baseURI;
 
         this.rctxt = rctxt;
-        this.tagFileJarUrls = new HashMap<String, JarResource>();
+        this.tagFileJarUrls = new HashMap<>();
         this.basePackageName = Constants.JSP_PACKAGE_NAME;
-    }
 
-    public JspCompilationContext(String tagfile,
-                                 TagInfo tagInfo,
-                                 Options options,
-                                 ServletContext context,
-                                 JspServletWrapper jsw,
-                                 JspRuntimeContext rctxt,
-                                 JarResource tagJarResource) {
-        this(tagfile, options, context, jsw, rctxt);
-        this.isTagFile = true;
         this.tagInfo = tagInfo;
         this.tagJarResource = tagJarResource;
+        this.isTagFile = isTagFile;
     }
+
 
     /* ==================== Methods to override ==================== */
 
@@ -576,17 +592,14 @@ public class JspCompilationContext {
     // ==================== Removal ====================
 
     public void incrementRemoved() {
-        if (removed == 0 && rctxt != null) {
+        if (removed == false && rctxt != null) {
             rctxt.removeWrapper(jspUri);
         }
-        removed++;
+        removed = true;
     }
 
     public boolean isRemoved() {
-        if (removed > 0 ) {
-            return true;
-        }
-        return false;
+        return removed;
     }
 
     // ==================== Compile and reload ====================
@@ -640,7 +653,7 @@ public class JspCompilationContext {
             throw new JasperException(Localizer.getMessage("jsp.error.unable.compile"),
                                       ex);
         }
-        removed = 0;
+        removed = false;
         return servletClass;
     }
 
@@ -656,7 +669,7 @@ public class JspCompilationContext {
 
     // ==================== protected methods ====================
 
-    static Object outputDirLock = new Object();
+    static final Object outputDirLock = new Object();
 
     public void checkOutputDir() {
         if (outputDir != null) {

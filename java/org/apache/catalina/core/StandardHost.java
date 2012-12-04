@@ -30,6 +30,7 @@ import javax.management.ObjectName;
 
 import org.apache.catalina.Container;
 import org.apache.catalina.Context;
+import org.apache.catalina.Engine;
 import org.apache.catalina.Host;
 import org.apache.catalina.JmxEnabled;
 import org.apache.catalina.Lifecycle;
@@ -92,6 +93,11 @@ public class StandardHost extends ContainerBase implements Host {
     private String xmlBase = null;
 
     /**
+     * host's default config path
+     */
+    private volatile File hostConfigBase = null;
+
+    /**
      * The auto deploy flag for this Host.
      */
     private boolean autoDeploy = true;
@@ -126,8 +132,9 @@ public class StandardHost extends ContainerBase implements Host {
 
 
     /**
-     * Should XML files be copied to $CATALINA_BASE/conf/<engine>/<host> by
-     * default when a web application is deployed?
+     * Should XML files be copied to
+     * $CATALINA_BASE/conf/&lt;engine&gt;/&lt;host&gt; by default when
+     * a web application is deployed?
      */
     private boolean copyXML = false;
 
@@ -155,31 +162,46 @@ public class StandardHost extends ContainerBase implements Host {
     /**
      * Should we create directories upon startup for appBase and xmlBase
      */
-     private boolean createDirs = true;
+    private boolean createDirs = true;
 
 
-     /**
-      * Track the class loaders for the child web applications so memory leaks
-      * can be detected.
-      */
-     private Map<ClassLoader, String> childClassLoaders =
-         new WeakHashMap<ClassLoader, String>();
+    /**
+     * Track the class loaders for the child web applications so memory leaks
+     * can be detected.
+     */
+    private final Map<ClassLoader, String> childClassLoaders =
+            new WeakHashMap<>();
 
 
-     /**
-      * Any file or directory in {@link #appBase} that this pattern matches will
-      * be ignored by the automatic deployment process (both
-      * {@link #deployOnStartup} and {@link #autoDeploy}).
-      */
-     private Pattern deployIgnore = null;
+    /**
+     * Any file or directory in {@link #appBase} that this pattern matches will
+     * be ignored by the automatic deployment process (both
+     * {@link #deployOnStartup} and {@link #autoDeploy}).
+     */
+    private Pattern deployIgnore = null;
+
+
+    private boolean undeployOldVersions = false;
 
 
     // ------------------------------------------------------------- Properties
 
-     @Override
-     public ExecutorService getStartStopExecutor() {
-         return startStopExecutor;
-     }
+    @Override
+    public boolean getUndeployOldVersions() {
+        return undeployOldVersions;
+    }
+
+
+    @Override
+    public void setUndeployOldVersions(boolean undeployOldVersions) {
+        this.undeployOldVersions = undeployOldVersions;
+    }
+
+
+    @Override
+    public ExecutorService getStartStopExecutor() {
+        return startStopExecutor;
+    }
 
 
     /**
@@ -240,7 +262,8 @@ public class StandardHost extends ContainerBase implements Host {
     /**
      * Return the XML root for this Host.  This can be an absolute
      * pathname, a relative pathname, or a URL.
-     * If null, defaults to ${catalina.base}/conf/ directory
+     * If null, defaults to
+     * ${catalina.base}/conf/&lt;engine name&gt;/&lt;host name&gt; directory
      */
     @Override
     public String getXmlBase() {
@@ -253,7 +276,8 @@ public class StandardHost extends ContainerBase implements Host {
     /**
      * Set the Xml root for this Host.  This can be an absolute
      * pathname, a relative pathname, or a URL.
-     * If null, defaults to ${catalina.base}/conf/ directory
+     * If null, defaults to
+     * ${catalina.base}/conf/&lt;engine name&gt;/&lt;host name&gt; directory
      *
      * @param xmlBase The new XML root
      */
@@ -264,6 +288,40 @@ public class StandardHost extends ContainerBase implements Host {
         this.xmlBase = xmlBase;
         support.firePropertyChange("xmlBase", oldXmlBase, this.xmlBase);
 
+    }
+
+
+    /**
+     * ({@inheritDoc}
+     */
+    @Override
+    public File getConfigBaseFile() {
+        if (hostConfigBase != null) {
+            return hostConfigBase;
+        }
+        String path = null;
+        if (getXmlBase()!=null) {
+            path = getXmlBase();
+        } else {
+            StringBuilder xmlDir = new StringBuilder("conf");
+            Container parent = getParent();
+            if (parent instanceof Engine) {
+                xmlDir.append('/');
+                xmlDir.append(parent.getName());
+            }
+            xmlDir.append('/');
+            xmlDir.append(getName());
+            path = xmlDir.toString();
+        }
+        File file = new File(path);
+        if (!file.isAbsolute())
+            file = new File(getCatalinaBase(), path);
+        try {
+            file = file.getCanonicalFile();
+        } catch (IOException e) {// ignore
+        }
+        this.hostConfigBase = file;
+        return file;
     }
 
 
@@ -670,7 +728,7 @@ public class StandardHost extends ContainerBase implements Host {
 
         System.gc();
 
-        List<String> result = new ArrayList<String>();
+        List<String> result = new ArrayList<>();
 
         for (Map.Entry<ClassLoader, String> entry :
                 childClassLoaders.entrySet()) {

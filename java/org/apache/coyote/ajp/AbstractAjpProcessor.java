@@ -25,6 +25,8 @@ import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import javax.servlet.http.ProtocolHandler;
+
 import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.ActionCode;
 import org.apache.coyote.AsyncContextCallback;
@@ -33,7 +35,6 @@ import org.apache.coyote.OutputBuffer;
 import org.apache.coyote.Request;
 import org.apache.coyote.RequestInfo;
 import org.apache.coyote.Response;
-import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.juli.logging.Log;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.buf.ByteChunk;
@@ -137,7 +138,7 @@ public abstract class AbstractAjpProcessor<S> extends AbstractProcessor<S> {
     /**
      * AJP packet size.
      */
-    protected int packetSize;
+    protected final int packetSize;
 
     /**
      * Header message. Note that this header is merely the one used during the
@@ -145,25 +146,25 @@ public abstract class AbstractAjpProcessor<S> extends AbstractProcessor<S> {
      * request header. It will stay unchanged during the processing of the whole
      * request.
      */
-    protected AjpMessage requestHeaderMessage = null;
+    protected final AjpMessage requestHeaderMessage;
 
 
     /**
      * Message used for response composition.
      */
-    protected AjpMessage responseMessage = null;
+    protected final AjpMessage responseMessage;
 
 
     /**
      * Body message.
      */
-    protected AjpMessage bodyMessage = null;
+    protected final AjpMessage bodyMessage;
 
 
     /**
      * Body message.
      */
-    protected MessageBytes bodyBytes = MessageBytes.newInstance();
+    protected final MessageBytes bodyBytes = MessageBytes.newInstance();
 
 
     /**
@@ -181,13 +182,13 @@ public abstract class AbstractAjpProcessor<S> extends AbstractProcessor<S> {
     /**
      * Temp message bytes used for processing.
      */
-    protected MessageBytes tmpMB = MessageBytes.newInstance();
+    protected final MessageBytes tmpMB = MessageBytes.newInstance();
 
 
     /**
      * Byte chunk for certs.
      */
-    protected MessageBytes certificates = MessageBytes.newInstance();
+    protected final MessageBytes certificates = MessageBytes.newInstance();
 
 
     /**
@@ -455,8 +456,12 @@ public abstract class AbstractAjpProcessor<S> extends AbstractProcessor<S> {
             ((AtomicBoolean) param).set(asyncStateMachine.isAsyncDispatching());
         } else if (actionCode == ActionCode.ASYNC_IS_ASYNC) {
             ((AtomicBoolean) param).set(asyncStateMachine.isAsync());
+        } else if (actionCode == ActionCode.ASYNC_IS_ASYNC_OPERATION) {
+            ((AtomicBoolean) param).set(asyncStateMachine.isAsyncOperation());
         } else if (actionCode == ActionCode.ASYNC_IS_TIMINGOUT) {
             ((AtomicBoolean) param).set(asyncStateMachine.isAsyncTimingOut());
+        } else if (actionCode == ActionCode.ASYNC_IS_ERROR) {
+            ((AtomicBoolean) param).set(asyncStateMachine.isAsyncError());
         } else if (actionCode == ActionCode.UPGRADE) {
             // HTTP connections only. Unsupported for AJP.
             // NOOP
@@ -472,7 +477,7 @@ public abstract class AbstractAjpProcessor<S> extends AbstractProcessor<S> {
         RequestInfo rp = request.getRequestProcessor();
         try {
             rp.setStage(org.apache.coyote.Constants.STAGE_SERVICE);
-            error = !adapter.asyncDispatch(request, response, status);
+            error = !getAdapter().asyncDispatch(request, response, status);
         } catch (InterruptedIOException e) {
             error = true;
         } catch (Throwable t) {
@@ -483,7 +488,7 @@ public abstract class AbstractAjpProcessor<S> extends AbstractProcessor<S> {
             if (error) {
                 // 500 - Internal Server Error
                 response.setStatus(500);
-                adapter.log(request, response, 0);
+                getAdapter().log(request, response, 0);
             }
         }
 
@@ -524,7 +529,7 @@ public abstract class AbstractAjpProcessor<S> extends AbstractProcessor<S> {
 
 
     @Override
-    public SocketState upgradeDispatch() throws IOException {
+    public SocketState upgradeDispatch(SocketStatus status) throws IOException {
         // Should never reach this code but in case we do...
         throw new IOException(
                 sm.getString("ajpprocessor.httpupgrade.notsupported"));
@@ -532,7 +537,7 @@ public abstract class AbstractAjpProcessor<S> extends AbstractProcessor<S> {
 
 
     @Override
-    public UpgradeInbound getUpgradeInbound() {
+    public ProtocolHandler getHttpUpgradeHandler() {
         // Should never reach this code but in case we do...
         throw new IllegalStateException(
                 sm.getString("ajpprocessor.httpupgrade.notsupported"));
@@ -646,6 +651,9 @@ public abstract class AbstractAjpProcessor<S> extends AbstractProcessor<S> {
 
         // Decode headers
         MimeHeaders headers = request.getMimeHeaders();
+
+        // Set this every time in case limit has been changed via JMX
+        headers.setLimit(endpoint.getMaxHeaderCount());
 
         int hCount = requestHeaderMessage.getInt();
         for(int i = 0 ; i < hCount ; i++) {
@@ -763,20 +771,17 @@ public abstract class AbstractAjpProcessor<S> extends AbstractProcessor<S> {
                 break;
 
             case Constants.SC_A_SSL_CERT :
-                request.scheme().setString("https");
                 // SSL certificate extraction is lazy, moved to JkCoyoteHandler
                 requestHeaderMessage.getBytes(certificates);
                 break;
 
             case Constants.SC_A_SSL_CIPHER :
-                request.scheme().setString("https");
                 requestHeaderMessage.getBytes(tmpMB);
                 request.setAttribute(SSLSupport.CIPHER_SUITE_KEY,
                         tmpMB.toString());
                 break;
 
             case Constants.SC_A_SSL_SESSION :
-                request.scheme().setString("https");
                 requestHeaderMessage.getBytes(tmpMB);
                 request.setAttribute(SSLSupport.SESSION_ID_KEY,
                         tmpMB.toString());
@@ -847,7 +852,7 @@ public abstract class AbstractAjpProcessor<S> extends AbstractProcessor<S> {
         parseHost(valueMB);
 
         if (error) {
-            adapter.log(request, response, 0);
+            getAdapter().log(request, response, 0);
         }
     }
 

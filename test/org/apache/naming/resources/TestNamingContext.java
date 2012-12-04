@@ -16,6 +16,7 @@
  */
 package org.apache.naming.resources;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 
@@ -33,6 +34,7 @@ import javax.servlet.http.HttpServletResponse;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.catalina.core.StandardContext;
@@ -342,5 +344,30 @@ public class TestNamingContext extends TomcatBaseTest {
                 throw new ServletException(ne);
             }
         }
+    }
+
+    @Test
+    public void testBug53465() throws Exception {
+        Tomcat tomcat = getTomcatInstance();
+        tomcat.enableNaming();
+
+        File appDir =
+            new File("test/webapp-3.0");
+        // app dir is relative to server home
+        org.apache.catalina.Context ctxt =
+                tomcat.addWebapp(null, "/test", appDir.getAbsolutePath());
+
+        tomcat.start();
+
+        ByteChunk bc = new ByteChunk();
+        int rc = getUrl("http://localhost:" + getPort() +
+                "/test/bug53465.jsp", bc, null);
+
+        Assert.assertEquals(HttpServletResponse.SC_OK, rc);
+        Assert.assertTrue(bc.toString().contains("<p>10</p>"));
+
+        ContextEnvironment ce =
+                ctxt.getNamingResources().findEnvironment("bug53465");
+        Assert.assertEquals("Bug53465MappedName", ce.getProperty("mappedName"));
     }
 }

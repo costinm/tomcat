@@ -26,6 +26,7 @@ import java.io.UnsupportedEncodingException;
 import java.util.Locale;
 
 import javax.servlet.ServletOutputStream;
+import javax.servlet.WriteListener;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpServletResponseWrapper;
@@ -178,11 +179,18 @@ public class Util {
      *
      * taken from org.apache.taglibs.standard.tag.common.core.Util
      */
-    @SuppressWarnings("null") // escapedBuffer cannot be null
     public static String escapeXml(String buffer) {
+        String result = escapeXml(buffer.toCharArray(), buffer.length());
+        if (result == null) {
+            return buffer;
+        } else {
+            return result;
+        }
+    }
+
+    @SuppressWarnings("null") // escapedBuffer cannot be null
+    public static String escapeXml(char[] arrayBuffer, int length) {
         int start = 0;
-        int length = buffer.length();
-        char[] arrayBuffer = buffer.toCharArray();
         StringBuilder escapedBuffer = null;
 
         for (int i = 0; i < length; i++) {
@@ -206,7 +214,7 @@ public class Util {
         }
         // no xml escaping was necessary
         if (start == 0) {
-            return buffer;
+            return null;
         }
         // add rest of unescaped portion
         if (start < length) {
@@ -261,6 +269,27 @@ public class Util {
             public void write(int b) throws IOException {
                 bos.write(b);
             }
+
+            /**
+             * TODO SERVLET 3.1
+             */
+            @Override
+            public boolean canWrite() {
+                // TODO Auto-generated method stub
+                return false;
+            }
+
+            /**
+             * TODO SERVLET 3.1
+             */
+            @Override
+            public void setWriteListener(WriteListener listener) {
+                // TODO Auto-generated method stub
+
+            }
+
+
+
         };
         private boolean isWriterUsed;
         private boolean isStreamUsed;

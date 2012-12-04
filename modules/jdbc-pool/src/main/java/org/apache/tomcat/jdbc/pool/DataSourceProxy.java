@@ -61,12 +61,14 @@ public class DataSourceProxy implements PoolConfiguration {
     }
 
 
+    @SuppressWarnings("unused") // Has to match signature in DataSource
     public boolean isWrapperFor(Class<?> iface) throws SQLException {
         // we are not a wrapper of anything
         return false;
     }
 
 
+    @SuppressWarnings("unused") // Has to match signature in DataSource
     public <T> T unwrap(Class<T> iface) throws SQLException {
         //we can't unwrap anything
         return null;
@@ -145,7 +147,11 @@ public class DataSourceProxy implements PoolConfiguration {
         if (con instanceof XAConnection) {
             return (XAConnection)con;
         } else {
-            try {con.close();} catch (Exception ignore){}
+            try {
+                con.close();
+            } catch (Exception ignore) {
+                // Ignore
+            }
             throw new SQLException("Connection from pool does not implement javax.sql.XAConnection");
         }
     }
@@ -158,7 +164,11 @@ public class DataSourceProxy implements PoolConfiguration {
         if (con instanceof XAConnection) {
             return (XAConnection)con;
         } else {
-            try {con.close();} catch (Exception ignore){}
+            try {
+                con.close();
+            } catch (Exception ignore) {
+                // Ignore
+            }
             throw new SQLException("Connection from pool does not implement javax.sql.XAConnection");
         }
     }
@@ -173,9 +183,11 @@ public class DataSourceProxy implements PoolConfiguration {
 
     /**
      * {@link javax.sql.DataSource#getConnection()}
+     * @param username unused
+     * @param password unused
      */
     public javax.sql.PooledConnection getPooledConnection(String username,
-                                                String password) throws SQLException {
+            String password) throws SQLException {
         return (javax.sql.PooledConnection) getConnection();
     }
 
@@ -201,7 +213,7 @@ public class DataSourceProxy implements PoolConfiguration {
         }
     }
 
-    public int getPoolSize() throws SQLException{
+    public int getPoolSize() {
         final ConnectionPool p = pool;
         if (p == null) return 0;
         else return p.getSize();
@@ -547,6 +559,7 @@ public class DataSourceProxy implements PoolConfiguration {
      * no-op
      * {@link javax.sql.DataSource#getLogWriter}
      */
+    @SuppressWarnings("unused") // Has to match signature in DataSource
     public PrintWriter getLogWriter() throws SQLException {
         return null;
     }
@@ -556,6 +569,7 @@ public class DataSourceProxy implements PoolConfiguration {
      * no-op
      * {@link javax.sql.DataSource#setLogWriter(PrintWriter)}
      */
+    @SuppressWarnings("unused") // Has to match signature in DataSource
     public void setLogWriter(PrintWriter out) throws SQLException {
         // NOOP
     }
@@ -1268,4 +1282,35 @@ public class DataSourceProxy implements PoolConfiguration {
         return getPoolProperties().getLogValidationErrors();
     }
 
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public boolean getPropagateInterruptState() {
+        return getPoolProperties().getPropagateInterruptState();
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void setPropagateInterruptState(boolean propagateInterruptState) {
+        getPoolProperties().setPropagateInterruptState(propagateInterruptState);
+    }
+
+    public void purge()  {
+        try {
+            createPool().purge();
+        }catch (SQLException x) {
+            log.error("Unable to purge pool.",x);
+        }
+    }
+
+    public void purgeOnReturn() {
+        try {
+            createPool().purgeOnReturn();
+        }catch (SQLException x) {
+            log.error("Unable to purge pool.",x);
+        }
+    }
 }

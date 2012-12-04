@@ -59,7 +59,9 @@ public class Bug51582
     Statement st = con.createStatement();
     try {
         st.execute("DROP ALIAS SLEEP");
-    }catch (Exception ignore) {}
+    } catch (Exception ignore) {
+        // Ignore
+    }
     st.execute("CREATE ALIAS SLEEP AS $$\nboolean sleep() {\n        try {\n            Thread.sleep(10000);\n            return true;        } catch (Exception x) {\n            return false;\n        }\n}\n$$;");
     st.close();
     con.close();
@@ -69,7 +71,7 @@ public class Bug51582
       final Connection connection = pool.getConnection();
       final CallableStatement s = connection.prepareCall("{CALL SLEEP()}");
 
-      List<Thread> threadList = new ArrayList<Thread>();
+      List<Thread> threadList = new ArrayList<>();
 
       for (int l = 0; l < 3; l++)
       {

@@ -271,4 +271,17 @@ public abstract class ServletOutputStream extends OutputStream {
         print(d);
         println();
     }
+
+    /**
+     * If this returns false, it will cause a callback to
+     * {@link WriteListener#onWritePossible()} when the buffer has emptied
+     * TODO SERVLET 3.1
+     * @return  TODO
+     */
+    public abstract boolean canWrite();
+
+    /**
+     * TODO SERVLET 3.1
+     */
+    public abstract void setWriteListener(javax.servlet.WriteListener listener);
 }

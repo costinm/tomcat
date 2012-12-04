@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.lang.reflect.Method;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -35,59 +36,62 @@ import org.apache.juli.logging.LogFactory;
  *
  */
 public class PoolProperties implements PoolConfiguration, Cloneable, Serializable {
+
+    private static final long serialVersionUID = -8519283440854213745L;
     private static final Log log = LogFactory.getLog(PoolProperties.class);
 
     public static final int DEFAULT_MAX_ACTIVE = 100;
 
     protected static AtomicInteger poolCounter = new AtomicInteger(0);
-    protected Properties dbProperties = new Properties();
-    protected String url = null;
-    protected String driverClassName = null;
-    protected Boolean defaultAutoCommit = null;
-    protected Boolean defaultReadOnly = null;
-    protected int defaultTransactionIsolation = DataSourceFactory.UNKNOWN_TRANSACTIONISOLATION;
-    protected String defaultCatalog = null;
-    protected String connectionProperties;
-    protected int initialSize = 10;
-    protected int maxActive = DEFAULT_MAX_ACTIVE;
-    protected int maxIdle = maxActive;
-    protected int minIdle = initialSize;
-    protected int maxWait = 30000;
-    protected String validationQuery;
-    protected String validatorClassName;
-    protected Validator validator;
-    protected boolean testOnBorrow = false;
-    protected boolean testOnReturn = false;
-    protected boolean testWhileIdle = false;
-    protected int timeBetweenEvictionRunsMillis = 5000;
-    protected int numTestsPerEvictionRun;
-    protected int minEvictableIdleTimeMillis = 60000;
-    protected final boolean accessToUnderlyingConnectionAllowed = true;
-    protected boolean removeAbandoned = false;
-    protected int removeAbandonedTimeout = 60;
-    protected boolean logAbandoned = false;
-    protected String name = "Tomcat Connection Pool["+(poolCounter.addAndGet(1))+"-"+System.identityHashCode(PoolProperties.class)+"]";
-    protected String password;
-    protected String username;
-    protected long validationInterval = 30000;
-    protected boolean jmxEnabled = true;
-    protected String initSQL;
-    protected boolean testOnConnect =false;
-    protected String jdbcInterceptors=null;
-    protected boolean fairQueue = true;
-    protected boolean useEquals = true;
-    protected int abandonWhenPercentageFull = 0;
-    protected long maxAge = 0;
-    protected boolean useLock = false;
-    protected InterceptorDefinition[] interceptors = null;
-    protected int suspectTimeout = 0;
-    protected Object dataSource = null;
-    protected String dataSourceJNDI = null;
-    protected boolean alternateUsernameAllowed = false;
-    protected boolean commitOnReturn = false;
-    protected boolean rollbackOnReturn = false;
-    protected boolean useDisposableConnectionFacade = false;
-    protected boolean logValidationErrors = false;
+    private volatile Properties dbProperties = new Properties();
+    private volatile String url = null;
+    private volatile String driverClassName = null;
+    private volatile Boolean defaultAutoCommit = null;
+    private volatile Boolean defaultReadOnly = null;
+    private volatile int defaultTransactionIsolation = DataSourceFactory.UNKNOWN_TRANSACTIONISOLATION;
+    private volatile String defaultCatalog = null;
+    private volatile String connectionProperties;
+    private volatile int initialSize = 10;
+    private volatile int maxActive = DEFAULT_MAX_ACTIVE;
+    private volatile int maxIdle = maxActive;
+    private volatile int minIdle = initialSize;
+    private volatile int maxWait = 30000;
+    private volatile String validationQuery;
+    private volatile String validatorClassName;
+    private volatile Validator validator;
+    private volatile boolean testOnBorrow = false;
+    private volatile boolean testOnReturn = false;
+    private volatile boolean testWhileIdle = false;
+    private volatile int timeBetweenEvictionRunsMillis = 5000;
+    private volatile int numTestsPerEvictionRun;
+    private volatile int minEvictableIdleTimeMillis = 60000;
+    private volatile boolean accessToUnderlyingConnectionAllowed = true;
+    private volatile boolean removeAbandoned = false;
+    private volatile int removeAbandonedTimeout = 60;
+    private volatile boolean logAbandoned = false;
+    private volatile String name = "Tomcat Connection Pool["+(poolCounter.addAndGet(1))+"-"+System.identityHashCode(PoolProperties.class)+"]";
+    private volatile String password;
+    private volatile String username;
+    private volatile long validationInterval = 30000;
+    private volatile boolean jmxEnabled = true;
+    private volatile String initSQL;
+    private volatile boolean testOnConnect =false;
+    private volatile String jdbcInterceptors=null;
+    private volatile boolean fairQueue = true;
+    private volatile boolean useEquals = true;
+    private volatile int abandonWhenPercentageFull = 0;
+    private volatile long maxAge = 0;
+    private volatile boolean useLock = false;
+    private volatile InterceptorDefinition[] interceptors = null;
+    private volatile int suspectTimeout = 0;
+    private volatile Object dataSource = null;
+    private volatile String dataSourceJNDI = null;
+    private volatile boolean alternateUsernameAllowed = false;
+    private volatile boolean commitOnReturn = false;
+    private volatile boolean rollbackOnReturn = false;
+    private volatile boolean useDisposableConnectionFacade = true;
+    private volatile boolean logValidationErrors = false;
+    private volatile boolean propagateInterruptState = false;
 
 
     /**
@@ -802,7 +806,7 @@ public class PoolProperties implements PoolConfiguration, Cloneable, Serializabl
                 final String[] prefix = new String[] {"get","is"};
                 for (int j=0; j<prefix.length; j++) {
 
-                    String name = prefix[j] + fields[i].substring(0, 1).toUpperCase() +
+                    String name = prefix[j] + fields[i].substring(0, 1).toUpperCase(Locale.US) +
                                   fields[i].substring(1);
                     Method m = null;
                     try {
@@ -898,9 +902,10 @@ public class PoolProperties implements PoolConfiguration, Cloneable, Serializabl
     }
 
 
-    public static class InterceptorDefinition {
+    public static class InterceptorDefinition implements Serializable {
+        private static final long serialVersionUID = 1L;
         protected String className;
-        protected Map<String,InterceptorProperty> properties = new HashMap<String,InterceptorProperty>();
+        protected Map<String,InterceptorProperty> properties = new HashMap<>();
         protected volatile Class<?> clazz = null;
         public InterceptorDefinition(String className) {
             this.className = className;
@@ -927,6 +932,7 @@ public class PoolProperties implements PoolConfiguration, Cloneable, Serializabl
             return properties;
         }
 
+        @SuppressWarnings("unchecked")
         public Class<? extends JdbcInterceptor> getInterceptorClass() throws ClassNotFoundException {
             if (clazz==null) {
                 if (getClassName().indexOf(".")<0) {
@@ -945,7 +951,8 @@ public class PoolProperties implements PoolConfiguration, Cloneable, Serializabl
         }
     }
 
-    public static class InterceptorProperty {
+    public static class InterceptorProperty implements Serializable {
+        private static final long serialVersionUID = 1L;
         String name;
         String value;
         public InterceptorProperty(String name, String value) {
@@ -1227,6 +1234,22 @@ public class PoolProperties implements PoolConfiguration, Cloneable, Serializabl
     @Override
     public boolean getLogValidationErrors() {
         return this.logValidationErrors;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public boolean getPropagateInterruptState() {
+        return propagateInterruptState;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public void setPropagateInterruptState(boolean propagateInterruptState) {
+        this.propagateInterruptState = propagateInterruptState;
     }
 
     @Override

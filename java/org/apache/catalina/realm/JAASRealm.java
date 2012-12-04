@@ -149,13 +149,13 @@ public class JAASRealm
     /**
      * The list of role class names, split out for easy processing.
      */
-    protected List<String> roleClasses = new ArrayList<String>();
+    protected final List<String> roleClasses = new ArrayList<>();
 
 
     /**
      * The set of user class names, split out for easy processing.
      */
-    protected List<String> userClasses = new ArrayList<String>();
+    protected final List<String> userClasses = new ArrayList<>();
 
 
     /**
@@ -171,9 +171,7 @@ public class JAASRealm
 
     /**
      * setter for the <code>appName</code> member variable
-     * @deprecated JAAS should use the <code>Engine</code> (domain) name and webpp/host overrides
      */
-    @Deprecated
     public void setAppName(String name) {
         appName = name;
     }
@@ -491,7 +489,7 @@ public class JAASRealm
             LoginContext loginContext) {
         // Prepare to scan the Principals for this Subject
 
-        List<String> roles = new ArrayList<String>();
+        List<String> roles = new ArrayList<>();
         Principal userPrincipal = null;
 
         // Scan the Principals for this Subject

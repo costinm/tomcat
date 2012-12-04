@@ -19,9 +19,9 @@ package org.apache.catalina.startup;
 import java.beans.PropertyChangeListener;
 import java.io.File;
 import java.net.URL;
+import java.util.Locale;
 import java.util.Set;
 
-import javax.naming.directory.DirContext;
 import javax.servlet.ServletContainerInitializer;
 import javax.servlet.ServletContext;
 import javax.servlet.ServletRegistration;
@@ -43,6 +43,7 @@ import org.apache.catalina.Manager;
 import org.apache.catalina.Pipeline;
 import org.apache.catalina.Realm;
 import org.apache.catalina.Valve;
+import org.apache.catalina.WebResourceRoot;
 import org.apache.catalina.Wrapper;
 import org.apache.catalina.connector.Request;
 import org.apache.catalina.connector.Response;
@@ -53,12 +54,10 @@ import org.apache.catalina.deploy.FilterMap;
 import org.apache.catalina.deploy.LoginConfig;
 import org.apache.catalina.deploy.NamingResources;
 import org.apache.catalina.deploy.SecurityConstraint;
-import org.apache.catalina.util.CharsetMapper;
 import org.apache.catalina.util.ContextName;
 import org.apache.catalina.util.LifecycleMBeanBase;
 import org.apache.juli.logging.Log;
 import org.apache.tomcat.JarScanner;
-import org.apache.tomcat.util.http.mapper.Mapper;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
@@ -223,6 +222,10 @@ public class FailedContext extends LifecycleMBeanBase implements Context {
     @Override
     public void removeChild(Container child) { /* NO-OP */ }
 
+    @Override
+    public String toString() {
+        return getName();
+    }
 
     // -------------------------------------------- All NO-OPs beyond this point
     @Override
@@ -262,9 +265,9 @@ public class FailedContext extends LifecycleMBeanBase implements Context {
     public void setRealm(Realm realm) { /* NO-OP */ }
 
     @Override
-    public DirContext getResources() { return null; }
+    public WebResourceRoot getResources() { return null; }
     @Override
-    public void setResources(DirContext resources) { /* NO-OP */ }
+    public void setResources(WebResourceRoot resources) { /* NO-OP */ }
 
     @Override
     public void backgroundProcess() { /* NO-OP */ }
@@ -313,12 +316,7 @@ public class FailedContext extends LifecycleMBeanBase implements Context {
     public void setApplicationLifecycleListeners(Object[] listeners) { /* NO-OP */ }
 
     @Override
-    public boolean getAvailable() { return false; }
-
-    @Override
-    public CharsetMapper getCharsetMapper() { return null; }
-    @Override
-    public void setCharsetMapper(CharsetMapper mapper) { /* NO-OP */ }
+    public String getCharset(Locale locale) { return null; }
 
     @Override
     public boolean getConfigured() { return false; }
@@ -388,9 +386,6 @@ public class FailedContext extends LifecycleMBeanBase implements Context {
     public LoginConfig getLoginConfig() { return null; }
     @Override
     public void setLoginConfig(LoginConfig config) { /* NO-OP */ }
-
-    @Override
-    public Mapper getMapper() { return null; }
 
     @Override
     public NamingResources getNamingResources() { return null; }
@@ -635,9 +630,6 @@ public class FailedContext extends LifecycleMBeanBase implements Context {
     public JspConfigDescriptor getJspConfigDescriptor() { return null; }
 
     @Override
-    public void addResourceJarUrl(URL url) { /* NO-OP */ }
-
-    @Override
     public void addServletContainerInitializer(ServletContainerInitializer sci,
             Set<Class<?>> classes) { /* NO-OP */ }
 
@@ -682,4 +674,11 @@ public class FailedContext extends LifecycleMBeanBase implements Context {
 
     @Override
     public File getCatalinaBase() { return null; }
+
+    @Override
+    public void setAddWebinfClassesResources(boolean addWebinfClassesResources) {
+        // NO-OP
+    }
+    @Override
+    public boolean getAddWebinfClassesResources() { return false; }
 }

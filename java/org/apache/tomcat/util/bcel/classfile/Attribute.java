@@ -18,11 +18,8 @@
 package org.apache.tomcat.util.bcel.classfile;
 
 import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.Serializable;
-import java.util.HashMap;
-import java.util.Map;
 
 import org.apache.tomcat.util.bcel.Constants;
 
@@ -56,34 +53,15 @@ public abstract class Attribute implements Cloneable, Serializable
 
     protected int length; // Content length of attribute field
 
-    protected byte tag; // Tag to distiguish subclasses
-
     protected ConstantPool constant_pool;
 
-    protected Attribute(byte tag, int name_index, int length,
+    protected Attribute(int name_index, int length,
             ConstantPool constant_pool)
     {
-        this.tag = tag;
         this.name_index = name_index;
         this.length = length;
         this.constant_pool = constant_pool;
     }
-
-    /**
-     * Dump attribute to file stream in binary format.
-     *
-     * @param file
-     *            Output file stream
-     * @throws IOException
-     */
-    public void dump(DataOutputStream file) throws IOException
-    {
-        file.writeShort(name_index);
-        file.writeInt(length);
-    }
-
-    private static final Map<String,AttributeReader> readers =
-            new HashMap<String,AttributeReader>();
 
     /*
      * Class method reads one attribute from the input data stream. This method
@@ -125,12 +103,6 @@ public abstract class Attribute implements Cloneable, Serializable
         switch (tag)
         {
         case Constants.ATTR_UNKNOWN:
-            AttributeReader r = readers.get(name);
-            if (r != null)
-            {
-                return r.createAttribute(name_index, length, file,
-                        constant_pool);
-            }
             return new Unknown(name_index, length, file, constant_pool);
         case Constants.ATTR_CONSTANT_VALUE:
             return new ConstantValue(name_index, length, file, constant_pool);
@@ -196,16 +168,6 @@ public abstract class Attribute implements Cloneable, Serializable
 
 
     /**
-     * @return Tag of attribute, i.e., its type. Value may not be altered, thus
-     *         there is no setTag() method.
-     */
-    public final byte getTag()
-    {
-        return tag;
-    }
-
-
-    /**
      * Use copy() if you want to have a deep copy(), i.e., with all references
      * copied correctly.
      *
@@ -224,19 +186,5 @@ public abstract class Attribute implements Cloneable, Serializable
             e.printStackTrace(); // Never occurs
         }
         return o;
-    }
-
-    /**
-     * @return deep copy of this attribute
-     */
-    public abstract Attribute copy(ConstantPool _constant_pool);
-
-    /**
-     * @return attribute name.
-     */
-    @Override
-    public String toString()
-    {
-        return Constants.ATTRIBUTE_NAMES[tag];
     }
 }

@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.regex.Pattern;
 
 import org.apache.catalina.Container;
+import org.apache.catalina.Context;
 import org.apache.catalina.Loader;
 import org.apache.catalina.ha.CatalinaCluster;
 import org.apache.catalina.ha.ClusterManager;
@@ -129,7 +130,9 @@ public abstract class ClusterManagerBase extends ManagerBase
     public static ClassLoader[] getClassLoaders(Container container) {
         Loader loader = null;
         ClassLoader classLoader = null;
-        if (container != null) loader = container.getLoader();
+        if (container instanceof Context) {
+            loader = ((Context) container).getLoader();
+        }
         if (loader != null) classLoader = loader.getClassLoader();
         else classLoader = Thread.currentThread().getContextClassLoader();
         if ( classLoader == Thread.currentThread().getContextClassLoader() ) {
@@ -141,7 +144,7 @@ public abstract class ClusterManagerBase extends ManagerBase
 
 
     public ClassLoader[] getClassLoaders() {
-        return getClassLoaders(container);
+        return getClassLoaders(getContext());
     }
 
     /**
@@ -189,6 +192,9 @@ public abstract class ClusterManagerBase extends ManagerBase
         copy.setProcessExpiresFrequency(getProcessExpiresFrequency());
         copy.setNotifyListenersOnReplication(isNotifyListenersOnReplication());
         copy.setSessionAttributeFilter(getSessionAttributeFilter());
+        copy.setSecureRandomClass(getSecureRandomClass());
+        copy.setSecureRandomProvider(getSecureRandomProvider());
+        copy.setSecureRandomAlgorithm(getSecureRandomAlgorithm());
     }
 
 }

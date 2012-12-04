@@ -32,6 +32,7 @@ import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
+import org.apache.tomcat.util.net.jsse.JSSESocketFactory;
 
 
 /**
@@ -102,6 +103,16 @@ public class JIoEndpoint extends AbstractEndpoint {
         }
     }
 
+
+    @Override
+    public String[] getCiphersUsed() {
+        if (serverSocketFactory instanceof JSSESocketFactory) {
+            return ((JSSESocketFactory) serverSocketFactory).getEnabledCiphers();
+        }
+        return new String[0];
+    }
+
+
     /*
      * Optional feature support.
      */
@@ -128,7 +139,7 @@ public class JIoEndpoint extends AbstractEndpoint {
         public SocketState process(SocketWrapper<Socket> socket,
                 SocketStatus status);
         public SSLImplementation getSslImplementation();
-        public void beforeHandshake(SocketWrapper<Socket> socket);        
+        public void beforeHandshake(SocketWrapper<Socket> socket);
     }
 
 
@@ -216,6 +227,7 @@ public class JIoEndpoint extends AbstractEndpoint {
                         // socket
                         socket = serverSocketFactory.acceptSocket(serverSocket);
                     } catch (IOException ioe) {
+                        countDownConnection();
                         // Introduce delay if necessary
                         errorDelay = handleExceptionWithDelay(errorDelay);
                         // re-throw
@@ -228,10 +240,12 @@ public class JIoEndpoint extends AbstractEndpoint {
                     if (running && !paused && setSocketOptions(socket)) {
                         // Hand this socket off to an appropriate processor
                         if (!processSocket(socket)) {
+                            countDownConnection();
                             // Close socket right away
                             closeSocket(socket);
                         }
                     } else {
+                        countDownConnection();
                         // Close socket right away
                         closeSocket(socket);
                     }
@@ -305,7 +319,7 @@ public class JIoEndpoint extends AbstractEndpoint {
 
                     if ((state != SocketState.CLOSED)) {
                         if (status == null) {
-                            state = handler.process(socket, SocketStatus.OPEN);
+                            state = handler.process(socket, SocketStatus.OPEN_READ);
                         } else {
                             state = handler.process(socket,status);
                         }
@@ -334,7 +348,17 @@ public class JIoEndpoint extends AbstractEndpoint {
                 } finally {
                     if (launch) {
                         try {
-                            getExecutor().execute(new SocketProcessor(socket, SocketStatus.OPEN));
+                            getExecutor().execute(new SocketProcessor(socket, SocketStatus.OPEN_READ));
+                        } catch (RejectedExecutionException x) {
+                            log.warn("Socket reprocessing request was rejected for:"+socket,x);
+                            try {
+                                //unable to handle connection at this time
+                                handler.process(socket, SocketStatus.DISCONNECT);
+                            } finally {
+                                countDownConnection();
+                            }
+
+
                         } catch (NullPointerException npe) {
                             if (running) {
                                 log.error(sm.getString("endpoint.launch.fail"),
@@ -363,7 +387,7 @@ public class JIoEndpoint extends AbstractEndpoint {
         // Initialize maxConnections
         if (getMaxConnections() == 0) {
             // User hasn't set a value - use the default
-            setMaxConnections(getMaxThreads());
+            setMaxConnections(getMaxThreadsExecutor(true));
         }
 
         if (serverSocketFactory == null) {
@@ -504,7 +528,7 @@ public class JIoEndpoint extends AbstractEndpoint {
     protected boolean processSocket(Socket socket) {
         // Process the request from this socket
         try {
-            SocketWrapper<Socket> wrapper = new SocketWrapper<Socket>(socket);
+            SocketWrapper<Socket> wrapper = new SocketWrapper<>(socket);
             wrapper.setKeepAliveLeft(getMaxKeepAliveRequests());
             // During shutdown, executor may be null - avoid NPE
             if (!running) {
@@ -560,6 +584,7 @@ public class JIoEndpoint extends AbstractEndpoint {
                             return false;
                         }
                         getExecutor().execute(proc);
+                        //TODO gotta catch RejectedExecutionException and properly handle it
                     } finally {
                         if (Constants.IS_SECURITY_ENABLED) {
                             PrivilegedAction<Void> pa = new PrivilegedSetTccl(loader);
@@ -581,7 +606,7 @@ public class JIoEndpoint extends AbstractEndpoint {
     }
 
     protected ConcurrentLinkedQueue<SocketWrapper<Socket>> waitingRequests =
-        new ConcurrentLinkedQueue<SocketWrapper<Socket>>();
+            new ConcurrentLinkedQueue<>();
 
     @Override
     protected Log getLog() {

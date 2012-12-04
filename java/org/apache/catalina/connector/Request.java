@@ -59,6 +59,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
 import javax.servlet.http.Part;
+import javax.servlet.http.ProtocolHandler;
 
 import org.apache.catalina.Context;
 import org.apache.catalina.Globals;
@@ -71,10 +72,10 @@ import org.apache.catalina.Wrapper;
 import org.apache.catalina.core.ApplicationPart;
 import org.apache.catalina.core.ApplicationSessionCookieConfig;
 import org.apache.catalina.core.AsyncContextImpl;
+import org.apache.catalina.mapper.MappingData;
 import org.apache.catalina.util.ParameterMap;
 import org.apache.catalina.util.StringParser;
 import org.apache.coyote.ActionCode;
-import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.ExceptionUtils;
@@ -91,7 +92,6 @@ import org.apache.tomcat.util.http.fileupload.FileUploadBase.InvalidContentTypeE
 import org.apache.tomcat.util.http.fileupload.FileUploadException;
 import org.apache.tomcat.util.http.fileupload.disk.DiskFileItemFactory;
 import org.apache.tomcat.util.http.fileupload.servlet.ServletFileUpload;
-import org.apache.tomcat.util.http.mapper.MappingData;
 import org.apache.tomcat.util.res.StringManager;
 
 
@@ -171,8 +171,8 @@ public class Request
      * Notice that because SimpleDateFormat is not thread-safe, we can't
      * declare formats[] as a static variable.
      */
-    protected SimpleDateFormat formats[] = {
-        new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US),
+    protected final SimpleDateFormat formats[] = {
+        new SimpleDateFormat(FastHttpDateFormat.RFC1123_DATE, Locale.US),
         new SimpleDateFormat("EEEEEE, dd-MMM-yy HH:mm:ss zzz", Locale.US),
         new SimpleDateFormat("EEE MMMM d HH:mm:ss yyyy", Locale.US)
     };
@@ -181,14 +181,13 @@ public class Request
     /**
      * The default Locale if none are specified.
      */
-    protected static Locale defaultLocale = Locale.getDefault();
+    protected static final Locale defaultLocale = Locale.getDefault();
 
 
     /**
      * The attributes associated with this Request, keyed by attribute name.
      */
-    protected HashMap<String, Object> attributes =
-        new HashMap<String, Object>();
+    protected final HashMap<String, Object> attributes = new HashMap<>();
 
 
     /**
@@ -201,21 +200,20 @@ public class Request
     /**
      * List of read only attributes for this Request.
      */
-    private final HashMap<String,Object> readOnlyAttributes =
-        new HashMap<String,Object>();
+    private final HashMap<String,Object> readOnlyAttributes = new HashMap<>();
 
 
     /**
      * The preferred Locales associated with this Request.
      */
-    protected ArrayList<Locale> locales = new ArrayList<Locale>();
+    protected final ArrayList<Locale> locales = new ArrayList<>();
 
 
     /**
      * Internal notes associated with this request by Catalina components
      * and event listeners.
      */
-    private transient HashMap<String, Object> notes = new HashMap<String, Object>();
+    private final transient HashMap<String, Object> notes = new HashMap<>();
 
 
     /**
@@ -245,14 +243,14 @@ public class Request
     /**
      * The associated input buffer.
      */
-    protected InputBuffer inputBuffer = new InputBuffer();
+    protected final InputBuffer inputBuffer = new InputBuffer();
 
 
     /**
      * ServletInputStream.
      */
     protected CoyoteInputStream inputStream =
-        new CoyoteInputStream(inputBuffer);
+            new CoyoteInputStream(inputBuffer);
 
 
     /**
@@ -306,14 +304,14 @@ public class Request
     /**
      * Post data buffer.
      */
-    protected static int CACHED_POST_LEN = 8192;
+    protected static final int CACHED_POST_LEN = 8192;
     protected byte[] postData = null;
 
 
     /**
      * Hash map used in the getParametersMap method.
      */
-    protected ParameterMap<String, String[]> parameterMap = new ParameterMap<String, String[]>();
+    protected ParameterMap<String, String[]> parameterMap = new ParameterMap<>();
 
 
     /**
@@ -420,7 +418,7 @@ public class Request
     /**
      * Path parameters
      */
-    protected Map<String,String> pathParameters = new HashMap<String, String>();
+    protected final Map<String,String> pathParameters = new HashMap<>();
 
     // --------------------------------------------------------- Public Methods
 
@@ -462,7 +460,16 @@ public class Request
         userPrincipal = null;
         subject = null;
         parametersParsed = false;
-        parts = null;
+        if (parts != null) {
+            for (Part part: parts) {
+                try {
+                    part.delete();
+                } catch (IOException ignored) {
+                    // ApplicationPart.delete() never throws an IOEx
+                }
+            }
+            parts = null;
+        }
         partsParseException = null;
         cookiesParsed = false;
         locales.clear();
@@ -494,7 +501,7 @@ public class Request
         requestedSessionURL = false;
 
         if (Globals.IS_SECURITY_ENABLED || Connector.RECYCLE_FACADES) {
-            parameterMap = new ParameterMap<String, String[]>();
+            parameterMap = new ParameterMap<>();
         } else {
             parameterMap.setLocked(false);
             parameterMap.clear();
@@ -620,14 +627,14 @@ public class Request
      * Return the Host within which this Request is being processed.
      */
     public Host getHost() {
-        return ((Host) mappingData.host);
+        return mappingData.host;
     }
 
 
     /**
      * Mapping data.
      */
-    protected MappingData mappingData = new MappingData();
+    protected final MappingData mappingData = new MappingData();
 
     /**
      * Return mapping data.
@@ -854,6 +861,7 @@ public class Request
     // ------------------------------------------------- ServletRequest Methods
 
 
+
     /**
      * Return the specified request attribute if it exists; otherwise, return
      * <code>null</code>.
@@ -909,6 +917,11 @@ public class Request
     }
 
 
+    @Override
+    public long getContentLengthLong() {
+        return coyoteRequest.getContentLengthLong();
+    }
+
     /**
      * Test if a given name is one of the special Servlet-spec SSL attributes.
      */
@@ -955,7 +968,7 @@ public class Request
         }
         // Take a copy to prevent ConncurrentModificationExceptions if used to
         // remove attributes
-        Set<String> names = new HashSet<String>();
+        Set<String> names = new HashSet<>();
         names.addAll(attributes.keySet());
         return Collections.enumeration(names);
     }
@@ -1051,7 +1064,7 @@ public class Request
         if (locales.size() > 0) {
             return Collections.enumeration(locales);
         }
-        ArrayList<Locale> results = new ArrayList<Locale>();
+        ArrayList<Locale> results = new ArrayList<>();
         results.add(defaultLocale);
         return Collections.enumeration(results);
 
@@ -1637,6 +1650,16 @@ public class Request
         return result.get();
     }
 
+    public boolean isAsyncOperation() {
+        if (asyncContext == null) {
+            return false;
+        }
+
+        AtomicBoolean result = new AtomicBoolean(false);
+        coyoteRequest.action(ActionCode.ASYNC_IS_ASYNC_OPERATION, result);
+        return result.get();
+    }
+
     @Override
     public boolean isAsyncSupported() {
         if (this.asyncSupported == null) {
@@ -1837,6 +1860,20 @@ public class Request
 
     // --------------------------------------------- HttpServletRequest Methods
 
+    /**
+     * {@inheritDoc}
+     *
+     * @since Servlet 3.1
+     */
+    @Override
+    public void upgrade(ProtocolHandler handler) throws IOException {
+        coyoteRequest.action(ActionCode.UPGRADE, handler);
+
+        // Output required by RFC2616. Protocol specific headers should have
+        // already been set.
+        response.setStatus(HttpServletResponse.SC_SWITCHING_PROTOCOLS);
+        response.flushBuffer();
+    }
 
     /**
      * Return the authentication type used for this Request.
@@ -1845,7 +1882,6 @@ public class Request
     public String getAuthType() {
         return authType;
     }
-
 
     /**
      * Return the portion of the request URI used to select the Context
@@ -2202,7 +2238,7 @@ public class Request
                 return false;
             } else {
                 for (int i = (getMappingData().contexts.length); i > 0; i--) {
-                    Context ctxt = (Context) getMappingData().contexts[i - 1];
+                    Context ctxt = getMappingData().contexts[i - 1];
                     try {
                         if (ctxt.getManager().findSession(requestedSessionId) !=
                                 null) {
@@ -2468,6 +2504,7 @@ public class Request
         }
 
         Parameters parameters = coyoteRequest.getParameters();
+        parameters.setLimit(getConnector().getMaxParameterCount());
 
         boolean success = false;
         try {
@@ -2510,7 +2547,7 @@ public class Request
             upload.setFileSizeMax(mce.getMaxFileSize());
             upload.setSizeMax(mce.getMaxRequestSize());
 
-            parts = new ArrayList<Part>();
+            parts = new ArrayList<>();
             try {
                 List<FileItem> items = upload.parseRequest(this);
                 int maxPostSize = getConnector().getMaxPostSize();
@@ -2607,22 +2644,7 @@ public class Request
     }
 
 
-    // --------------------------------------------------------- Upgrade Methods
-
-    public void doUpgrade(UpgradeInbound inbound)
-            throws IOException {
-
-        coyoteRequest.action(ActionCode.UPGRADE, inbound);
-
-        // Output required by RFC2616. Protocol specific headers should have
-        // already been set.
-        response.setStatus(HttpServletResponse.SC_SWITCHING_PROTOCOLS);
-        response.flushBuffer();
-    }
-
-
     // ------------------------------------------------------ Protected Methods
-
 
     protected Session doGetSession(boolean create) {
 
@@ -2985,7 +3007,7 @@ public class Request
         // a local collection, sorted by the quality value (so we can
         // add Locales in descending order).  The values will be ArrayLists
         // containing the corresponding Locales to be added
-        TreeMap<Double, ArrayList<Locale>> locales = new TreeMap<Double, ArrayList<Locale>>();
+        TreeMap<Double, ArrayList<Locale>> locales = new TreeMap<>();
 
         // Preprocess the value to remove all whitespace
         int white = value.indexOf(' ');
@@ -3076,7 +3098,7 @@ public class Request
             Double key = new Double(-quality);  // Reverse the order
             ArrayList<Locale> values = locales.get(key);
             if (values == null) {
-                values = new ArrayList<Locale>();
+                values = new ArrayList<>();
                 locales.put(key, values);
             }
             values.add(locale);
@@ -3117,7 +3139,7 @@ public class Request
     }
 
     private static final Map<String, SpecialAttributeAdapter> specialAttributes
-        = new HashMap<String, SpecialAttributeAdapter>();
+        = new HashMap<>();
 
     static {
         specialAttributes.put(Globals.DISPATCHER_TYPE_ATTR,
@@ -3188,6 +3210,45 @@ public class Request
                         return null;
                     }
 
+                    @Override
+                    public void set(Request request, String name, Object value) {
+                        // NO-OP
+                    }
+                });
+        specialAttributes.put(Globals.COMET_SUPPORTED_ATTR,
+                new SpecialAttributeAdapter() {
+                    @Override
+                    public Object get(Request request, String name) {
+                        return Boolean.valueOf(
+                                request.getConnector().getProtocolHandler(
+                                        ).isCometSupported());
+                    }
+                    @Override
+                    public void set(Request request, String name, Object value) {
+                        // NO-OP
+                    }
+                });
+        specialAttributes.put(Globals.COMET_TIMEOUT_SUPPORTED_ATTR,
+                new SpecialAttributeAdapter() {
+                    @Override
+                    public Object get(Request request, String name) {
+                        return Boolean.valueOf(
+                                request.getConnector().getProtocolHandler(
+                                        ).isCometTimeoutSupported());
+                    }
+                    @Override
+                    public void set(Request request, String name, Object value) {
+                        // NO-OP
+                    }
+                });
+        specialAttributes.put(Globals.SENDFILE_SUPPORTED_ATTR,
+                new SpecialAttributeAdapter() {
+                    @Override
+                    public Object get(Request request, String name) {
+                        return Boolean.valueOf(
+                                request.getConnector().getProtocolHandler(
+                                        ).isSendfileSupported());
+                    }
                     @Override
                     public void set(Request request, String name, Object value) {
                         // NO-OP

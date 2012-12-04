@@ -38,8 +38,7 @@ public class MbeansDescriptorsDigesterSource extends ModelerSource
             LogFactory.getLog(MbeansDescriptorsDigesterSource.class);
 
     private Registry registry;
-    private String type;
-    private final List<ObjectName> mbeans = new ArrayList<ObjectName>();
+    private final List<ObjectName> mbeans = new ArrayList<>();
     private static volatile Digester digester = null;
 
     private static Digester createDigester() {
@@ -137,14 +136,6 @@ public class MbeansDescriptorsDigesterSource extends ModelerSource
     }
 
 
-    /** Used if a single component is loaded
-     *
-     * @param type
-     */
-    public void setType( String type ) {
-       this.type=type;
-    }
-
     public void setSource( Object source ) {
         this.source=source;
     }
@@ -153,7 +144,6 @@ public class MbeansDescriptorsDigesterSource extends ModelerSource
     public List<ObjectName> loadDescriptors( Registry registry, String type,
             Object source) throws Exception {
         setRegistry(registry);
-        setType(type);
         setSource(source);
         execute();
         return mbeans;
@@ -169,7 +159,7 @@ public class MbeansDescriptorsDigesterSource extends ModelerSource
         if (digester == null) {
             digester = createDigester();
         }
-        ArrayList<ManagedBean> loadedMbeans = new ArrayList<ManagedBean>();
+        ArrayList<ManagedBean> loadedMbeans = new ArrayList<>();
 
         synchronized (digester) {
 

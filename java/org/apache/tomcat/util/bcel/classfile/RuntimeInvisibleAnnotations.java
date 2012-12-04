@@ -18,10 +18,7 @@
 package org.apache.tomcat.util.bcel.classfile;
 
 import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
-
-import org.apache.tomcat.util.bcel.Constants;
 
 /**
  * represents an annotation that is represented in the class file but is not
@@ -49,24 +46,6 @@ public class RuntimeInvisibleAnnotations extends Annotations
                                 DataInputStream file, ConstantPool constant_pool)
                                 throws IOException
     {
-        super(Constants.ATTR_RUNTIMEIN_VISIBLE_ANNOTATIONS, name_index, length,
-                file, constant_pool);
-    }
-
-    /**
-     * @return deep copy of this attribute
-     */
-    @Override
-    public Attribute copy(ConstantPool constant_pool)
-    {
-        Annotations c = (Annotations) clone();
-        return c;
-    }
-
-    @Override
-    public final void dump(DataOutputStream dos) throws IOException
-    {
-        super.dump(dos);
-        writeAnnotations(dos);
+        super(name_index, length, file, constant_pool);
     }
 }

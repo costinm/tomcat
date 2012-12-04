@@ -18,7 +18,6 @@
 package org.apache.tomcat.util.bcel.classfile;
 
 import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
 
 /**
@@ -32,11 +31,6 @@ public abstract class ElementValue
 
     protected ConstantPool cpool;
 
-    @Override
-    public String toString()
-    {
-        return stringifyValue();
-    }
 
     protected ElementValue(int type, ConstantPool cpool)
     {
@@ -46,8 +40,6 @@ public abstract class ElementValue
 
 
     public abstract String stringifyValue();
-
-    public abstract void dump(DataOutputStream dos) throws IOException;
 
     public static final int STRING = 's';
 
@@ -109,7 +101,8 @@ public abstract class ElementValue
             return new SimpleElementValue(STRING, dis.readUnsignedShort(),
                     cpool);
         case 'e': // Enum constant
-            return new EnumElementValue(ENUM_CONSTANT, dis.readUnsignedShort(),
+            dis.readUnsignedShort();    // Unused type_index
+            return new EnumElementValue(ENUM_CONSTANT,
                     dis.readUnsignedShort(), cpool);
         case 'c': // Class
             return new ClassElementValue(CLASS, dis.readUnsignedShort(), cpool);

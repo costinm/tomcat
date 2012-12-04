@@ -215,8 +215,9 @@ public class StandardManager extends ManagerBase {
         try {
             fis = new FileInputStream(file.getAbsolutePath());
             bis = new BufferedInputStream(fis);
-            if (container != null)
-                loader = container.getLoader();
+            Context c = getContext();
+            if (c != null)
+                loader = c.getLoader();
             if (loader != null)
                 classLoader = loader.getClassLoader();
             if (classLoader != null) {
@@ -341,6 +342,7 @@ public class StandardManager extends ManagerBase {
      *
      * @exception IOException if an input/output error occurs
      */
+    @SuppressWarnings("null")
     protected void doUnload() throws IOException {
 
         if (log.isDebugEnabled())
@@ -396,11 +398,12 @@ public class StandardManager extends ManagerBase {
         }
 
         // Write the number of active sessions, followed by the details
-        ArrayList<StandardSession> list = new ArrayList<StandardSession>();
+        ArrayList<StandardSession> list = new ArrayList<>();
         synchronized (sessions) {
             if (log.isDebugEnabled())
                 log.debug("Unloading " + sessions.size() + " sessions");
             try {
+                // oos can't be null here
                 oos.writeObject(new Integer(sessions.size()));
                 Iterator<Session> elements = sessions.values().iterator();
                 while (elements.hasNext()) {
@@ -535,9 +538,9 @@ public class StandardManager extends ManagerBase {
             return (null);
         File file = new File(pathname);
         if (!file.isAbsolute()) {
-            if (container instanceof Context) {
-                ServletContext servletContext =
-                    ((Context) container).getServletContext();
+            Context context = getContext();
+            if (context != null) {
+                ServletContext servletContext = context.getServletContext();
                 File tempdir = (File)
                     servletContext.getAttribute(ServletContext.TEMPDIR);
                 if (tempdir != null)

@@ -21,12 +21,25 @@
   <artifactId>tomcat-embed-jasper</artifactId>
   <version>@MAVEN.DEPLOY.VERSION@</version>
   <description>Core Tomcat implementation</description>
+  <url>http://tomcat.apache.org/</url>
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>http://www.apache.org/licenses/LICENSE-2.0.txt</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
   <dependencies>
     <dependency>
       <groupId>org.apache.tomcat.embed</groupId>
       <artifactId>tomcat-embed-core</artifactId>
       <version>@MAVEN.DEPLOY.VERSION@</version>
       <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.eclipse.jdt.core.compiler</groupId>
+      <artifactId>ecj</artifactId>
+      <version>3.7.2</version>
     </dependency>
   </dependencies>
 </project>

@@ -14,18 +14,19 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
-
 package org.apache.coyote;
 
 import java.io.IOException;
 import java.io.StringReader;
 import java.util.Locale;
 
+import javax.servlet.WriteListener;
+
+import org.apache.coyote.http11.AbstractOutputBuffer;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.http.MimeHeaders;
-import org.apache.tomcat.util.http.parser.AstMediaType;
 import org.apache.tomcat.util.http.parser.HttpParser;
-import org.apache.tomcat.util.http.parser.ParseException;
+import org.apache.tomcat.util.http.parser.MediaType;
 
 /**
  * Response object.
@@ -44,7 +45,7 @@ public final class Response {
     /**
      * Default locale as mandated by the spec.
      */
-    private static Locale DEFAULT_LOCALE = Locale.getDefault();
+    private static final Locale DEFAULT_LOCALE = Locale.getDefault();
 
 
     // ----------------------------------------------------- Instance Variables
@@ -64,7 +65,7 @@ public final class Response {
     /**
      * Response headers.
      */
-    protected MimeHeaders headers = new MimeHeaders();
+    protected final MimeHeaders headers = new MimeHeaders();
 
 
     /**
@@ -76,7 +77,7 @@ public final class Response {
     /**
      * Notes.
      */
-    protected Object notes[] = new Object[Constants.MAX_NOTES];
+    protected final Object notes[] = new Object[Constants.MAX_NOTES];
 
 
     /**
@@ -339,9 +340,6 @@ public final class Response {
                 return false;
             }
         }
-        if( name.equalsIgnoreCase( "Content-Language" ) ) {
-            // XXX XXX Need to construct Locale or something else
-        }
         return false;
     }
 
@@ -435,11 +433,13 @@ public final class Response {
             return;
         }
 
-        AstMediaType m = null;
-        HttpParser hp = new HttpParser(new StringReader(type));
+        MediaType m = null;
         try {
-             m = hp.MediaType();
-        } catch (ParseException e) {
+             m = HttpParser.parseMediaType(new StringReader(type));
+        } catch (IOException e) {
+            // Ignore - null test below handles this
+        }
+        if (m == null) {
             // Invalid - Assume no charset and just pass through whatever
             // the user provided.
             this.contentType = type;
@@ -540,5 +540,30 @@ public final class Response {
             action(ActionCode.CLIENT_FLUSH, this);
         }
         return outputBuffer.getBytesWritten();
+    }
+
+    protected volatile WriteListener listener;
+
+    public WriteListener getWriteListener() {
+        return listener;
+}
+
+    public void setWriteListener(WriteListener listener) {
+        //TODO SERVLET 3.1 is it allowed to switch from non block to blocking?
+        setBlocking(listener==null);
+        this.listener = listener;
+    }
+
+    protected volatile boolean blocking = true;
+
+    public boolean isBlocking() {
+        return blocking;
+    }
+
+    public void setBlocking(boolean blocking) throws IllegalStateException {
+        @SuppressWarnings("rawtypes")
+        AbstractOutputBuffer buf = (AbstractOutputBuffer)outputBuffer;
+        if (!blocking && !buf.supportsNonBlocking()) throw new IllegalStateException();
+        this.blocking = blocking;
     }
 }

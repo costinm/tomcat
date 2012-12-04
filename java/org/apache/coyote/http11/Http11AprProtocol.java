@@ -18,15 +18,14 @@ package org.apache.coyote.http11;
 
 import java.io.IOException;
 
+import javax.servlet.http.ProtocolHandler;
+
 import org.apache.coyote.AbstractProtocol;
-import org.apache.coyote.Adapter;
 import org.apache.coyote.Processor;
-import org.apache.coyote.http11.upgrade.UpgradeAprProcessor;
-import org.apache.coyote.http11.upgrade.UpgradeInbound;
+import org.apache.coyote.http11.upgrade.AprProcessor;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.net.AbstractEndpoint;
-import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.AprEndpoint;
 import org.apache.tomcat.util.net.AprEndpoint.Handler;
 import org.apache.tomcat.util.net.SocketStatus;
@@ -41,7 +40,7 @@ import org.apache.tomcat.util.net.SocketWrapper;
  * @author Remy Maucherat
  * @author Costin Manolache
  */
-public class Http11AprProtocol extends AbstractHttp11Protocol {
+public class Http11AprProtocol extends AbstractHttp11Protocol<Long> {
 
     private static final Log log = LogFactory.getLog(Http11AprProtocol.class);
 
@@ -52,6 +51,14 @@ public class Http11AprProtocol extends AbstractHttp11Protocol {
     @Override
     protected AbstractEndpoint.Handler getHandler() {
         return cHandler;
+    }
+
+
+    @Override
+    public boolean isAprRequired() {
+        // Override since this protocol implementation requires the APR/native
+        // library
+        return true;
     }
 
 
@@ -109,6 +116,17 @@ public class Http11AprProtocol extends AbstractHttp11Protocol {
      */
     public String getSSLCipherSuite() { return ((AprEndpoint)endpoint).getSSLCipherSuite(); }
     public void setSSLCipherSuite(String SSLCipherSuite) { ((AprEndpoint)endpoint).setSSLCipherSuite(SSLCipherSuite); }
+    public String[] getCiphersUsed() { return endpoint.getCiphersUsed();}
+
+    /**
+     * SSL honor cipher order.
+     *
+     * Set to <code>true</code> to enforce the <i>server's</i> cipher order
+     * instead of the default which is to allow the client to choose a
+     * preferred cipher.
+     */
+    public boolean getSSLHonorCipherOrder() { return ((AprEndpoint)endpoint).getSSLHonorCipherOrder(); }
+    public void setSSLHonorCipherOrder(boolean SSLHonorCipherOrder) { ((AprEndpoint)endpoint).setSSLHonorCipherOrder(SSLHonorCipherOrder); }
 
 
     /**
@@ -186,7 +204,7 @@ public class Http11AprProtocol extends AbstractHttp11Protocol {
         super.start();
         if (npnHandler != null) {
             long sslCtx = ((AprEndpoint) endpoint).getJniSslContext();
-            npnHandler.init(endpoint, sslCtx, adapter);
+            npnHandler.init(endpoint, sslCtx, getAdapter());
         }
     }
 
@@ -230,10 +248,12 @@ public class Http11AprProtocol extends AbstractHttp11Protocol {
                 Processor<Long> processor, boolean isSocketClosing,
                 boolean addToPoller) {
             processor.recycle(isSocketClosing);
-            recycledProcessors.offer(processor);
+            recycledProcessors.push(processor);
             if (addToPoller && proto.endpoint.isRunning()) {
                 ((AprEndpoint)proto.endpoint).getPoller().add(
-                        socket.getSocket().longValue(), true);
+                        socket.getSocket().longValue(),
+                        proto.endpoint.getKeepAliveTimeout(),
+                        AprEndpoint.Poller.FLAGS_READ);
             }
         }
 
@@ -242,7 +262,7 @@ public class Http11AprProtocol extends AbstractHttp11Protocol {
                 SocketStatus status) {
             if (proto.npnHandler != null) {
                 Processor<Long> processor = null;
-                if (status == SocketStatus.OPEN) {
+                if (status == SocketStatus.OPEN_READ) {
                     processor = connections.get(socket.getSocket());
 
                 }
@@ -273,13 +293,24 @@ public class Http11AprProtocol extends AbstractHttp11Protocol {
             if (processor.isAsync()) {
                 // Async
                 socket.setAsync(true);
-            } else if (processor.isComet() && proto.endpoint.isRunning()) {
-                ((AprEndpoint) proto.endpoint).getCometPoller().add(
-                        socket.getSocket().longValue(), false);
+            } else if (processor.isComet()) {
+                // Comet
+                if (proto.endpoint.isRunning()) {
+                    ((AprEndpoint) proto.endpoint).getCometPoller().add(
+                            socket.getSocket().longValue(),
+                            proto.endpoint.getSoTimeout(),
+                            AprEndpoint.Poller.FLAGS_READ);
+                } else {
+                    // Process a STOP directly
+                    ((AprEndpoint) proto.endpoint).processSocket(
+                            socket.getSocket().longValue(),
+                            SocketStatus.STOP);
+                }
             } else {
                 // Upgraded
                 ((AprEndpoint) proto.endpoint).getPoller().add(
-                        socket.getSocket().longValue(), false);
+                        socket.getSocket().longValue(), -1,
+                        AprEndpoint.Poller.FLAGS_READ);
             }
         }
 
@@ -288,7 +319,7 @@ public class Http11AprProtocol extends AbstractHttp11Protocol {
             Http11AprProcessor processor = new Http11AprProcessor(
                     proto.getMaxHttpHeaderSize(), (AprEndpoint)proto.endpoint,
                     proto.getMaxTrailerSize());
-            processor.setAdapter(proto.adapter);
+            processor.setAdapter(proto.getAdapter());
             processor.setMaxKeepAliveRequests(proto.getMaxKeepAliveRequests());
             processor.setKeepAliveTimeout(proto.getKeepAliveTimeout());
             processor.setConnectionUploadTimeout(
@@ -309,9 +340,10 @@ public class Http11AprProtocol extends AbstractHttp11Protocol {
 
         @Override
         protected Processor<Long> createUpgradeProcessor(
-                SocketWrapper<Long> socket, UpgradeInbound inbound)
+                SocketWrapper<Long> socket,
+                ProtocolHandler httpUpgradeProcessor)
                 throws IOException {
-            return new UpgradeAprProcessor(socket, inbound);
+            return new AprProcessor(socket, httpUpgradeProcessor);
         }
     }
 }

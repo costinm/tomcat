@@ -44,6 +44,15 @@
           description="Allow disabling TRACE method"
                  type="boolean"/>
 
+    <attribute   name="ciphers"
+          description="Comma-separated list of requested cipher suites"
+                 type="java.lang.String"/>
+
+    <attribute   name="ciphersUsed"
+          description="Array of ciphers suites in use"
+                 type="[Ljava.lang.String;"
+            writeable="false"/>
+
     <attribute   name="className"
           description="Fully qualified class name of the managed object"
                  type="java.lang.String"
@@ -76,6 +85,10 @@
     <attribute   name="localPort"
           description="The port number on which this connector is listening to requests. If the special value for port of zero is used then this method will report the actual port bound."
                 type="int"/>
+
+    <attribute   name="maxHeaderCount"
+          description="The maximum number of headers that are allowed by the container. 100 by default. A value of less than 0 means no limit."
+                 type="int"/>
 
     <attribute   name="maxKeepAliveRequests"
           description="Maximum number of Keep-Alive requests to honor per connection"
@@ -184,26 +197,6 @@
     <attribute    name="xpoweredBy"
            description="Is generation of X-Powered-By response header enabled/disabled?"
                   type="boolean"/>
-
-    <operation name="start" description="Start" impact="ACTION" returnType="void" />
-    <operation name="stop" description="Stop" impact="ACTION" returnType="void" />
-    <operation name="pause" description="Start" impact="ACTION" returnType="void" />
-    <operation name="resume" description="Stop" impact="ACTION" returnType="void" />
-    <operation name="init" description="Init" impact="ACTION" returnType="void" />
-    <operation name="destroy" description="Destroy" impact="ACTION" returnType="void" />
-
-  </mbean>
-
-  <mbean   name="Mapper"
-    description="Maps requests received by the associated connector to Hosts, Contexts and Wrappers"
-         domain="Catalina"
-          group="Mapper"
-           type="org.apache.catalina.connector.MapperListener">
-
-    <attribute   name="stateName"
-          description="The name of the LifecycleState that this component is currently in"
-                 type="java.lang.String"
-                 writeable="false"/>
 
     <operation name="start" description="Start" impact="ACTION" returnType="void" />
     <operation name="stop" description="Stop" impact="ACTION" returnType="void" />

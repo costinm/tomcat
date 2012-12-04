@@ -81,14 +81,18 @@
 
       <attribute name="maxActiveSessions" required="false">
         <p>The maximum number of active sessions that will be created by
-        this Manager, or -1 (the default) for no limit.</p>
+        this Manager, or <code>-1</code> (the default) for no limit.</p>
+
+        <p>When the limit is reached, any attempt to create a new session
+        (e.g. with <code>HttpServletRequest.getSession()</code> call)
+        will fail with an <code>IllegalStateException</code>.</p>
       </attribute>
 
       <attribute name="maxInactiveInterval" required="false">
         <p>The initial maximum time interval, in seconds,
         between client requests before a session is invalidated. A negative value
         will result in sessions never timing out. If the attribute is not provided,
-        a default of 60 seconds is used.</p>
+        a default of 1800 seconds (30 minutes) is used.</p>
 
         <p>This attribute provides the initial value whenever a
         new session is created, but the interval may be dynamically
@@ -138,7 +142,7 @@
       <attribute name="processExpiresFrequency" required="false">
         <p>Frequency of the session expiration, and related manager operations.
         Manager operations will be done once for the specified amount of
-        backgrondProcess calls (i.e., the lower the amount, the more often the
+        backgroundProcess calls (i.e., the lower the amount, the more often the
         checks will occur). The minimum value is 1, and the default value is 6.
         </p>
       </attribute>

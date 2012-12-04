@@ -30,6 +30,7 @@ import java.util.StringTokenizer;
 
 import javax.servlet.ServletContext;
 
+import org.apache.jasper.Constants;
 import org.apache.jasper.JasperException;
 import org.apache.jasper.util.ExceptionUtils;
 import org.apache.jasper.xmlparser.ParserUtils;
@@ -89,6 +90,7 @@ public class TldLocationsCache {
     public static final int NOROOT_REL_URI = 2;
 
     private static final String WEB_INF = "/WEB-INF/";
+    private static final String WEB_INF_CLASSES = "/WEB-INF/classes/";
     private static final String WEB_INF_LIB = "/WEB-INF/lib/";
     private static final String JAR_EXT = ".jar";
     private static final String TLD_EXT = ".tld";
@@ -99,6 +101,48 @@ public class TldLocationsCache {
     // Flag that indicates that an INFO level message has been provided that
     // there are JARs that could be skipped
     private static volatile boolean showTldScanWarning = true;
+
+    static {
+        // Set the default list of JARs to skip for TLDs
+        // Set the default list of JARs to skip for TLDs
+        StringBuilder jarList = new StringBuilder(System.getProperty(
+                Constants.DEFAULT_JAR_SKIP_PROP, ""));
+
+        String tldJars = System.getProperty(Constants.TLD_JAR_SKIP_PROP, "");
+        if (tldJars.length() > 0) {
+            if (jarList.length() > 0) {
+                jarList.append(',');
+            }
+            jarList.append(tldJars);
+        }
+
+        if (jarList.length() > 0) {
+            setNoTldJars(jarList.toString());
+        }
+    }
+
+    /**
+     * Sets the list of JARs that are known not to contain any TLDs.
+     *
+     * @param jarNames List of comma-separated names of JAR files that are
+     * known not to contain any TLDs
+     */
+    public static synchronized void setNoTldJars(String jarNames) {
+        if (jarNames == null) {
+            noTldJars = null;
+        } else {
+            if (noTldJars == null) {
+                noTldJars = new HashSet<>();
+            } else {
+                noTldJars.clear();
+            }
+            StringTokenizer tokenizer = new StringTokenizer(jarNames, ",");
+            while (tokenizer.hasMoreElements()) {
+                noTldJars.add(tokenizer.nextToken());
+            }
+        }
+    }
+
 
     /**
      * The mapping of the 'global' tag library URI to the location (resource
@@ -119,32 +163,9 @@ public class TldLocationsCache {
      */
     public TldLocationsCache(ServletContext ctxt) {
         this.ctxt = ctxt;
-        mappings = new Hashtable<String, TldLocation>();
+        mappings = new Hashtable<>();
         initialized = false;
     }
-
-    /**
-     * Sets the list of JARs that are known not to contain any TLDs.
-     *
-     * @param jarNames List of comma-separated names of JAR files that are
-     * known not to contain any TLDs
-     */
-    public static void setNoTldJars(String jarNames) {
-        if (jarNames == null) {
-            noTldJars = null;
-        } else {
-            if (noTldJars == null) {
-                noTldJars = new HashSet<String>();
-            } else {
-                noTldJars.clear();
-            }
-            StringTokenizer tokenizer = new StringTokenizer(jarNames, ",");
-            while (tokenizer.hasMoreElements()) {
-                noTldJars.add(tokenizer.nextToken());
-            }
-        }
-    }
-
 
     /**
      * Obtains the TLD location cache for the given {@link ServletContext} and
@@ -217,7 +238,7 @@ public class TldLocationsCache {
         if (initialized) return;
         try {
             tldScanWebXml();
-            tldScanResourcePaths(WEB_INF);
+            tldScanResourcePaths(WEB_INF, false);
 
             JarScanner jarScanner = JarScannerFactory.getJarScanner(ctxt);
             if (jarScanner != null) {
@@ -246,6 +267,11 @@ public class TldLocationsCache {
             if (metaInf.isDirectory()) {
                 tldScanDir(metaInf);
             }
+        }
+
+        @Override
+        public void scanWebInfClasses() throws IOException {
+            tldScanResourcePaths(WEB_INF_CLASSES, true);
         }
     }
 
@@ -316,12 +342,13 @@ public class TldLocationsCache {
      *
      * Initially, rootPath equals /WEB-INF/. The /WEB-INF/classes and
      * /WEB-INF/lib sub-directories are excluded from the search, as per the
-     * JSP 2.0 spec.
+     * JSP 2.0 spec unless the JarScanner is configured to treat
+     * /WEB-INF/classes/ as an exploded JAR.
      *
      * Keep code in sync with o.a.c.startup.TldConfig
      */
-    private void tldScanResourcePaths(String startPath)
-            throws Exception {
+    private void tldScanResourcePaths(String startPath, boolean webInfAsJar)
+            throws IOException {
 
         Set<String> dirList = ctxt.getResourcePaths(startPath);
         if (dirList != null) {
@@ -330,7 +357,8 @@ public class TldLocationsCache {
                 String path = it.next();
                 if (!path.endsWith(TLD_EXT)
                         && (path.startsWith(WEB_INF_LIB)
-                                || path.startsWith("/WEB-INF/classes/"))) {
+                                || path.startsWith("/WEB-INF/classes/")
+                                   && !webInfAsJar)) {
                     continue;
                 }
                 if (path.endsWith(TLD_EXT)) {
@@ -351,7 +379,7 @@ public class TldLocationsCache {
                         }
                     }
                 } else {
-                    tldScanResourcePaths(path);
+                    tldScanResourcePaths(path, false);
                 }
             }
         }

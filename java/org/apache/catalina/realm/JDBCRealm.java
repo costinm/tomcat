@@ -596,6 +596,12 @@ public class JDBCRealm
      */
     protected ArrayList<String> getRoles(String username) {
 
+        if (allRolesMode != AllRolesMode.STRICT_MODE && !isRoleStoreDefined()) {
+            // Using an authentication only configuration and no role store has
+            // been defined so don't spend cycles looking
+            return null;
+        }
+
         PreparedStatement stmt = null;
         ResultSet rs = null;
 
@@ -616,7 +622,7 @@ public class JDBCRealm
 
                 try {
                     // Accumulate the user's roles
-                    ArrayList<String> roleList = new ArrayList<String>();
+                    ArrayList<String> roleList = new ArrayList<>();
                     stmt = roles(dbConnection, username);
                     rs = stmt.executeQuery();
                     while (rs.next()) {
@@ -655,8 +661,7 @@ public class JDBCRealm
             numberOfTries--;
         }
 
-        return (null);
-
+        return null;
     }
 
 
@@ -701,18 +706,6 @@ public class JDBCRealm
 
 
     /**
-     * Release our use of this connection so that it can be recycled.
-     *
-     * @param dbConnection The connection to be released
-     */
-    protected void release(Connection dbConnection) {
-
-        // NO-OP since we are not pooling anything
-
-    }
-
-
-    /**
      * Return a PreparedStatement configured to perform the SELECT required
      * to retrieve user roles for the specified username.
      *
@@ -743,8 +736,12 @@ public class JDBCRealm
     }
 
 
-    // ------------------------------------------------------ Lifecycle Methods
+    private boolean isRoleStoreDefined() {
+        return userRoleTable != null || roleNameCol != null;
+    }
 
+
+    // ------------------------------------------------------ Lifecycle Methods
 
     /**
      * Prepare for the beginning of active use of the public methods of this

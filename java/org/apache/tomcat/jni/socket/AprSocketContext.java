@@ -118,7 +118,7 @@ public class AprSocketContext {
     /**
      * Pollers.
      */
-    List<AprPoller> pollers = new ArrayList<AprPoller>();
+    List<AprPoller> pollers = new ArrayList<>();
     static int pollerCnt = 0;
 
     // Set on all accepted or connected sockets.
@@ -133,7 +133,7 @@ public class AprSocketContext {
     // If false: use executor ( but that may choke the acceptor thread )
     protected boolean nonBlockingAccept = false;
 
-    BlockingQueue<AprSocket> acceptedQueue = new LinkedBlockingQueue<AprSocket>();
+    BlockingQueue<AprSocket> acceptedQueue = new LinkedBlockingQueue<>();
 
     /**
      * Root APR memory pool.
@@ -167,7 +167,7 @@ public class AprSocketContext {
     RawDataHandler rawDataHandler = null;
 
     // TODO: do we need this here ?
-    protected Map<String, HostInfo> hosts = new HashMap<String, HostInfo>();
+    protected Map<String, HostInfo> hosts = new HashMap<>();
 
     String[] enabledCiphers;
 
@@ -184,7 +184,6 @@ public class AprSocketContext {
     // Separate executor for connect/handshakes
     ExecutorService connectExecutor;
 
-    boolean debug = false;
     boolean debugSSL = false;
     boolean debugPoll = false;
 
@@ -339,8 +338,7 @@ public class AprSocketContext {
     /**
      * Set certificate, will also enable TLS mode.
      */
-    public AprSocketContext setKeys(String certPemFile, String keyDerFile)
-            throws IOException {
+    public AprSocketContext setKeys(String certPemFile, String keyDerFile) {
         this.sslMode = true;
         setTls();
         certFile = certPemFile;
@@ -388,7 +386,7 @@ public class AprSocketContext {
             throw new IOException("Missing certificates for server");
         }
         if (sslMode || !nonBlockingAccept) {
-            acceptorDispatch = new AcceptorDispatchThread(port);
+            acceptorDispatch = new AcceptorDispatchThread();
             acceptorDispatch.setName("AprAcceptorDispatch-" + port);
             acceptorDispatch.start();
         }
@@ -404,19 +402,22 @@ public class AprSocketContext {
     /**
      * Get a socket for connectiong to host:port.
      */
-    public AprSocket socket(String host, int port, boolean ssl) throws IOException {
+    public AprSocket socket(String host, int port, boolean ssl) {
         HostInfo hi = getHostInfo(host, port, ssl);
         return socket(hi);
     }
 
-    public AprSocket socket(HostInfo hi) throws IOException {
+    public AprSocket socket(HostInfo hi) {
         AprSocket sock = newSocket(this);
         sock.setHost(hi);
         return sock;
     }
 
-    public AprSocket socket(long socket) throws IOException {
+    public AprSocket socket(long socket) {
         AprSocket sock = newSocket(this);
+        // Tomcat doesn't set this
+        SSLExt.sslSetMode(socket, SSLExt.SSL_MODE_ENABLE_PARTIAL_WRITE |
+                SSLExt.SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
         sock.setStatus(AprSocket.ACCEPTED);
         sock.socket = socket;
         return sock;
@@ -429,7 +430,7 @@ public class AprSocketContext {
             if (socket.socket != 0) {
                 long s = socket.socket;
                 socket.socket = 0;
-                System.err.println("DESTROY: " + Long.toHexString(s));
+                log.info("DESTROY: " + Long.toHexString(s));
                 Socket.destroy(s);
             }
         }
@@ -500,7 +501,7 @@ public class AprSocketContext {
         }
     }
 
-    AprSocket newSocket(AprSocketContext context) throws IOException {
+    AprSocket newSocket(AprSocketContext context) {
         return new AprSocket(context);
     }
 
@@ -522,7 +523,7 @@ public class AprSocketContext {
     }
 
 
-    public void stop() throws IOException {
+    public void stop() {
         synchronized (pollers) {
             if (!running) {
                 return;
@@ -583,7 +584,7 @@ public class AprSocketContext {
             if (rootPool == 0) {
                 return;
             }
-            System.err.println("DESTROY " + rootPool);
+            log.info("Destroy root pool " + rootPool);
             //Pool.destroy(rootPool);
             //rootPool = 0;
         }
@@ -687,10 +688,6 @@ public class AprSocketContext {
                 throw new IOException(e);
             }
 
-            long mode =
-                    SSLExt.sslCtxSetMode(sslCtx, SSLExt.SSL_MODE_ENABLE_PARTIAL_WRITE |
-                            SSLExt.SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
-
             // TODO: try release buffers
             }
         }
@@ -737,11 +734,11 @@ public class AprSocketContext {
     }
 
     /**
-     * Called on each accepted socket ( for servers ) or after connection (client)
+     * Called on each accepted socket (for servers) or after connection (client)
      * after handshake.
      */
-    protected void onSocket(AprSocket s) throws IOException {
-
+    protected void onSocket(@SuppressWarnings("unused") AprSocket s) {
+        // Defaults to NO-OP. Parameter is used by sub-classes.
     }
 
     class AcceptorThread extends Thread {
@@ -813,10 +810,9 @@ public class AprSocketContext {
         }
 
         void unblock() {
-            try {
+            try (java.net.Socket sock = new java.net.Socket()) {
                 // Easiest ( maybe safest ) way to interrupt accept
                 // we could have it in non-blocking mode, etc
-                java.net.Socket sock = new java.net.Socket();
                 sock.connect(new InetSocketAddress("127.0.0.1", port));
             } catch (Exception ex) {
                 // ignore - the acceptor may have shut down by itself.
@@ -857,7 +853,7 @@ public class AprSocketContext {
 
     class AcceptorDispatchThread extends Thread {
 
-        AcceptorDispatchThread(int port) {
+        AcceptorDispatchThread() {
             setDaemon(true);
         }
 
@@ -884,19 +880,18 @@ public class AprSocketContext {
     AprPoller allocatePoller() throws IOException {
         long pool = Pool.create(getRootPool());
         int size = maxConnections / pollerThreadCount;
-        int timeout = keepAliveTimeout;
 
-        long serverPollset = allocatePoller(size, pool, timeout);
+        long serverPollset = allocatePoller(size, pool);
 
         if (serverPollset == 0 && size > 1024) {
             log.severe("Falling back to 1024-sized poll, won't scale");
             size = 1024;
-            serverPollset = allocatePoller(size, pool, timeout);
+            serverPollset = allocatePoller(size, pool);
         }
         if (serverPollset == 0) {
             log.severe("Falling back to 62-sized poll, won't scale");
             size = 62;
-            serverPollset = allocatePoller(size, pool, timeout);
+            serverPollset = allocatePoller(size, pool);
         }
 
         AprPoller res = new AprPoller();
@@ -919,12 +914,12 @@ public class AprSocketContext {
     // last test shows a small improvement, can switch later.
     static boolean sizeLogged = false;
 
-    protected long allocatePoller(int size, long pool, int timeout) {
+    protected long allocatePoller(int size, long pool) {
         int flag = threadSafe ? Poll.APR_POLLSET_THREADSAFE: 0;
         for (int i = 0; i < 2; i++) {
             try {
                 //  timeout must be -1 - or ttl will take effect, strange results.
-                return Poll.create(size, pool, flag, -1); // timeout * 1000);
+                return Poll.create(size, pool, flag, -1);
             } catch (Error e) {
                 e.printStackTrace();
                 if (Status.APR_STATUS_IS_EINVAL(e.getError())) {
@@ -961,7 +956,7 @@ public class AprSocketContext {
 
         // Should be replaced with socket data.
         // used only to lookup by socket
-        Map<Long, AprSocket> channels = new HashMap<Long, AprSocket>();
+        Map<Long, AprSocket> channels = new HashMap<>();
 
         // Active + pending, must be < desc.length / 2
         // The channel will also have poller=this when active or pending
@@ -972,7 +967,7 @@ public class AprSocketContext {
 
         protected AtomicInteger pollCount = new AtomicInteger();
 
-        private List<AprSocket> updates = new ArrayList<AprSocket>();
+        private List<AprSocket> updates = new ArrayList<>();
 
         @Override
         public void run() {
@@ -1022,7 +1017,7 @@ public class AprSocketContext {
                             boolean blocking = false;
 
                             synchronized (channels) {
-                                ch = channels.get(sock);
+                                ch = channels.get(Long.valueOf(sock));
                                 if (ch != null) {
                                     blocking = ch.isBlocking();
                                 } else {
@@ -1038,7 +1033,6 @@ public class AprSocketContext {
                             // Check for failed sockets and hand this socket off to a worker
                             long mask = desc[pollIdx * 2];
 
-                            boolean hup = ((mask & Poll.APR_POLLHUP) == Poll.APR_POLLHUP);
                             boolean err = ((mask & Poll.APR_POLLERR) == Poll.APR_POLLERR);
                             boolean nval = ((mask & Poll.APR_POLLNVAL) != 0);
                             if (err || nval) {
@@ -1226,7 +1220,9 @@ public class AprSocketContext {
                 updateIOThread(ch);
             } else {
                 synchronized (this) {
-                    updates.add(ch);
+                    if (!updates.contains(ch)) {
+                        updates.add(ch);
+                    }
                     interruptPoll();
                 }
                 if (debugPoll) {
@@ -1252,7 +1248,7 @@ public class AprSocketContext {
                 if (ch.isClosed()) {
                     synchronized (channels) {
                         ch.poller = null;
-                        channels.remove(ch.socket);
+                        channels.remove(Long.valueOf(ch.socket));
                     }
                     keepAliveCount.decrementAndGet();
                     ch.reset();
@@ -1276,6 +1272,9 @@ public class AprSocketContext {
             boolean failed = false;
             int rv;
             synchronized (channels) {
+                if (up.isClosed()) {
+                    return;
+                }
                 rv = Poll.add(serverPollset, up.socket, req);
                 if (rv != Status.APR_SUCCESS) {
                     up.poller = null;
@@ -1283,7 +1282,7 @@ public class AprSocketContext {
                     failed = true;
                 } else {
                     polledCount.incrementAndGet();
-                    channels.put(up.socket, up);
+                    channels.put(Long.valueOf(up.socket), up);
                     up.setStatus(AprSocket.POLL);
                 }
             }
@@ -1297,7 +1296,7 @@ public class AprSocketContext {
          * Called only from IO thread. Remove from Poll and channels,
          * set POLL bit to false.
          */
-        private void removeSafe(AprSocket up) throws IOException {
+        private void removeSafe(AprSocket up) {
             int rv = Status.APR_EGENERAL;
             if (running && serverPollset != 0 && up.socket != 0
                     && !up.isClosed()) {

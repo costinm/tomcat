@@ -32,6 +32,8 @@ import org.apache.catalina.LifecycleState;
 import org.apache.catalina.Server;
 import org.apache.catalina.Service;
 import org.apache.catalina.connector.Connector;
+import org.apache.catalina.mapper.Mapper;
+import org.apache.catalina.mapper.MapperListener;
 import org.apache.catalina.util.LifecycleMBeanBase;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -73,18 +75,19 @@ public class StandardService extends LifecycleMBeanBase implements Service {
     /**
      * The property change support for this component.
      */
-    protected PropertyChangeSupport support = new PropertyChangeSupport(this);
+    protected final PropertyChangeSupport support = new PropertyChangeSupport(this);
 
 
     /**
      * The set of Connectors associated with this Service.
      */
     protected Connector connectors[] = new Connector[0];
+    private final Object connectorsLock = new Object();
 
     /**
      *
      */
-    protected ArrayList<Executor> executors = new ArrayList<Executor>();
+    protected final ArrayList<Executor> executors = new ArrayList<>();
 
     /**
      * The Container associated with this Service.
@@ -93,7 +96,25 @@ public class StandardService extends LifecycleMBeanBase implements Service {
 
     private ClassLoader parentClassLoader = null;
 
+    /**
+     * Mapper.
+     */
+    protected final Mapper mapper = new Mapper();
+
+
+    /**
+     * Mapper listener.
+     */
+    protected final MapperListener mapperListener =
+            new MapperListener(mapper, this);
+
+
     // ------------------------------------------------------------- Properties
+
+    @Override
+    public Mapper getMapper() {
+        return mapper;
+    }
 
 
     /**
@@ -204,7 +225,7 @@ public class StandardService extends LifecycleMBeanBase implements Service {
     @Override
     public void addConnector(Connector connector) {
 
-        synchronized (connectors) {
+        synchronized (connectorsLock) {
             connector.setService(this);
             Connector results[] = new Connector[connectors.length + 1];
             System.arraycopy(connectors, 0, results, 0, connectors.length);
@@ -254,7 +275,7 @@ public class StandardService extends LifecycleMBeanBase implements Service {
     @Override
     public Connector[] findConnectors() {
 
-        return (connectors);
+        return connectors;
 
     }
 
@@ -269,7 +290,7 @@ public class StandardService extends LifecycleMBeanBase implements Service {
     @Override
     public void removeConnector(Connector connector) {
 
-        synchronized (connectors) {
+        synchronized (connectorsLock) {
             int j = -1;
             for (int i = 0; i < connectors.length; i++) {
                 if (connector == connectors[i]) {
@@ -425,8 +446,11 @@ public class StandardService extends LifecycleMBeanBase implements Service {
             }
         }
 
+
+        mapperListener.start();
+
         // Start our defined Connectors second
-        synchronized (connectors) {
+        synchronized (connectorsLock) {
             for (Connector connector: connectors) {
                 try {
                     // If it has already failed, don't try and start it
@@ -455,7 +479,7 @@ public class StandardService extends LifecycleMBeanBase implements Service {
     protected void stopInternal() throws LifecycleException {
 
         // Pause connectors first
-        synchronized (connectors) {
+        synchronized (connectorsLock) {
             for (Connector connector: connectors) {
                 try {
                     connector.pause();
@@ -479,7 +503,7 @@ public class StandardService extends LifecycleMBeanBase implements Service {
         }
 
         // Now stop the connectors
-        synchronized (connectors) {
+        synchronized (connectorsLock) {
             for (Connector connector: connectors) {
                 if (!LifecycleState.STARTED.equals(
                         connector.getState())) {
@@ -497,6 +521,8 @@ public class StandardService extends LifecycleMBeanBase implements Service {
                 }
             }
         }
+
+        mapperListener.stop();
 
         synchronized (executors) {
             for (Executor executor: executors) {
@@ -527,8 +553,11 @@ public class StandardService extends LifecycleMBeanBase implements Service {
             executor.init();
         }
 
+        // Initialize mapper listener
+        mapperListener.init();
+
         // Initialize our defined Connectors
-        synchronized (connectors) {
+        synchronized (connectorsLock) {
             for (Connector connector : connectors) {
                 try {
                     connector.init();
@@ -546,8 +575,10 @@ public class StandardService extends LifecycleMBeanBase implements Service {
 
     @Override
     protected void destroyInternal() throws LifecycleException {
+        mapperListener.destroy();
+
         // Destroy our defined Connectors
-        synchronized (connectors) {
+        synchronized (connectorsLock) {
             for (Connector connector : connectors) {
                 try {
                     connector.destroy();

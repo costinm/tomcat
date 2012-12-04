@@ -20,7 +20,12 @@ package org.apache.catalina.startup;
 
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.regex.Pattern;
 
 import org.apache.catalina.Context;
 import org.apache.catalina.Host;
@@ -95,6 +100,15 @@ public final class UserConfig
     private String userClass =
         "org.apache.catalina.startup.PasswdUserDatabase";
 
+    /**
+     * A regular expression defining user who deployment is allowed.
+     */
+    protected Pattern allow = null;
+
+    /**
+     * A regular expression defining user who deployment is denied.
+     */
+    protected Pattern deny = null;
 
     // ------------------------------------------------------------- Properties
 
@@ -206,6 +220,50 @@ public final class UserConfig
 
     }
 
+    /**
+     * Return the regular expression used to test for user who deployment is allowed.
+     */
+    public String getAllow() {
+        if (allow == null) return null;
+        return allow.toString();
+    }
+
+
+    /**
+     * Set the regular expression used to test for user who deployment is allowed.
+     *
+     * @param allow The new allow expression
+     */
+    public void setAllow(String allow) {
+        if (allow == null || allow.length() == 0) {
+            this.allow = null;
+        } else {
+            this.allow = Pattern.compile(allow);
+        }
+    }
+
+
+    /**
+     * Return the regular expression used to test for user who deployment is denied.
+     */
+    public String getDeny() {
+        if (deny == null) return null;
+        return deny.toString();
+    }
+
+
+    /**
+     * Set the regular expression used to test for user who deployment is denied.
+     *
+     * @param deny The new deny expression
+     */
+    public void setDeny(String deny) {
+        if (deny == null || deny.length() == 0) {
+            this.deny = null;
+        } else {
+            this.deny = Pattern.compile(deny);
+        }
+    }
 
     // --------------------------------------------------------- Public Methods
 
@@ -258,14 +316,25 @@ public final class UserConfig
             return;
         }
 
+        ExecutorService executor = host.getStartStopExecutor();
+        List<Future<?>> results = new ArrayList<>();
+
         // Deploy the web application (if any) for each defined user
         Enumeration<String> users = database.getUsers();
         while (users.hasMoreElements()) {
             String user = users.nextElement();
+            if (!isDeployAllowed(user)) continue;
             String home = database.getHome(user);
-            deploy(user, home);
+            results.add(executor.submit(new DeployUserDirectory(this, user, home)));
         }
 
+        for (Future<?> result : results) {
+            try {
+                result.get();
+            } catch (Exception e) {
+                host.getLogger().error(sm.getString("userConfig.deploy.threaded.error"), e);
+            }
+        }
     }
 
 
@@ -334,5 +403,42 @@ public final class UserConfig
 
     }
 
+    /**
+     * Test allow and deny rules for the provided user.
+     *
+     * @return <code>true</code> if this user is allowed to deploy,
+     *         <code>false</code> otherwise
+     */
+    private boolean isDeployAllowed(String user) {
+        if (deny != null && deny.matcher(user).matches()) {
+            return false;
+        }
+        if (allow != null) {
+            if (allow.matcher(user).matches()) {
+                return true;
+            } else {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static class DeployUserDirectory implements Runnable {
+
+        private UserConfig config;
+        private String user;
+        private String home;
+
+        public DeployUserDirectory(UserConfig config, String user, String home) {
+            this.config = config;
+            this.user = user;
+            this.home= home;
+        }
+
+        @Override
+        public void run() {
+            config.deploy(user, home);
+        }
+    }
 
 }

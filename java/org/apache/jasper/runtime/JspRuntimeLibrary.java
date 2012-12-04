@@ -133,8 +133,7 @@ public class JspRuntimeLibrary {
         if (s == null || s.length() == 0) {
             return (char) 0;
         } else {
-            // this trick avoids escaping issues
-            return (char)(int) s.charAt(0);
+            return s.charAt(0);
         }
     }
 
@@ -190,8 +189,11 @@ public class JspRuntimeLibrary {
         } else if (target == Character.class) {
             if (isNullOrEmpty)
                 return Character.valueOf((char) 0);
-            else
-                return Character.valueOf(s.charAt(0));
+            else {
+                @SuppressWarnings("null")
+                Character result = Character.valueOf(s.charAt(0));
+                return result;
+            }
         } else if (target == Double.class) {
             if (isNullOrEmpty)
                 return Double.valueOf(0);
@@ -331,7 +333,7 @@ public class JspRuntimeLibrary {
                     }
                 }
             }
-            if ( method != null ) {
+            if (method != null && type != null) {
                 if (type.isArray()) {
                     if (request == null) {
                         throw new JasperException(

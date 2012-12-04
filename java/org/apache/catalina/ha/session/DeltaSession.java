@@ -112,116 +112,140 @@ public class DeltaSession extends StandardSession implements Externalizable,Clus
     // ----------------------------------------------------- ReplicatedMapEntry
 
     /**
-         * Has the object changed since last replication
-         * and is not in a locked state
-         * @return boolean
-         */
-        @Override
-        public boolean isDirty() {
-            return getDeltaRequest().getSize()>0;
-        }
+     * Has the object changed since last replication
+     * and is not in a locked state
+     * @return boolean
+     */
+    @Override
+    public boolean isDirty() {
+        return getDeltaRequest().getSize()>0;
+    }
 
-        /**
-         * If this returns true, the map will extract the diff using getDiff()
-         * Otherwise it will serialize the entire object.
-         * @return boolean
-         */
-        @Override
-        public boolean isDiffable() {
+    /**
+     * If this returns true, the map will extract the diff using getDiff()
+     * Otherwise it will serialize the entire object.
+     * @return boolean
+     */
+    @Override
+    public boolean isDiffable() {
+        return true;
+    }
+
+    /**
+     * Returns a diff and sets the dirty map to false
+     * @return byte[]
+     * @throws IOException
+     */
+    @Override
+    public byte[] getDiff() throws IOException {
+        try{
+            lock();
+            return getDeltaRequest().serialize();
+        }finally{
+            unlock();
+        }
+    }
+
+    public ClassLoader[] getClassLoaders() {
+        if ( manager instanceof BackupManager ) return ((BackupManager)manager).getClassLoaders();
+        else if ( manager instanceof ClusterManagerBase ) return ((ClusterManagerBase)manager).getClassLoaders();
+        else if ( manager instanceof StandardManager ) {
+            StandardManager sm = (StandardManager)manager;
+            return ClusterManagerBase.getClassLoaders(sm.getContext());
+        } else if ( manager instanceof ManagerBase ) {
+            ManagerBase mb = (ManagerBase)manager;
+            return ClusterManagerBase.getClassLoaders(mb.getContext());
+        }//end if
+        return null;
+    }
+
+    /**
+     * Applies a diff to an existing object.
+     * @param diff byte[]
+     * @param offset int
+     * @param length int
+     * @throws IOException
+     */
+    @Override
+    public void applyDiff(byte[] diff, int offset, int length) throws IOException, ClassNotFoundException {
+        try {
+            lock();
+            ReplicationStream stream = ( (ClusterManager) getManager()).getReplicationStream(diff, offset, length);
+            ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
+            try {
+                ClassLoader[] loaders = getClassLoaders();
+                if (loaders != null && loaders.length > 0)
+                    Thread.currentThread().setContextClassLoader(loaders[0]);
+                getDeltaRequest().readExternal(stream);
+                getDeltaRequest().execute(this, ((ClusterManager)getManager()).isNotifyListenersOnReplication());
+            } finally {
+                Thread.currentThread().setContextClassLoader(contextLoader);
+            }
+        }finally {
+            unlock();
+        }
+    }
+
+    /**
+     * Resets the current diff state and resets the dirty flag
+     */
+    @Override
+    public void resetDiff() {
+        resetDeltaRequest();
+    }
+
+    /**
+     * Lock during serialization
+     */
+    @Override
+    public void lock() {
+        diffLock.lock();
+    }
+
+    /**
+     * Unlock after serialization
+     */
+    @Override
+    public void unlock() {
+        diffLock.unlock();
+    }
+
+    @Override
+    public void setOwner(Object owner) {
+        if ( owner instanceof ClusterManager && getManager()==null) {
+            ClusterManager cm = (ClusterManager)owner;
+            this.setManager(cm);
+            this.setValid(true);
+            this.setPrimarySession(false);
+            this.access();
+            this.resetDeltaRequest();
+            this.endAccess();
+        }
+    }
+
+    /**
+     * If this returns true, to replicate that an object has been accessed
+     * @return boolean
+     */
+    @Override
+    public boolean isAccessReplicate() {
+        long replDelta = System.currentTimeMillis() - getLastTimeReplicated();
+        if (maxInactiveInterval >=0 && replDelta > (maxInactiveInterval * 1000)) {
             return true;
         }
+        return false;
+    }
 
-        /**
-         * Returns a diff and sets the dirty map to false
-         * @return byte[]
-         * @throws IOException
-         */
-        @Override
-        public byte[] getDiff() throws IOException {
-            try{
-                lock();
-                return getDeltaRequest().serialize();
-            }finally{
-                unlock();
-            }
-        }
+    /**
+     * Access to an existing object.
+     */
+    @Override
+    public void accessEntry() {
+        this.access();
+        this.setPrimarySession(false);
+        this.endAccess();
+    }
 
-        public ClassLoader[] getClassLoaders() {
-            if ( manager instanceof BackupManager ) return ((BackupManager)manager).getClassLoaders();
-            else if ( manager instanceof ClusterManagerBase ) return ((ClusterManagerBase)manager).getClassLoaders();
-            else if ( manager instanceof StandardManager ) {
-                StandardManager sm = (StandardManager)manager;
-                return ClusterManagerBase.getClassLoaders(sm.getContainer());
-            } else if ( manager instanceof ManagerBase ) {
-                ManagerBase mb = (ManagerBase)manager;
-                return ClusterManagerBase.getClassLoaders(mb.getContainer());
-            }//end if
-            return null;
-        }
-
-        /**
-         * Applies a diff to an existing object.
-         * @param diff byte[]
-         * @param offset int
-         * @param length int
-         * @throws IOException
-         */
-        @Override
-        public void applyDiff(byte[] diff, int offset, int length) throws IOException, ClassNotFoundException {
-            try {
-                lock();
-                ReplicationStream stream = ( (ClusterManager) getManager()).getReplicationStream(diff, offset, length);
-                ClassLoader contextLoader = Thread.currentThread().getContextClassLoader();
-                try {
-                    ClassLoader[] loaders = getClassLoaders();
-                    if (loaders != null && loaders.length > 0)
-                        Thread.currentThread().setContextClassLoader(loaders[0]);
-                    getDeltaRequest().readExternal(stream);
-                    getDeltaRequest().execute(this, ((ClusterManager)getManager()).isNotifyListenersOnReplication());
-                } finally {
-                    Thread.currentThread().setContextClassLoader(contextLoader);
-                }
-            }finally {
-                unlock();
-            }
-        }
-
-        /**
-         * Resets the current diff state and resets the dirty flag
-         */
-        @Override
-        public void resetDiff() {
-            resetDeltaRequest();
-        }
-
-        /**
-         * Lock during serialization
-         */
-        @Override
-        public void lock() {
-            diffLock.lock();
-        }
-
-        /**
-         * Unlock after serialization
-         */
-        @Override
-        public void unlock() {
-            diffLock.unlock();
-        }
-
-        @Override
-        public void setOwner(Object owner) {
-            if ( owner instanceof ClusterManager && getManager()==null) {
-                ClusterManager cm = (ClusterManager)owner;
-                this.setManager(cm);
-                this.setValid(true);
-                this.setPrimarySession(false);
-                this.access();
-                this.resetDeltaRequest();
-                this.endAccess();
-            }
-        }
     // ----------------------------------------------------- Session Properties
 
     /**
@@ -505,10 +529,10 @@ public class DeltaSession extends StandardSession implements Externalizable,Clus
      */
     @Override
     public void readObjectData(ObjectInputStream stream) throws ClassNotFoundException, IOException {
-        readObject((ObjectInput)stream);
+        doReadObject((ObjectInput)stream);
     }
     public void readObjectData(ObjectInput stream) throws ClassNotFoundException, IOException {
-        readObject(stream);
+        doReadObject(stream);
     }
 
     /**
@@ -527,7 +551,7 @@ public class DeltaSession extends StandardSession implements Externalizable,Clus
         writeObjectData((ObjectOutput)stream);
     }
     public void writeObjectData(ObjectOutput stream) throws IOException {
-        writeObject(stream);
+        doWriteObject(stream);
     }
 
     public void resetDeltaRequest() {
@@ -679,11 +703,11 @@ public class DeltaSession extends StandardSession implements Externalizable,Clus
      *                if an input/output error occurs
      */
     @Override
-    protected void readObject(ObjectInputStream stream) throws ClassNotFoundException, IOException {
-        readObject((ObjectInput)stream);
+    protected void doReadObject(ObjectInputStream stream) throws ClassNotFoundException, IOException {
+        doReadObject((ObjectInput)stream);
     }
 
-    private void readObject(ObjectInput stream) throws ClassNotFoundException, IOException {
+    private void doReadObject(ObjectInput stream) throws ClassNotFoundException, IOException {
 
         // Deserialize the scalar instance variables (except Manager)
         authType = null; // Transient only
@@ -705,7 +729,7 @@ public class DeltaSession extends StandardSession implements Externalizable,Clus
         if (log.isDebugEnabled()) log.debug(sm.getString("deltaSession.readSession", id));
 
         // Deserialize the attribute count and attribute values
-        if (attributes == null) attributes = new ConcurrentHashMap<String, Object>();
+        if (attributes == null) attributes = new ConcurrentHashMap<>();
         int n = ( (Integer) stream.readObject()).intValue();
         boolean isValidSave = isValid;
         isValid = true;
@@ -719,13 +743,12 @@ public class DeltaSession extends StandardSession implements Externalizable,Clus
         isValid = isValidSave;
 
         if (listeners == null) {
-            ArrayList<SessionListener> arrayList =
-                new ArrayList<SessionListener>();
+            ArrayList<SessionListener> arrayList = new ArrayList<>();
             listeners = arrayList;
         }
 
         if (notes == null) {
-            notes = new Hashtable<String,Object>();
+            notes = new Hashtable<>();
         }
         activate();
     }
@@ -734,7 +757,7 @@ public class DeltaSession extends StandardSession implements Externalizable,Clus
     public void writeExternal(ObjectOutput out ) throws java.io.IOException {
         try {
             lock();
-            writeObject(out);
+            doWriteObject(out);
         }finally {
             unlock();
         }
@@ -763,11 +786,11 @@ public class DeltaSession extends StandardSession implements Externalizable,Clus
      *                if an input/output error occurs
      */
     @Override
-    protected void writeObject(ObjectOutputStream stream) throws IOException {
-        writeObject((ObjectOutput)stream);
+    protected void doWriteObject(ObjectOutputStream stream) throws IOException {
+        doWriteObject((ObjectOutput)stream);
     }
 
-    private void writeObject(ObjectOutput stream) throws IOException {
+    private void doWriteObject(ObjectOutput stream) throws IOException {
         // Write the scalar instance variables (except Manager)
         stream.writeObject(Long.valueOf(creationTime));
         stream.writeObject(Long.valueOf(lastAccessedTime));
@@ -786,8 +809,8 @@ public class DeltaSession extends StandardSession implements Externalizable,Clus
 
         // Accumulate the names of serializable and non-serializable attributes
         String keys[] = keys();
-        ArrayList<String> saveNames = new ArrayList<String>();
-        ArrayList<Object> saveValues = new ArrayList<Object>();
+        ArrayList<String> saveNames = new ArrayList<>();
+        ArrayList<Object> saveValues = new ArrayList<>();
         for (int i = 0; i < keys.length; i++) {
             Object value = null;
             value = attributes.get(keys[i]);
@@ -815,15 +838,8 @@ public class DeltaSession extends StandardSession implements Externalizable,Clus
 
     }
 
+
     // -------------------------------------------------------- Private Methods
-
-
-    /**
-     * Return the value of an attribute without a check for validity.
-     */
-    protected Object getAttributeInternal(String name) {
-        return (attributes.get(name));
-    }
 
     protected void removeAttributeInternal(String name, boolean notify,
                                            boolean addDeltaRequest) {
@@ -843,7 +859,8 @@ public class DeltaSession extends StandardSession implements Externalizable,Clus
         }
     }
 
-    protected long getLastTimeReplicated() {
+    @Override
+    public long getLastTimeReplicated() {
         return lastTimeReplicated;
     }
 
@@ -852,7 +869,8 @@ public class DeltaSession extends StandardSession implements Externalizable,Clus
         return version;
     }
 
-    protected void setLastTimeReplicated(long lastTimeReplicated) {
+    @Override
+    public void setLastTimeReplicated(long lastTimeReplicated) {
         this.lastTimeReplicated = lastTimeReplicated;
     }
 

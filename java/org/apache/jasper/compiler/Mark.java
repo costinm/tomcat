@@ -81,7 +81,7 @@ final class Mark {
         this.fileName = name;
         this.baseDir = inBaseDir;
         this.encoding = inEncoding;
-        this.includeStack = new Stack<IncludeState>();
+        this.includeStack = new Stack<>();
     }
 
 
@@ -89,22 +89,37 @@ final class Mark {
      * Constructor
      */
     Mark(Mark other) {
+       init(other, false);
+    }
 
-        this.reader = other.reader;
-        this.ctxt = other.reader.getJspCompilationContext();
-        this.stream = other.stream;
-        this.fileId = other.fileId;
-        this.fileName = other.fileName;
+    void update(int cursor, int line, int col) {
+        this.cursor = cursor;
+        this.line = line;
+        this.col = col;
+    }
+
+    void init(Mark other, boolean singleFile) {
         this.cursor = other.cursor;
         this.line = other.line;
         this.col = other.col;
-        this.baseDir = other.baseDir;
-        this.encoding = other.encoding;
 
-        // clone includeStack without cloning contents
-        includeStack = new Stack<IncludeState>();
-        for ( int i=0; i < other.includeStack.size(); i++ ) {
-            includeStack.addElement( other.includeStack.elementAt(i) );
+        if (!singleFile) {
+            this.reader = other.reader;
+            this.ctxt = other.ctxt;
+            this.stream = other.stream;
+            this.fileId = other.fileId;
+            this.fileName = other.fileName;
+            this.baseDir = other.baseDir;
+            this.encoding = other.encoding;
+
+            if (includeStack == null) {
+                includeStack = new Stack<>();
+            } else {
+                includeStack.clear();
+            }
+            for (int i = 0; i < other.includeStack.size(); i++ ) {
+                includeStack.addElement(other.includeStack.elementAt(i));
+            }
         }
     }
 
@@ -231,6 +246,20 @@ final class Mark {
         }
         return false;
     }
+
+
+    @Override
+    public int hashCode() {
+        final int prime = 31;
+        int result = 1;
+        result = prime * result + col;
+        result = prime * result + cursor;
+        result = prime * result + fileId;
+        result = prime * result + line;
+        result = prime * result + ((reader == null) ? 0 : reader.hashCode());
+        return result;
+    }
+
 
     /**
      * Keep track of parser before parsing an included file.

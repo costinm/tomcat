@@ -31,6 +31,7 @@ import java.net.SocketAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Simple client for unit testing. It isn't robust, it isn't secure and
@@ -39,7 +40,7 @@ import java.util.List;
  */
 public abstract class SimpleHttpClient {
     public static final String TEMP_DIR =
-        System.getProperty("java.io.tmpdir");
+            System.getProperty("java.io.tmpdir");
 
     public static final String CRLF = "\r\n";
 
@@ -48,13 +49,32 @@ public abstract class SimpleHttpClient {
     public static final String REDIRECT_302 = "HTTP/1.1 302";
     public static final String FAIL_400 = "HTTP/1.1 400";
     public static final String FAIL_404 = "HTTP/1.1 404";
+    public static final String TIMEOUT_408 = "HTTP/1.1 408";
     public static final String FAIL_413 = "HTTP/1.1 413";
     public static final String FAIL_50X = "HTTP/1.1 50";
     public static final String FAIL_500 = "HTTP/1.1 500";
     public static final String FAIL_501 = "HTTP/1.1 501";
 
+    private static final String CONTENT_LENGTH_HEADER_PREFIX =
+            "Content-Length: ";
+
+    protected static final String SESSION_COOKIE_NAME = "JSESSIONID";
+    protected static final String SESSION_PARAMETER_NAME =
+            SESSION_COOKIE_NAME.toLowerCase(Locale.US);
+
+    private static final String COOKIE_HEADER_PREFIX = "Set-Cookie: ";
     private static final String SESSION_COOKIE_HEADER_PREFIX =
-        "Set-Cookie: JSESSIONID=";
+            COOKIE_HEADER_PREFIX + SESSION_COOKIE_NAME + "=";
+
+    private static final String REDIRECT_HEADER_PREFIX = "Location: ";
+    protected static final String SESSION_PATH_PARAMETER_PREFIX =
+            SESSION_PARAMETER_NAME + "=";
+    protected static final String SESSION_PATH_PARAMETER_TAILS = CRLF + ";?";
+
+    private static final String ELEMENT_HEAD = "<";
+    private static final String ELEMENT_TAIL = ">";
+    private static final String RESOURCE_TAG = "a";
+    private static final String LOGIN_TAG = "form";
 
     private Socket socket;
     private Writer writer;
@@ -63,12 +83,18 @@ public abstract class SimpleHttpClient {
 
     private String[] request;
     private boolean useContinue = false;
+    private boolean useCookies = true;
     private int requestPause = 1000;
 
     private String responseLine;
-    private List<String> responseHeaders = new ArrayList<String>();
-    private String responseBody;
+    private List<String> responseHeaders = new ArrayList<>();
+    private String sessionId;
     private boolean useContentLength;
+    private int contentLength;
+    private String redirectUri;
+
+    private String responseBody;
+    private List<String> bodyUriElements = null;
 
     protected void setPort(int thePort) {
         port = thePort;
@@ -78,12 +104,23 @@ public abstract class SimpleHttpClient {
         request = theRequest;
     }
 
+    /*
+     * Expect the server to reply with 100 Continue interim response
+     */
     public void setUseContinue(boolean theUseContinueFlag) {
         useContinue = theUseContinueFlag;
     }
 
     public boolean getUseContinue() {
         return useContinue;
+    }
+
+    public void setUseCookies(boolean theUseCookiesFlag) {
+        useCookies = theUseCookiesFlag;
+    }
+
+    public boolean getUseCookies() {
+        return useCookies;
     }
 
     public void setRequestPause(int theRequestPause) {
@@ -102,22 +139,39 @@ public abstract class SimpleHttpClient {
         return responseBody;
     }
 
+    /**
+     * Return opening tags of HTML elements that were extracted by the
+     * {@link #extractUriElements()} method.
+     *
+     * <p>
+     * Note, that {@link #extractUriElements()} method has to be called
+     * explicitly.
+     *
+     * @return List of HTML tags, accumulated by {@link #extractUriElements()}
+     *         method, or {@code null} if the method has not been called yet.
+     */
+    public List<String> getResponseBodyUriElements() {
+        return bodyUriElements;
+    }
+
     public void setUseContentLength(boolean b) {
         useContentLength = b;
     }
 
-    public String getSessionId() {
-        for (String header : responseHeaders) {
-            if (header.startsWith(SESSION_COOKIE_HEADER_PREFIX)) {
-                header = header.substring(SESSION_COOKIE_HEADER_PREFIX.length());
-                header = header.substring(0, header.indexOf(';'));
-                return header;
-            }
-        }
-        return null;
+    public void setSessionId(String theSessionId) {
+        sessionId = theSessionId;
     }
 
-    public void connect(int connectTimeout, int soTimeout) throws UnknownHostException, IOException {
+    public String getSessionId() {
+        return sessionId;
+    }
+
+    public String getRedirectUri() {
+        return redirectUri;
+    }
+
+    public void connect(int connectTimeout, int soTimeout)
+           throws UnknownHostException, IOException {
         final String encoding = "ISO-8859-1";
         SocketAddress addr = new InetSocketAddress("localhost", port);
         socket = new Socket();
@@ -137,34 +191,43 @@ public abstract class SimpleHttpClient {
         processRequest(true);
     }
 
-    public void processRequest(boolean readBody) throws IOException, InterruptedException {
+    public void processRequest(boolean wantBody)
+            throws IOException, InterruptedException {
         sendRequest();
 
-        readResponse(readBody);
+        readResponse(wantBody);
 
     }
 
+    /*
+     * Send the component parts of the request
+     * (be tolerant and simply skip null entries)
+     */
     public void sendRequest() throws InterruptedException, IOException {
-        // Send the request
         boolean first = true;
         for (String requestPart : request) {
-            if (first) {
-                first = false;
-            } else {
-                Thread.sleep(requestPause);
+            if (requestPart != null) {
+                if (first) {
+                    first = false;
+                }
+                else {
+                    Thread.sleep(requestPause);
+                }
+                writer.write(requestPart);
+                writer.flush();
             }
-            writer.write(requestPart);
-            writer.flush();
         }
     }
 
-    public void readResponse(boolean readBody) throws IOException {
-        // Reset fields use to hold response
-        responseLine = null;
+    public void readResponse(boolean wantBody) throws IOException {
+        // clear any residual data before starting on this response
         responseHeaders.clear();
         responseBody = null;
+        if (bodyUriElements != null) {
+            bodyUriElements.clear();
+        }
 
-        // Read the response
+        // Read the response status line
         responseLine = readLine();
 
         // Is a 100 continue response expected?
@@ -179,33 +242,123 @@ public abstract class SimpleHttpClient {
             }
         }
 
-        // Put the headers into the map
-        String line = readLine();
-        int cl = -1;
-        while (line!=null && line.length() > 0) {
-            responseHeaders.add(line);
-            line = readLine();
-            if (line != null && line.startsWith("Content-Length: ")) {
-                cl = Integer.parseInt(line.substring(16));
-            }
-        }
+        // Put the headers into a map, and process interesting ones
+        processHeaders();
 
-        // Read the body, if any
+        // Read the body, if requested and if one exists
+        processBody(wantBody);
+
+        if (isResponse408()) {
+            // the session has timed out
+            sessionId = null;
+        }
+    }
+
+    /*
+     * Accumulate the response headers into a map, and extract
+     * interesting details at the same time
+     */
+    private void processHeaders() throws IOException {
+        // Reset response fields
+        redirectUri = null;
+        contentLength = -1;
+
+        String line = readLine();
+        while ((line != null) && (line.length() > 0)) {
+            responseHeaders.add(line);
+            if (line.startsWith(CONTENT_LENGTH_HEADER_PREFIX)) {
+                contentLength = Integer.parseInt(line.substring(16));
+            }
+            else if (line.startsWith(COOKIE_HEADER_PREFIX)) {
+                if (useCookies) {
+                    String temp = line.substring(
+                            SESSION_COOKIE_HEADER_PREFIX.length());
+                    temp = temp.substring(0, temp.indexOf(';'));
+                    setSessionId(temp);
+                }
+            }
+            else if (line.startsWith(REDIRECT_HEADER_PREFIX)) {
+                redirectUri = line.substring(REDIRECT_HEADER_PREFIX.length());
+            }
+            line = readLine();
+        }
+    }
+
+    /*
+     * Read the body of the server response. Save its contents and
+     * search it for uri-elements only if requested
+     */
+    private void processBody(boolean wantBody) throws IOException {
+        // Read the body, if one exists
         StringBuilder builder = new StringBuilder();
-        if (readBody) {
-            if (cl > -1 && useContentLength) {
-                char[] body = new char[cl];
+        if (wantBody) {
+            if (useContentLength && (contentLength > -1)) {
+                char[] body = new char[contentLength];
                 reader.read(body);
                 builder.append(body);
-            } else {
-                line = readLine();
-                while (line != null) {
+            }
+            else {
+                // not using content length, so just read it line by line
+                String line = null;
+                while ((line = readLine()) != null) {
                     builder.append(line);
-                    line = readLine();
                 }
             }
         }
         responseBody = builder.toString();
+    }
+
+    /**
+     * Scan the response body for opening tags of certain HTML elements
+     * (&lt;a&gt;, &lt;form&gt;). If any are found, then accumulate them.
+     *
+     * <p>
+     * Note: This method has the following limitations: a) It assumes that the
+     * response is HTML. b) It searches for lowercase tags only.
+     *
+     * @see #getResponseBodyUriElements()
+     */
+    public void extractUriElements() {
+        bodyUriElements = new ArrayList<>();
+        if (responseBody.length() > 0) {
+            int ix = 0;
+            while ((ix = extractUriElement(responseBody, ix, RESOURCE_TAG)) > 0){
+                // loop
+            }
+            ix = 0;
+            while ((ix = extractUriElement(responseBody, ix, LOGIN_TAG)) > 0){
+                // loop
+            }
+        }
+    }
+
+    /*
+     * Scan an html body for a given html uri element, starting from the
+     * given index into the source string. If any are found, simply
+     * accumulate them as literal strings, including angle brackets.
+     * note: nested elements will not be collected.
+     *
+     * @param body HTTP body of the response
+     * @param startIx offset into the body to resume the scan (for iteration)
+     * @param elementName to scan for (only one at a time)
+     * @returns the index into the body to continue the scan (for iteration)
+     */
+    private int extractUriElement(String body, int startIx, String elementName) {
+        String detector = ELEMENT_HEAD + elementName + " ";
+        int iStart = body.indexOf(detector, startIx);
+        if (iStart > -1) {
+            int iEnd = body.indexOf(ELEMENT_TAIL, iStart);
+            if (iEnd < 0) {
+                throw new IllegalArgumentException(
+                        "Response body check failure.\n"
+                        + "element [" + detector + "] is not terminated with ["
+                        + ELEMENT_TAIL + "]\nActual: [" + body + "]");
+            }
+            String element = body.substring(iStart, iEnd);
+            bodyUriElements.add(element);
+            iStart += element.length();
+        }
+        return iStart;
     }
 
     public String readLine() throws IOException {
@@ -229,7 +382,7 @@ public abstract class SimpleHttpClient {
         useContinue = false;
 
         responseLine = null;
-        responseHeaders = new ArrayList<String>();
+        responseHeaders = new ArrayList<>();
         responseBody = null;
     }
 
@@ -251,6 +404,10 @@ public abstract class SimpleHttpClient {
 
     public boolean isResponse404() {
         return getResponseLine().startsWith(FAIL_404);
+    }
+
+    public boolean isResponse408() {
+        return getResponseLine().startsWith(TIMEOUT_408);
     }
 
     public boolean isResponse413() {

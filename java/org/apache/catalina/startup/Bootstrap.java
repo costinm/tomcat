@@ -170,7 +170,7 @@ public final class Bootstrap {
 
         value = replace(value);
 
-        List<Repository> repositories = new ArrayList<Repository>();
+        List<Repository> repositories = new ArrayList<>();
 
         StringTokenizer tokenizer = new StringTokenizer(value, ",");
         while (tokenizer.hasMoreElements()) {
@@ -447,7 +447,8 @@ public final class Bootstrap {
 
 
     /**
-     * Main method, used for testing only.
+     * Main method and entry point when starting Tomcat via the provided
+     * scripts.
      *
      * @param args Command line arguments to be processed
      */

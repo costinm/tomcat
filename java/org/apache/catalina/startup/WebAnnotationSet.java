@@ -14,10 +14,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-
 package org.apache.catalina.startup;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 
 import javax.annotation.Resource;
 import javax.annotation.Resources;
@@ -33,6 +33,8 @@ import org.apache.catalina.deploy.ContextResourceEnvRef;
 import org.apache.catalina.deploy.ContextService;
 import org.apache.catalina.deploy.FilterDef;
 import org.apache.catalina.deploy.MessageDestinationRef;
+import org.apache.catalina.util.Introspection;
+import org.apache.tomcat.util.res.StringManager;
 
 /**
  * <p><strong>AnnotationSet</strong> for processing the annotations of the web application
@@ -44,9 +46,16 @@ import org.apache.catalina.deploy.MessageDestinationRef;
 
 public class WebAnnotationSet {
 
+    private static final String SEPARATOR = "/";
+
+    /**
+     * The string resources for this package.
+     */
+    protected static final StringManager sm =
+        StringManager.getManager(Constants.Package);
+
 
     // --------------------------------------------------------- Public Methods
-
 
     /**
      * Process the annotations on a context.
@@ -68,9 +77,18 @@ public class WebAnnotationSet {
      * Process the annotations for the listeners.
      */
     protected static void loadApplicationListenerAnnotations(Context context) {
+        Class<?> classClass = null;
         String[] applicationListeners = context.findApplicationListeners();
         for (int i = 0; i < applicationListeners.length; i++) {
-            loadClassAnnotation(context, applicationListeners[i]);
+            classClass = Introspection.loadClass(context,
+                    applicationListeners[i]);
+            if (classClass == null) {
+                continue;
+            }
+
+            loadClassAnnotation(context, classClass);
+            loadFieldsAnnotation(context, classClass);
+            loadMethodsAnnotation(context, classClass);
         }
     }
 
@@ -79,9 +97,18 @@ public class WebAnnotationSet {
      * Process the annotations for the filters.
      */
     protected static void loadApplicationFilterAnnotations(Context context) {
+        Class<?> classClass = null;
         FilterDef[] filterDefs = context.findFilterDefs();
         for (int i = 0; i < filterDefs.length; i++) {
-            loadClassAnnotation(context, (filterDefs[i]).getFilterClass());
+            classClass = Introspection.loadClass(context,
+                    (filterDefs[i]).getFilterClass());
+            if (classClass == null) {
+                continue;
+            }
+
+            loadClassAnnotation(context, classClass);
+            loadFieldsAnnotation(context, classClass);
+            loadMethodsAnnotation(context, classClass);
         }
     }
 
@@ -91,7 +118,6 @@ public class WebAnnotationSet {
      */
     protected static void loadApplicationServletAnnotations(Context context) {
 
-        ClassLoader classLoader = context.getLoader().getClassLoader();
         Wrapper wrapper = null;
         Class<?> classClass = null;
 
@@ -104,19 +130,16 @@ public class WebAnnotationSet {
                     continue;
                 }
 
-                try {
-                    classClass = classLoader.loadClass(wrapper.getServletClass());
-                } catch (ClassNotFoundException e) {
-                    // We do nothing
-                } catch (NoClassDefFoundError e) {
-                    // We do nothing
-                }
-
+                classClass = Introspection.loadClass(context,
+                        wrapper.getServletClass());
                 if (classClass == null) {
                     continue;
                 }
 
-                loadClassAnnotation(context, wrapper.getServletClass());
+                loadClassAnnotation(context, classClass);
+                loadFieldsAnnotation(context, classClass);
+                loadMethodsAnnotation(context, classClass);
+
                 /* Process RunAs annotation which can be only on servlets.
                  * Ref JSR 250, equivalent to the run-as element in
                  * the deployment descriptor
@@ -135,25 +158,9 @@ public class WebAnnotationSet {
     /**
      * Process the annotations on a context for a given className.
      */
-    protected static void loadClassAnnotation(Context context, String fileString) {
-
-        ClassLoader classLoader = context.getLoader().getClassLoader();
-        Class<?> classClass = null;
-
-        try {
-            classClass = classLoader.loadClass(fileString);
-        } catch (ClassNotFoundException e) {
-            // We do nothing
-        } catch (NoClassDefFoundError e) {
-            // We do nothing
-        }
-
-        if (classClass == null) {
-            return;
-        }
-
+    protected static void loadClassAnnotation(Context context,
+            Class<?> classClass) {
         // Initialize the annotations
-
         if (classClass.isAnnotationPresent(Resource.class)) {
             Resource annotation = classClass.getAnnotation(Resource.class);
             addResource(context, annotation);
@@ -245,10 +252,51 @@ public class WebAnnotationSet {
                 context.addSecurityRole(annotation.value()[i]);
             }
         }
-
-
     }
 
+
+    protected static void loadFieldsAnnotation(Context context,
+            Class<?> classClass) {
+        // Initialize the annotations
+        Field[] fields = Introspection.getDeclaredFields(classClass);
+        if (fields != null && fields.length > 0) {
+            for (Field field : fields) {
+                if (field.isAnnotationPresent(Resource.class)) {
+                    Resource annotation = field.getAnnotation(Resource.class);
+                    String defaultName =
+                            classClass.getName() + SEPARATOR + field.getName();
+                    String defaultType = field.getType().getCanonicalName();
+                    addResource(context, annotation, defaultName, defaultType);
+                }
+            }
+        }
+    }
+
+
+    protected static void loadMethodsAnnotation(Context context,
+            Class<?> classClass) {
+        // Initialize the annotations
+        Method[] methods = Introspection.getDeclaredMethods(classClass);
+        if (methods != null && methods.length > 0) {
+            for (Method method : methods) {
+                if (method.isAnnotationPresent(Resource.class)) {
+                    Resource annotation = method.getAnnotation(Resource.class);
+
+                    if (!Introspection.isValidSetter(method)) {
+                        throw new IllegalArgumentException(sm.getString(
+                                "webAnnotationSet.invalidInjection"));
+                    }
+
+                    String defaultName = classClass.getName() + SEPARATOR +
+                            Introspection.getPropertyName(method);
+
+                    String defaultType =
+                            (method.getParameterTypes()[0]).getCanonicalName();
+                    addResource(context, annotation, defaultName, defaultType);
+                }
+            }
+        }
+    }
 
     /**
      * Process a Resource annotation to set up a Resource.
@@ -257,22 +305,29 @@ public class WebAnnotationSet {
      * or service-ref element in the deployment descriptor.
      */
     protected static void addResource(Context context, Resource annotation) {
+        addResource(context, annotation, null, null);
+    }
 
-        if (annotation.type().getCanonicalName().equals("java.lang.String") ||
-                annotation.type().getCanonicalName().equals("java.lang.Character") ||
-                annotation.type().getCanonicalName().equals("java.lang.Integer") ||
-                annotation.type().getCanonicalName().equals("java.lang.Boolean") ||
-                annotation.type().getCanonicalName().equals("java.lang.Double") ||
-                annotation.type().getCanonicalName().equals("java.lang.Byte") ||
-                annotation.type().getCanonicalName().equals("java.lang.Short") ||
-                annotation.type().getCanonicalName().equals("java.lang.Long") ||
-                annotation.type().getCanonicalName().equals("java.lang.Float")) {
+    protected static void addResource(Context context, Resource annotation,
+            String defaultName, String defaultType) {
+        String name = getName(annotation, defaultName);
+        String type = getType(annotation, defaultType);
+
+        if (type.equals("java.lang.String") ||
+                type.equals("java.lang.Character") ||
+                type.equals("java.lang.Integer") ||
+                type.equals("java.lang.Boolean") ||
+                type.equals("java.lang.Double") ||
+                type.equals("java.lang.Byte") ||
+                type.equals("java.lang.Short") ||
+                type.equals("java.lang.Long") ||
+                type.equals("java.lang.Float")) {
 
             // env-ref element
             ContextEnvironment resource = new ContextEnvironment();
 
-            resource.setName(annotation.name());
-            resource.setType(annotation.type().getCanonicalName());
+            resource.setName(name);
+            resource.setType(type);
 
             resource.setDescription(annotation.description());
 
@@ -280,37 +335,34 @@ public class WebAnnotationSet {
 
             context.getNamingResources().addEnvironment(resource);
 
-        } else if (annotation.type().getCanonicalName().equals("javax.xml.rpc.Service")) {
+        } else if (type.equals("javax.xml.rpc.Service")) {
 
             // service-ref element
             ContextService service = new ContextService();
 
-            service.setName(annotation.name());
+            service.setName(name);
             service.setWsdlfile(annotation.mappedName());
 
-            service.setType(annotation.type().getCanonicalName());
+            service.setType(type);
             service.setDescription(annotation.description());
 
             context.getNamingResources().addService(service);
 
-        } else if (annotation.type().getCanonicalName().equals("javax.sql.DataSource") ||
-                annotation.type().getCanonicalName().equals("javax.jms.ConnectionFactory") ||
-                annotation.type().getCanonicalName()
-                .equals("javax.jms.QueueConnectionFactory") ||
-                annotation.type().getCanonicalName()
-                .equals("javax.jms.TopicConnectionFactory") ||
-                annotation.type().getCanonicalName().equals("javax.mail.Session") ||
-                annotation.type().getCanonicalName().equals("java.net.URL") ||
-                annotation.type().getCanonicalName()
-                .equals("javax.resource.cci.ConnectionFactory") ||
-                annotation.type().getCanonicalName().equals("org.omg.CORBA_2_3.ORB") ||
-                annotation.type().getCanonicalName().endsWith("ConnectionFactory")) {
+        } else if (type.equals("javax.sql.DataSource") ||
+                type.equals("javax.jms.ConnectionFactory") ||
+                type.equals("javax.jms.QueueConnectionFactory") ||
+                type.equals("javax.jms.TopicConnectionFactory") ||
+                type.equals("javax.mail.Session") ||
+                type.equals("java.net.URL") ||
+                type.equals("javax.resource.cci.ConnectionFactory") ||
+                type.equals("org.omg.CORBA_2_3.ORB") ||
+                type.endsWith("ConnectionFactory")) {
 
             // resource-ref element
             ContextResource resource = new ContextResource();
 
-            resource.setName(annotation.name());
-            resource.setType(annotation.type().getCanonicalName());
+            resource.setName(name);
+            resource.setType(type);
 
             if (annotation.authenticationType()
                     == Resource.AuthenticationType.CONTAINER) {
@@ -327,31 +379,29 @@ public class WebAnnotationSet {
 
             context.getNamingResources().addResource(resource);
 
-        } else if (annotation.type().getCanonicalName().equals("javax.jms.Queue") ||
-                annotation.type().getCanonicalName().equals("javax.jms.Topic")) {
+        } else if (type.equals("javax.jms.Queue") ||
+                type.equals("javax.jms.Topic")) {
 
             // message-destination-ref
             MessageDestinationRef resource = new MessageDestinationRef();
 
-            resource.setName(annotation.name());
-            resource.setType(annotation.type().getCanonicalName());
+            resource.setName(name);
+            resource.setType(type);
 
             resource.setUsage(annotation.mappedName());
             resource.setDescription(annotation.description());
 
             context.getNamingResources().addMessageDestinationRef(resource);
 
-        } else if (annotation.type().getCanonicalName()
-                .equals("javax.resource.cci.InteractionSpec") ||
-                annotation.type().getCanonicalName()
-                .equals("javax.transaction.UserTransaction") ||
+        } else if (type.equals("javax.resource.cci.InteractionSpec") ||
+                type.equals("javax.transaction.UserTransaction") ||
                 true) {
 
             // resource-env-ref
             ContextResourceEnvRef resource = new ContextResourceEnvRef();
 
-            resource.setName(annotation.name());
-            resource.setType(annotation.type().getCanonicalName());
+            resource.setName(name);
+            resource.setType(type);
 
             resource.setProperty("mappedName", annotation.mappedName());
             resource.setDescription(annotation.description());
@@ -359,9 +409,27 @@ public class WebAnnotationSet {
             context.getNamingResources().addResourceEnvRef(resource);
 
         }
-
-
     }
 
 
+    private static String getType(Resource annotation, String defaultType) {
+        String type = annotation.type().getCanonicalName();
+        if (type == null || type.equals("java.lang.Object")) {
+            if (defaultType != null) {
+                type = defaultType;
+            }
+        }
+        return type;
+    }
+
+
+    private static String getName(Resource annotation, String defaultName) {
+        String name = annotation.name();
+        if (name == null || name.equals("")) {
+            if (defaultName != null) {
+                name = defaultName;
+            }
+        }
+        return name;
+    }
 }

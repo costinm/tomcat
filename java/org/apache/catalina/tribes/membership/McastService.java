@@ -173,26 +173,8 @@ public class McastService implements MembershipService,MembershipListener,Messag
         properties.setProperty("mcastAddress", addr);
     }
 
-    /**
-     * @deprecated use setAddress
-     * @param addr String
-     */
-    @Deprecated
-    public void setMcastAddr(String addr) {
-        setAddress(addr);
-    }
-
     public String getAddress() {
         return properties.getProperty("mcastAddress");
-    }
-
-    /**
-     * @deprecated use getAddress
-     * @return String
-     */
-    @Deprecated
-    public String getMcastAddr() {
-        return getAddress();
     }
 
     public void setMcastBindAddress(String bindaddr) {
@@ -202,26 +184,9 @@ public class McastService implements MembershipService,MembershipListener,Messag
     public void setBind(String bindaddr) {
         properties.setProperty("mcastBindAddress", bindaddr);
     }
-    /**
-     * @deprecated use getBind
-     * @return String
-     */
-    @Deprecated
-    public String getMcastBindAddress() {
-        return getBind();
-    }
 
     public String getBind() {
         return properties.getProperty("mcastBindAddress");
-    }
-
-    /**
-     * @deprecated use setPort
-     * @param port int
-     */
-    @Deprecated
-    public void setMcastPort(int port) {
-        setPort(port);
     }
 
     public void setPort(int port) {
@@ -276,39 +241,13 @@ public class McastService implements MembershipService,MembershipListener,Messag
         return false;
     }
 
-    /**
-     * @deprecated use getPort()
-     * @return int
-     */
-    @Deprecated
-    public int getMcastPort() {
-        return getPort();
-    }
     public int getPort() {
         String p = properties.getProperty("mcastPort");
         return new Integer(p).intValue();
     }
 
-    /**
-     * @deprecated use setFrequency
-     * @param time long
-     */
-    @Deprecated
-    public void setMcastFrequency(long time) {
-        setFrequency(time);
-    }
-
     public void setFrequency(long time) {
         properties.setProperty("mcastFrequency", String.valueOf(time));
-    }
-
-    /**
-     * @deprecated use getFrequency
-     * @return long
-     */
-    @Deprecated
-    public long getMcastFrequency() {
-        return getFrequency();
     }
 
     public long getFrequency() {
@@ -321,15 +260,6 @@ public class McastService implements MembershipService,MembershipListener,Messag
     }
     public void setDropTime(long time) {
         properties.setProperty("memberDropTime", String.valueOf(time));
-    }
-
-    /**
-     * @deprecated use getDropTime
-     * @return long
-     */
-    @Deprecated
-    public long getMcastDropTime() {
-        return getDropTime();
     }
 
     public long getDropTime() {
@@ -400,14 +330,16 @@ public class McastService implements MembershipService,MembershipListener,Messag
             try {
                 ttl = Integer.parseInt(properties.getProperty("mcastTTL"));
             } catch ( Exception x ) {
-                log.error("Unable to parse mcastTTL="+properties.getProperty("mcastTTL"),x);
+                log.error(sm.getString("McastService.parseTTL",
+                        properties.getProperty("mcastTTL")), x);
             }
         }
         if ( properties.getProperty("mcastSoTimeout") != null ) {
             try {
                 soTimeout = Integer.parseInt(properties.getProperty("mcastSoTimeout"));
             } catch ( Exception x ) {
-                log.error("Unable to parse mcastSoTimeout="+properties.getProperty("mcastSoTimeout"),x);
+                log.error(sm.getString("McastService.parseTTL",
+                        properties.getProperty("mcastSoTimeout")), x);
             }
         }
 
@@ -444,7 +376,8 @@ public class McastService implements MembershipService,MembershipListener,Messag
         try  {
             if ( impl != null && impl.stop(svc) ) impl = null;
         } catch ( Exception x)  {
-            log.error("Unable to stop the mcast service, level:"+svc+".",x);
+            log.error(sm.getString(
+                    "McastService.stopFail", Integer.valueOf(svc)), x);
         }
     }
 
@@ -569,40 +502,13 @@ public class McastService implements MembershipService,MembershipListener,Messag
         }
     }
 
-    /**
-     * @deprecated use getSoTimeout
-     * @return int
-     */
-    @Deprecated
-    public int getMcastSoTimeout() {
-        return getSoTimeout();
-    }
-
     public int getSoTimeout() {
         return mcastSoTimeout;
-    }
-
-    /**
-     * @deprecated use setSoTimeout
-     * @param mcastSoTimeout int
-     */
-    @Deprecated
-    public void setMcastSoTimeout(int mcastSoTimeout) {
-        setSoTimeout(mcastSoTimeout);
     }
 
     public void setSoTimeout(int mcastSoTimeout) {
         this.mcastSoTimeout = mcastSoTimeout;
         properties.setProperty("mcastSoTimeout", String.valueOf(mcastSoTimeout));
-    }
-
-    /**
-     * @deprecated use getTtl
-     * @return int
-     */
-    @Deprecated
-    public int getMcastTTL() {
-        return getTtl();
     }
 
     public int getTtl() {
@@ -615,15 +521,6 @@ public class McastService implements MembershipService,MembershipListener,Messag
 
     public byte[] getDomain() {
         return domain;
-    }
-
-    /**
-     * @deprecated use setTtl
-     * @param mcastTTL int
-     */
-    @Deprecated
-    public void setMcastTTL(int mcastTTL) {
-        setTtl(mcastTTL);
     }
 
     public void setTtl(int mcastTTL) {
@@ -640,7 +537,7 @@ public class McastService implements MembershipService,MembershipListener,Messag
             try {
                 if (impl != null) impl.send(false);
             }catch ( Exception x ) {
-                log.error("Unable to send payload update.",x);
+                log.error(sm.getString("McastService.payload"), x);
             }
         }
     }
@@ -654,7 +551,7 @@ public class McastService implements MembershipService,MembershipListener,Messag
             try {
                 if (impl != null) impl.send(false);
             }catch ( Exception x ) {
-                log.error("Unable to send domain update.",x);
+                log.error(sm.getString("McastService.domain"), x);
             }
         }
     }
@@ -671,8 +568,6 @@ public class McastService implements MembershipService,MembershipListener,Messag
      * @throws Exception If an error occurs
      */
     public static void main(String args[]) throws Exception {
-        if(log.isInfoEnabled())
-            log.info("Usage McastService hostname tcpport");
         McastService service = new McastService();
         java.util.Properties p = new java.util.Properties();
         p.setProperty("mcastPort","5555");

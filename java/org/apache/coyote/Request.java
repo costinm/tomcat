@@ -20,6 +20,9 @@ package org.apache.coyote;
 import java.io.IOException;
 import java.util.HashMap;
 
+import javax.servlet.ReadListener;
+
+import org.apache.coyote.http11.AbstractInputBuffer;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
 import org.apache.tomcat.util.buf.UDecoder;
@@ -125,7 +128,7 @@ public final class Request {
 
     private final MessageBytes remoteUser=MessageBytes.newInstance();
     private final MessageBytes authType=MessageBytes.newInstance();
-    private final HashMap<String,Object> attributes=new HashMap<String,Object>();
+    private final HashMap<String,Object> attributes=new HashMap<>();
 
     private Response response;
     private ActionHook hook;
@@ -136,6 +139,34 @@ public final class Request {
     private int available = 0;
 
     private final RequestInfo reqProcessorMX=new RequestInfo(this);
+
+
+    // ------------------------------------------------------------- TODO SERVLET 3.1 IN PROGRESS
+
+    protected volatile ReadListener listener;
+
+    public ReadListener getReadListener() {
+        return listener;
+    }
+
+    public void setReadListener(ReadListener listener) {
+        //TODO SERVLET 3.1 is it allowed to switch from non block to blocking?
+        setBlocking(listener==null);
+        this.listener = listener;
+    }
+
+    protected volatile boolean blocking = true;
+
+    public boolean isBlocking() {
+        return blocking;
+    }
+
+    public void setBlocking(boolean blocking) throws IllegalStateException {
+        @SuppressWarnings("rawtypes")
+        AbstractInputBuffer buf = (AbstractInputBuffer)inputBuffer;
+        if (!blocking && !buf.supportsNonBlocking()) throw new IllegalStateException();
+        this.blocking = blocking;
+    }
     // ------------------------------------------------------------- Properties
 
 
@@ -505,6 +536,9 @@ public final class Request {
         remoteUser.recycle();
         authType.recycle();
         attributes.clear();
+
+        blocking = true;
+        listener = null;
     }
 
     // -------------------- Info  --------------------

@@ -73,30 +73,10 @@ public class IdentityInputFilter implements InputFilter {
     /**
      * Chunk used to read leftover bytes.
      */
-    protected ByteChunk endChunk = new ByteChunk();
-
-
-    // ------------------------------------------------------------- Properties
-
-
-    /**
-     * Get content length.
-     */
-    public long getContentLength() {
-        return contentLength;
-    }
-
-
-    /**
-     * Get remaining bytes.
-     */
-    public long getRemaining() {
-        return remaining;
-    }
+    protected final ByteChunk endChunk = new ByteChunk();
 
 
     // ---------------------------------------------------- InputBuffer Methods
-
 
     /**
      * Read bytes.

@@ -28,10 +28,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.naming.Context;
 import javax.naming.InitialContext;
 import javax.naming.NamingException;
+import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -159,13 +161,40 @@ public class TestTomcat extends TomcatBaseTest {
     }
 
     /**
+     * Simple servlet to test initialization of servlet instances.
+     */
+    private static class InitCount extends HttpServlet {
+
+        private static final long serialVersionUID = 1L;
+
+        private AtomicInteger callCount = new AtomicInteger(0);
+
+        @Override
+        public void init() throws ServletException {
+            super.init();
+            callCount.incrementAndGet();
+        }
+
+        @Override
+        protected void doGet(HttpServletRequest req, HttpServletResponse resp)
+                throws ServletException, IOException {
+            resp.setContentType("text/plain");
+            resp.getWriter().print("OK");
+        }
+
+        public int getCallCount() {
+            return callCount.intValue();
+        }
+    }
+
+
+    /**
      * Simple Realm that uses a configurable {@link Map} to link user names and
      * passwords.
      */
     public static final class MapRealm extends RealmBase {
-        private Map<String,String> users = new HashMap<String,String>();
-        private Map<String,List<String>> roles =
-            new HashMap<String,List<String>>();
+        private Map<String,String> users = new HashMap<>();
+        private Map<String,List<String>> roles = new HashMap<>();
 
         public void addUser(String username, String password) {
             users.put(username, password);
@@ -174,7 +203,7 @@ public class TestTomcat extends TomcatBaseTest {
         public void addUserRole(String username, String role) {
             List<String> userRoles = roles.get(username);
             if (userRoles == null) {
-                userRoles = new ArrayList<String>();
+                userRoles = new ArrayList<>();
                 roles.put(username, userRoles);
             }
             userRoles.add(role);
@@ -396,5 +425,25 @@ public class TestTomcat extends TomcatBaseTest {
             e = ex;
         }
         assertNull(e);
+    }
+
+    @Test
+    public void testBug53301() throws Exception {
+        Tomcat tomcat = getTomcatInstance();
+
+        // Must have a real docBase - just use temp
+        org.apache.catalina.Context ctx =
+            tomcat.addContext("", System.getProperty("java.io.tmpdir"));
+
+        InitCount initCount = new InitCount();
+        Tomcat.addServlet(ctx, "initCount", initCount);
+        ctx.addServletMapping("/", "initCount");
+
+        tomcat.start();
+
+        ByteChunk res = getUrl("http://localhost:" + getPort() + "/");
+        assertEquals("OK", res.toString());
+
+        assertEquals(1, initCount.getCallCount());
     }
 }

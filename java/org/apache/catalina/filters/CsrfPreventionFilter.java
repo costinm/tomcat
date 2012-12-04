@@ -33,6 +33,7 @@ import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpServletResponseWrapper;
+import javax.servlet.http.HttpSession;
 
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -56,13 +57,33 @@ public class CsrfPreventionFilter extends FilterBase {
 
     private Random randomSource;
 
-    private final Set<String> entryPoints = new HashSet<String>();
+    private int denyStatus = HttpServletResponse.SC_FORBIDDEN;
+
+    private final Set<String> entryPoints = new HashSet<>();
 
     private int nonceCacheSize = 5;
 
     @Override
     protected Log getLogger() {
         return log;
+    }
+
+    /**
+     * Return response status code that is used to reject denied request.
+     */
+    public int getDenyStatus() {
+        return denyStatus;
+    }
+
+    /**
+     * Set response status code that is used to reject denied request. If none
+     * set, the default value of 403 will be used.
+     *
+     * @param denyStatus
+     *            HTTP status code
+     */
+    public void setDenyStatus(int denyStatus) {
+        this.denyStatus = denyStatus;
     }
 
     /**
@@ -153,24 +174,29 @@ public class CsrfPreventionFilter extends FilterBase {
                 }
             }
 
-            @SuppressWarnings("unchecked")
-            LruCache<String> nonceCache =
-                (LruCache<String>) req.getSession(true).getAttribute(
-                    Constants.CSRF_NONCE_SESSION_ATTR_NAME);
+            HttpSession session = req.getSession(false);
+
+            LruCache<String> nonceCache = (session == null) ? null
+                    : (LruCache<String>) session.getAttribute(
+                            Constants.CSRF_NONCE_SESSION_ATTR_NAME);
 
             if (!skipNonceCheck) {
                 String previousNonce =
                     req.getParameter(Constants.CSRF_NONCE_REQUEST_PARAM);
 
-                if (nonceCache != null && !nonceCache.contains(previousNonce)) {
-                    res.sendError(HttpServletResponse.SC_FORBIDDEN);
+                if (nonceCache == null || previousNonce == null ||
+                        !nonceCache.contains(previousNonce)) {
+                    res.sendError(denyStatus);
                     return;
                 }
             }
 
             if (nonceCache == null) {
-                nonceCache = new LruCache<String>(nonceCacheSize);
-                req.getSession().setAttribute(
+                nonceCache = new LruCache<>(nonceCacheSize);
+                if (session == null) {
+                    session = req.getSession(true);
+                }
+                session.setAttribute(
                         Constants.CSRF_NONCE_SESSION_ATTR_NAME, nonceCache);
             }
 

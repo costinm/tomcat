@@ -49,8 +49,15 @@ public class AjpAprProtocol extends AbstractAjpProtocol {
     }
 
 
-    // ------------------------------------------------------------ Constructor
+    @Override
+    public boolean isAprRequired() {
+        // Override since this protocol implementation requires the APR/native
+        // library
+        return true;
+    }
 
+
+    // ------------------------------------------------------------ Constructor
 
     public AjpAprProtocol() {
         endpoint = new AprEndpoint();
@@ -70,7 +77,7 @@ public class AjpAprProtocol extends AbstractAjpProtocol {
     /**
      * Connection handler for AJP.
      */
-    private AjpConnectionHandler cHandler;
+    private final AjpConnectionHandler cHandler;
 
 
     // --------------------------------------------------------- Public Methods
@@ -99,7 +106,7 @@ public class AjpAprProtocol extends AbstractAjpProtocol {
             extends AbstractAjpConnectionHandler<Long,AjpAprProcessor>
             implements Handler {
 
-        protected AjpAprProtocol proto;
+        protected final AjpAprProtocol proto;
 
         public AjpConnectionHandler(AjpAprProtocol proto) {
             this.proto = proto;
@@ -124,10 +131,12 @@ public class AjpAprProtocol extends AbstractAjpProtocol {
                 Processor<Long> processor, boolean isSocketClosing,
                 boolean addToPoller) {
             processor.recycle(isSocketClosing);
-            recycledProcessors.offer(processor);
+            recycledProcessors.push(processor);
             if (addToPoller) {
                 ((AprEndpoint)proto.endpoint).getPoller().add(
-                        socket.getSocket().longValue(), true);
+                        socket.getSocket().longValue(),
+                        proto.endpoint.getKeepAliveTimeout(),
+                        AprEndpoint.Poller.FLAGS_READ);
             }
         }
 
@@ -135,7 +144,7 @@ public class AjpAprProtocol extends AbstractAjpProtocol {
         @Override
         protected AjpAprProcessor createProcessor() {
             AjpAprProcessor processor = new AjpAprProcessor(proto.packetSize, (AprEndpoint)proto.endpoint);
-            processor.setAdapter(proto.adapter);
+            processor.setAdapter(proto.getAdapter());
             processor.setTomcatAuthentication(proto.tomcatAuthentication);
             processor.setRequiredSecret(proto.requiredSecret);
             processor.setClientCertProvider(proto.getClientCertProvider());

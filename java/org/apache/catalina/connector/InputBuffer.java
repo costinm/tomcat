@@ -23,6 +23,8 @@ import java.security.PrivilegedActionException;
 import java.security.PrivilegedExceptionAction;
 import java.util.HashMap;
 
+import javax.servlet.ReadListener;
+
 import org.apache.catalina.security.SecurityUtil;
 import org.apache.coyote.ActionCode;
 import org.apache.coyote.Request;
@@ -106,8 +108,7 @@ public class InputBuffer extends Reader
     /**
      * List of encoders.
      */
-    protected HashMap<String,B2CConverter> encoders =
-        new HashMap<String,B2CConverter>();
+    protected final HashMap<String,B2CConverter> encoders = new HashMap<>();
 
 
     /**
@@ -131,7 +132,7 @@ public class InputBuffer extends Reader
     /**
      * Buffer size.
      */
-    private int size = -1;
+    private final int size;
 
 
     // ----------------------------------------------------------- Constructors
@@ -248,8 +249,35 @@ public class InputBuffer extends Reader
     }
 
 
-    // ------------------------------------------------- Bytes Handling Methods
+    private volatile ReadListener listener;
+    public void setReadListener(ReadListener listener) {
+        this.listener = listener;
+        coyoteRequest.action(ActionCode.SET_READ_LISTENER, listener);
+    }
 
+
+    public ReadListener getReadListener() {
+        return listener;
+    }
+
+
+    public boolean isFinished() {
+        return available() == 0;
+    }
+
+
+    public boolean isReady() {
+        if (getReadListener()==null) throw new IllegalStateException("not in non blocking mode.");
+        int available = available();
+        boolean result = available > 0;
+        if (!result) {
+            coyoteRequest.action(ActionCode.NB_READ_INTEREST, null);
+        }
+        return result;
+    }
+
+
+    // ------------------------------------------------- Bytes Handling Methods
 
     /**
      * Reads new bytes in the byte chunk.
@@ -441,7 +469,9 @@ public class InputBuffer extends Reader
         if (closed) {
             throw new IOException(sm.getString("inputBuffer.streamClosed"));
         }
-
+        if (state == INITIAL_STATE) {
+            state = CHAR_STATE;
+        }
         return (available() > 0);
     }
 

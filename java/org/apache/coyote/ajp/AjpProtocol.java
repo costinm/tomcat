@@ -71,7 +71,7 @@ public class AjpProtocol extends AbstractAjpProtocol {
     /**
      * Connection handler for AJP.
      */
-    private AjpConnectionHandler cHandler;
+    private final AjpConnectionHandler cHandler;
 
 
     // ----------------------------------------------------- JMX related methods
@@ -89,7 +89,7 @@ public class AjpProtocol extends AbstractAjpProtocol {
             extends AbstractAjpConnectionHandler<Socket,AjpProcessor>
             implements Handler {
 
-        protected AjpProtocol proto;
+        protected final AjpProtocol proto;
 
         public AjpConnectionHandler(AjpProtocol proto) {
             this.proto = proto;
@@ -125,14 +125,14 @@ public class AjpProtocol extends AbstractAjpProtocol {
                 Processor<Socket> processor, boolean isSocketClosing,
                 boolean addToPoller) {
             processor.recycle(isSocketClosing);
-            recycledProcessors.offer(processor);
+            recycledProcessors.push(processor);
         }
 
 
         @Override
         protected AjpProcessor createProcessor() {
             AjpProcessor processor = new AjpProcessor(proto.packetSize, (JIoEndpoint)proto.endpoint);
-            processor.setAdapter(proto.adapter);
+            processor.setAdapter(proto.getAdapter());
             processor.setTomcatAuthentication(proto.tomcatAuthentication);
             processor.setRequiredSecret(proto.requiredSecret);
             processor.setKeepAliveTimeout(proto.getKeepAliveTimeout());

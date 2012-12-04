@@ -40,17 +40,20 @@ public final class FastHttpDateFormat {
 
 
     /**
-     * HTTP date format.
+     * The only date format permitted when generating HTTP headers.
      */
+    public static final String RFC1123_DATE =
+            "EEE, dd MMM yyyy HH:mm:ss zzz";
+
     private static final SimpleDateFormat format =
-        new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US);
+            new SimpleDateFormat(RFC1123_DATE, Locale.US);
 
 
     /**
      * The set of SimpleDateFormat formats to use in getDateHeader().
      */
     private static final SimpleDateFormat formats[] = {
-        new SimpleDateFormat("EEE, dd MMM yyyy HH:mm:ss zzz", Locale.US),
+        new SimpleDateFormat(RFC1123_DATE, Locale.US),
         new SimpleDateFormat("EEEEEE, dd-MMM-yy HH:mm:ss zzz", Locale.US),
         new SimpleDateFormat("EEE MMMM d HH:mm:ss yyyy", Locale.US)
     };
@@ -89,14 +92,14 @@ public final class FastHttpDateFormat {
      * Formatter cache.
      */
     private static final ConcurrentHashMap<Long, String> formatCache =
-        new ConcurrentHashMap<Long, String>(CACHE_SIZE);
+            new ConcurrentHashMap<>(CACHE_SIZE);
 
 
     /**
      * Parser cache.
      */
     private static final ConcurrentHashMap<String, Long> parseCache =
-        new ConcurrentHashMap<String, Long>(CACHE_SIZE);
+            new ConcurrentHashMap<>(CACHE_SIZE);
 
 
     // --------------------------------------------------------- Public Methods

@@ -69,7 +69,7 @@ public class InternalOutputBuffer extends AbstractOutputBuffer<Socket>
     /**
      * Socket buffer.
      */
-    private ByteChunk socketBuffer;
+    private final ByteChunk socketBuffer;
 
 
     /**
@@ -94,6 +94,11 @@ public class InternalOutputBuffer extends AbstractOutputBuffer<Socket>
 
 
     // --------------------------------------------------------- Public Methods
+
+    @Override
+    public boolean supportsNonBlocking() {
+        return false;
+    }
 
     @Override
     public void init(SocketWrapper<Socket> socketWrapper,

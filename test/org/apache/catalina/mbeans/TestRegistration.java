@@ -64,6 +64,7 @@ public class TestRegistration extends TomcatBaseTest {
         return new String[] {
             "Tomcat:type=Engine",
             "Tomcat:type=Realm,realmPath=/realm0",
+            "Tomcat:type=Mapper",
             "Tomcat:type=MBeanFactory",
             "Tomcat:type=NamingResources",
             "Tomcat:type=Server",
@@ -95,7 +96,6 @@ public class TestRegistration extends TomcatBaseTest {
         return new String[] {
             "Tomcat:j2eeType=WebModule,name=//" + host + context +
                 ",J2EEApplication=none,J2EEServer=none",
-            "Tomcat:type=Cache,host=" + host + ",context=" + context,
             "Tomcat:type=Loader,context=" + context + ",host=" + host,
             "Tomcat:type=Manager,context=" + context + ",host=" + host,
             "Tomcat:type=NamingResources,context=" + context +
@@ -106,6 +106,8 @@ public class TestRegistration extends TomcatBaseTest {
                 ",host=" + host + ",name=StandardContextValve",
             "Tomcat:type=WebappClassLoader,context=" + context +
                 ",host=" + host,
+            "Tomcat:type=WebResourceRoot,context=" + context +
+                ",host=" + host,
         };
     }
 
@@ -115,8 +117,6 @@ public class TestRegistration extends TomcatBaseTest {
                 + ObjectName.quote(ADDRESS),
         "Tomcat:type=GlobalRequestProcessor,name="
                 + ObjectName.quote("http-" + type + "-" + ADDRESS + "-" + port),
-        "Tomcat:type=Mapper,port=" + port + ",address="
-                + ObjectName.quote(ADDRESS),
         "Tomcat:type=ProtocolHandler,port=" + port + ",address="
                 + ObjectName.quote(ADDRESS),
         "Tomcat:type=ThreadPool,name="
@@ -156,7 +156,7 @@ public class TestRegistration extends TomcatBaseTest {
 
         // Verify there are the correct Tomcat MBeans
         onames = mbeanServer.queryNames(new ObjectName("Tomcat:*"), null);
-        ArrayList<String> found = new ArrayList<String>(onames.size());
+        ArrayList<String> found = new ArrayList<>(onames.size());
         for (ObjectName on: onames) {
             found.add(on.toString());
         }
@@ -171,14 +171,15 @@ public class TestRegistration extends TomcatBaseTest {
         } else {
             protocol = "bio";
         }
-        ArrayList<String> expected = new ArrayList<String>(Arrays.asList(basicMBeanNames()));
+        String index = getTomcatInstance().getConnector().getProperty("nameIndex").toString();
+        ArrayList<String> expected = new ArrayList<>(Arrays.asList(basicMBeanNames()));
         expected.addAll(Arrays.asList(hostMBeanNames("localhost")));
         expected.addAll(Arrays.asList(contextMBeanNames("localhost", contextName)));
-        expected.addAll(Arrays.asList(connectorMBeanNames("auto-1", protocol)));
+        expected.addAll(Arrays.asList(connectorMBeanNames("auto-" + index, protocol)));
         expected.addAll(Arrays.asList(optionalMBeanNames("localhost")));
 
         // Did we find all expected MBeans?
-        ArrayList<String> missing = new ArrayList<String>(expected);
+        ArrayList<String> missing = new ArrayList<>(expected);
         missing.removeAll(found);
         assertTrue("Missing Tomcat MBeans: " + missing, missing.isEmpty());
 

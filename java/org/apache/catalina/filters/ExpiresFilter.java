@@ -36,6 +36,7 @@ import javax.servlet.ServletException;
 import javax.servlet.ServletOutputStream;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;
+import javax.servlet.WriteListener;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpServletResponseWrapper;
@@ -992,6 +993,26 @@ public class ExpiresFilter extends FilterBase {
             servletOutputStream.write(b);
         }
 
+        /**
+         * TODO SERVLET 3.1
+         */
+        @Override
+        public boolean canWrite() {
+            // TODO Auto-generated method stub
+            return false;
+        }
+
+        /**
+         * TODO SERVLET 3.1
+         */
+        @Override
+        public void setWriteListener(WriteListener listener) {
+            // TODO Auto-generated method stub
+
+        }
+
+
+
     }
 
     /**
@@ -1156,7 +1177,7 @@ public class ExpiresFilter extends FilterBase {
     /**
      * Expires configuration by content type. Visible for test.
      */
-    private Map<String, ExpiresConfiguration> expiresConfigurationByContentType = new LinkedHashMap<String, ExpiresConfiguration>();
+    private Map<String, ExpiresConfiguration> expiresConfigurationByContentType = new LinkedHashMap<>();
 
     @Override
     public void doFilter(ServletRequest request, ServletResponse response,
@@ -1515,7 +1536,7 @@ public class ExpiresFilter extends FilterBase {
             }
         }
 
-        List<Duration> durations = new ArrayList<Duration>();
+        List<Duration> durations = new ArrayList<>();
 
         while (currentToken != null) {
             int amount;

@@ -18,10 +18,7 @@
 package org.apache.tomcat.util.bcel.classfile;
 
 import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
-
-import org.apache.tomcat.util.bcel.Constants;
 
 /**
  * This class represents the table of exceptions that are thrown by a
@@ -50,7 +47,7 @@ public final class ExceptionTable extends Attribute {
      */
     public ExceptionTable(int name_index, int length, int[] exception_index_table,
             ConstantPool constant_pool) {
-        super(Constants.ATTR_EXCEPTIONS, name_index, length, constant_pool);
+        super(name_index, length, constant_pool);
         setExceptionIndexTable(exception_index_table);
     }
 
@@ -75,62 +72,11 @@ public final class ExceptionTable extends Attribute {
 
 
     /**
-     * Dump exceptions attribute to file stream in binary format.
-     *
-     * @param file Output file stream
-     * @throws IOException
-     */
-    @Override
-    public final void dump( DataOutputStream file ) throws IOException {
-        super.dump(file);
-        file.writeShort(number_of_exceptions);
-        for (int i = 0; i < number_of_exceptions; i++) {
-            file.writeShort(exception_index_table[i]);
-        }
-    }
-
-
-    /**
      * @param exception_index_table the list of exception indexes
      * Also redefines number_of_exceptions according to table length.
      */
     public final void setExceptionIndexTable( int[] exception_index_table ) {
         this.exception_index_table = exception_index_table;
         number_of_exceptions = (exception_index_table == null) ? 0 : exception_index_table.length;
-    }
-
-
-    /**
-     * @return String representation, i.e., a list of thrown exceptions.
-     */
-    @Override
-    public final String toString() {
-        StringBuilder buf = new StringBuilder();
-        String str;
-        for (int i = 0; i < number_of_exceptions; i++) {
-            str = constant_pool.getConstantString(exception_index_table[i],
-                    Constants.CONSTANT_Class);
-            buf.append(Utility.compactClassName(str, false));
-            if (i < number_of_exceptions - 1) {
-                buf.append(", ");
-            }
-        }
-        return buf.toString();
-    }
-
-
-    /**
-     * @return deep copy of this attribute
-     */
-    @Override
-    public Attribute copy( ConstantPool _constant_pool ) {
-        ExceptionTable c = (ExceptionTable) clone();
-        if (exception_index_table != null) {
-            c.exception_index_table = new int[exception_index_table.length];
-            System.arraycopy(exception_index_table, 0, c.exception_index_table, 0,
-                    exception_index_table.length);
-        }
-        c.constant_pool = _constant_pool;
-        return c;
     }
 }

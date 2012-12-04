@@ -19,7 +19,6 @@ package org.apache.catalina.websocket;
 import java.io.IOException;
 import java.io.InputStream;
 
-import org.apache.coyote.http11.upgrade.UpgradeProcessor;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
@@ -34,8 +33,8 @@ public class WsInputStream extends InputStream {
             StringManager.getManager(Constants.Package);
 
 
-    private UpgradeProcessor<?> processor;
-    private WsOutbound outbound;
+    private final InputStream is;
+    private final WsOutbound outbound;
 
     private WsFrame frame;
     private long remaining;
@@ -44,8 +43,8 @@ public class WsInputStream extends InputStream {
     private String error = null;
 
 
-    public WsInputStream(UpgradeProcessor<?> processor, WsOutbound outbound) {
-        this.processor = processor;
+    public WsInputStream(InputStream is, WsOutbound outbound) {
+        this.is = is;
         this.outbound = outbound;
     }
 
@@ -54,7 +53,7 @@ public class WsInputStream extends InputStream {
      * Process the next WebSocket frame.
      *
      * @param block Should this method block until a frame is presented if no
-     *              data is currently available to process. Note that is a
+     *              data is currently available to process. Note that if a
      *              single byte is available, this method will block until the
      *              complete frame (excluding payload for non-control frames) is
      *              available.
@@ -65,7 +64,7 @@ public class WsInputStream extends InputStream {
      * @throws IOException  If a problem occurs reading the data for the frame.
      */
     public WsFrame nextFrame(boolean block) throws IOException {
-        frame = WsFrame.nextFrame(processor, block);
+        frame = WsFrame.nextFrame(is, block);
         if (frame != null) {
             readThisFragment = 0;
             remaining = frame.getPayLoadLength();
@@ -88,7 +87,7 @@ public class WsInputStream extends InputStream {
         remaining--;
         readThisFragment++;
 
-        int masked = processor.read();
+        int masked = is.read();
         if(masked == -1) {
             return -1;
         }
@@ -109,7 +108,8 @@ public class WsInputStream extends InputStream {
         if (len > remaining) {
             len = (int) remaining;
         }
-        int result = processor.read(true, b, off, len);
+        // TODO Must block????
+        int result = is.read(b, off, len);
         if(result == -1) {
             return -1;
         }

@@ -60,9 +60,9 @@ public class AprLifecycleListener
 
     protected static final int TCN_REQUIRED_MAJOR = 1;
     protected static final int TCN_REQUIRED_MINOR = 1;
-    protected static final int TCN_REQUIRED_PATCH = 17;
+    protected static final int TCN_REQUIRED_PATCH = 24;
     protected static final int TCN_RECOMMENDED_MINOR = 1;
-    protected static final int TCN_RECOMMENDED_PV = 22;
+    protected static final int TCN_RECOMMENDED_PV = 24;
 
 
     // ---------------------------------------------- Properties
@@ -71,7 +71,6 @@ public class AprLifecycleListener
     protected static String SSLRandomSeed = "builtin";
     protected static boolean sslInitialized = false;
     protected static boolean aprInitialized = false;
-    protected static boolean sslAvailable = false;
     protected static boolean aprAvailable = false;
     protected static boolean fipsModeActive = false;
 
@@ -150,7 +149,6 @@ public class AprLifecycleListener
         aprAvailable = false;
         aprInitialized = false;
         sslInitialized = false; // Well we cleaned the pool in terminate.
-        sslAvailable = false; // Well we cleaned the pool in terminate.
         fipsModeActive = false;
     }
 
@@ -161,7 +159,7 @@ public class AprLifecycleListener
         int patch = 0;
         int apver = 0;
         int rqver = TCN_REQUIRED_MAJOR * 1000 + TCN_REQUIRED_MINOR * 100 + TCN_REQUIRED_PATCH;
-        int rcver = TCN_REQUIRED_MAJOR * 1000 + TCN_REQUIRED_MINOR * 100 + TCN_RECOMMENDED_PV;
+        int rcver = TCN_REQUIRED_MAJOR * 1000 + TCN_RECOMMENDED_MINOR * 100 + TCN_RECOMMENDED_PV;
 
         if (aprInitialized) {
             return;
@@ -213,7 +211,10 @@ public class AprLifecycleListener
         }
 
         log.info(sm.getString("aprListener.tcnValid", major + "."
-                    + minor + "." + patch));
+                    + minor + "." + patch,
+                    Library.APR_MAJOR_VERSION + "."
+                    + Library.APR_MINOR_VERSION + "."
+                    + Library.APR_PATCH_VERSION));
 
         // Log APR flags
         log.info(sm.getString("aprListener.flags",
@@ -273,7 +274,7 @@ public class AprLifecycleListener
             }
         }
 
-        sslAvailable = true;
+        log.info(sm.getString("aprListener.initializedOpenSSL", SSL.versionString()));
     }
 
     public String getSSLEngine() {

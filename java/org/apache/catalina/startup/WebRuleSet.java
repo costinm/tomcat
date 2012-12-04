@@ -24,6 +24,7 @@ import java.util.ArrayList;
 
 import org.apache.catalina.deploy.ContextHandler;
 import org.apache.catalina.deploy.ContextService;
+import org.apache.catalina.deploy.ResourceBase;
 import org.apache.catalina.deploy.SecurityConstraint;
 import org.apache.catalina.deploy.ServletDef;
 import org.apache.catalina.deploy.WebXml;
@@ -60,54 +61,54 @@ public class WebRuleSet extends RuleSetBase {
     /**
      * The matching pattern prefix to use for recognizing our elements.
      */
-    protected String prefix = null;
+    protected final String prefix;
 
     /**
      * The full pattern matching prefix, including the webapp or web-fragment
      * component, to use for matching elements
      */
-    protected String fullPrefix = null;
+    protected final String fullPrefix;
 
     /**
      * Flag that indicates if this ruleset is for a web-fragment.xml file or for
      * a web.xml file.
      */
-    protected boolean fragment = false;
+    protected final boolean fragment;
 
     /**
      * The <code>SetSessionConfig</code> rule used to parse the web.xml
      */
-    protected SetSessionConfig sessionConfig = new SetSessionConfig();
+    protected final SetSessionConfig sessionConfig = new SetSessionConfig();
 
 
     /**
      * The <code>SetLoginConfig</code> rule used to parse the web.xml
      */
-    protected SetLoginConfig loginConfig = new SetLoginConfig();
+    protected final SetLoginConfig loginConfig = new SetLoginConfig();
 
 
     /**
      * The <code>SetJspConfig</code> rule used to parse the web.xml
      */
-    protected SetJspConfig jspConfig = new SetJspConfig();
+    protected final SetJspConfig jspConfig = new SetJspConfig();
 
 
     /**
      * The <code>NameRule</code> rule used to parse the web.xml
      */
-    protected NameRule name = new NameRule();
+    protected final NameRule name = new NameRule();
 
 
     /**
      * The <code>AbsoluteOrderingRule</code> rule used to parse the web.xml
      */
-    protected AbsoluteOrderingRule absoluteOrdering;
+    protected final AbsoluteOrderingRule absoluteOrdering;
 
 
     /**
      * The <code>RelativeOrderingRule</code> rule used to parse the web.xml
      */
-    protected RelativeOrderingRule relativeOrdering;
+    protected final RelativeOrderingRule relativeOrdering;
 
 
 
@@ -302,7 +303,7 @@ public class WebRuleSet extends RuleSetBase {
         digester.addCallMethod(fullPrefix + "/jsp-config/jsp-property-group/trim-directive-whitespaces",
                                "setTrimWhitespace", 0);
         digester.addCallMethod(fullPrefix + "/jsp-config/jsp-property-group/url-pattern",
-                               "setUrlPattern", 0);
+                               "addUrlPattern", 0);
         digester.addCallMethod(fullPrefix + "/jsp-config/jsp-property-group/default-content-type",
                                "setDefaultContentType", 0);
         digester.addCallMethod(fullPrefix + "/jsp-config/jsp-property-group/buffer",
@@ -386,10 +387,15 @@ public class WebRuleSet extends RuleSetBase {
         digester.addCallMethod(fullPrefix + "/servlet/run-as/role-name",
                                "setRunAs", 0);
 
-        digester.addCallMethod(fullPrefix + "/servlet/security-role-ref",
-                               "addSecurityRoleRef", 2);
-        digester.addCallParam(fullPrefix + "/servlet/security-role-ref/role-link", 1);
-        digester.addCallParam(fullPrefix + "/servlet/security-role-ref/role-name", 0);
+        digester.addObjectCreate(fullPrefix + "/servlet/security-role-ref",
+                                 "org.apache.catalina.deploy.SecurityRoleRef");
+        digester.addSetNext(fullPrefix + "/servlet/security-role-ref",
+                            "addSecurityRoleRef",
+                            "org.apache.catalina.deploy.SecurityRoleRef");
+        digester.addCallMethod(fullPrefix + "/servlet/security-role-ref/role-link",
+                               "setLink", 0);
+        digester.addCallMethod(fullPrefix + "/servlet/security-role-ref/role-name",
+                               "setName", 0);
 
         digester.addCallMethod(fullPrefix + "/servlet/servlet-class",
                               "setServletClass", 0);
@@ -488,6 +494,8 @@ public class WebRuleSet extends RuleSetBase {
                                "setLocal", 0);
         digester.addCallMethod(fullPrefix + "/ejb-local-ref/local-home",
                                "setHome", 0);
+        digester.addRule(fullPrefix + "/ejb-local-ref/mapped-name",
+                         new MappedNameRule());
         configureInjectionRules(digester, "web-app/ejb-local-ref/");
 
         //ejb-ref
@@ -508,6 +516,8 @@ public class WebRuleSet extends RuleSetBase {
                                "setHome", 0);
         digester.addCallMethod(fullPrefix + "/ejb-ref/remote",
                                "setRemote", 0);
+        digester.addRule(fullPrefix + "/ejb-ref/mapped-name",
+                         new MappedNameRule());
         configureInjectionRules(digester, "web-app/ejb-ref/");
 
         //env-entry
@@ -524,6 +534,8 @@ public class WebRuleSet extends RuleSetBase {
                                "setType", 0);
         digester.addCallMethod(fullPrefix + "/env-entry/env-entry-value",
                                "setValue", 0);
+        digester.addRule(fullPrefix + "/env-entry/mapped-name",
+                         new MappedNameRule());
         configureInjectionRules(digester, "web-app/env-entry/");
 
         //resource-env-ref
@@ -536,6 +548,8 @@ public class WebRuleSet extends RuleSetBase {
                 "setName", 0);
         digester.addCallMethod(fullPrefix + "/resource-env-ref/resource-env-ref-type",
                 "setType", 0);
+        digester.addRule(fullPrefix + "/resource-env-ref/mapped-name",
+                         new MappedNameRule());
         configureInjectionRules(digester, "web-app/resource-env-ref/");
 
         //message-destination
@@ -554,6 +568,8 @@ public class WebRuleSet extends RuleSetBase {
                                "setSmallIcon", 0);
         digester.addCallMethod(fullPrefix + "/message-destination/message-destination-name",
                                "setName", 0);
+        digester.addRule(fullPrefix + "/message-destination/mapped-name",
+                         new MappedNameRule());
 
         //message-destination-ref
         digester.addObjectCreate(fullPrefix + "/message-destination-ref",
@@ -571,7 +587,8 @@ public class WebRuleSet extends RuleSetBase {
                                "setType", 0);
         digester.addCallMethod(fullPrefix + "/message-destination-ref/message-destination-usage",
                                "setUsage", 0);
-
+        digester.addRule(fullPrefix + "/message-destination-ref/mapped-name",
+                         new MappedNameRule());
         configureInjectionRules(digester, "web-app/message-destination-ref/");
 
         //resource-ref
@@ -590,6 +607,8 @@ public class WebRuleSet extends RuleSetBase {
                                "setScope", 0);
         digester.addCallMethod(fullPrefix + "/resource-ref/res-type",
                                "setType", 0);
+        digester.addRule(fullPrefix + "/resource-ref/mapped-name",
+                         new MappedNameRule());
         configureInjectionRules(digester, "web-app/resource-ref/");
 
         //service-ref
@@ -647,9 +666,9 @@ public class WebRuleSet extends RuleSetBase {
                                "addSoapRole", 0);
         digester.addCallMethod(fullPrefix + "/service-ref/handler/port-name",
                                "addPortName", 0);
+        digester.addRule(fullPrefix + "/service-ref/mapped-name",
+                         new MappedNameRule());
         configureInjectionRules(digester, "web-app/service-ref/");
-
-
     }
 
     protected void configureInjectionRules(Digester digester, String base) {
@@ -889,7 +908,7 @@ final class CallParamMultiRule extends CallParamRule {
             @SuppressWarnings("unchecked")
             ArrayList<String> params = (ArrayList<String>) parameters[paramIndex];
             if (params == null) {
-                params = new ArrayList<String>();
+                params = new ArrayList<>();
                 parameters[paramIndex] = params;
             }
             params.add(bodyTextStack.pop());
@@ -905,7 +924,7 @@ final class CallParamMultiRule extends CallParamRule {
  */
 final class CallMethodMultiRule extends CallMethodRule {
 
-    protected int multiParamIndex = 0;
+    protected final int multiParamIndex;
 
     public CallMethodMultiRule(String methodName, int paramCount, int multiParamIndex) {
         super(methodName, paramCount);
@@ -1241,6 +1260,31 @@ final class TaglibLocationRule extends Rule {
                     "taglib definition not consistent with specification version");
         }
     }
+}
 
+/**
+ * A Rule that sets mapped name on the ResourceBase.
+ */
+final class MappedNameRule extends Rule {
 
+    public MappedNameRule() {
+        // NO-OP
+    }
+
+    /**
+     * Process the body text of this element.
+     *
+     * @param namespace the namespace URI of the matching element, or an
+     *   empty string if the parser is not namespace aware or the element has
+     *   no namespace
+     * @param name the local name if the parser is namespace aware, or just
+     *   the element name otherwise
+     * @param text The body text of this element
+     */
+    @Override
+    public void body(String namespace, String name, String text)
+            throws Exception {
+        ResourceBase resourceBase = (ResourceBase) digester.peek();
+        resourceBase.setProperty("mappedName", text.trim());
+    }
 }

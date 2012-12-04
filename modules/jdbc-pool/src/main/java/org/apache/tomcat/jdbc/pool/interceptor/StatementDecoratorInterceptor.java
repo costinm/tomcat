@@ -126,12 +126,26 @@ public class StatementDecoratorInterceptor extends AbstractCreateStatementInterc
         return statement;
     }
 
+    /**
+     * Creates a proxy for a Statement.
+     *
+     * @param proxy         The proxy object on which the method that triggered
+     *                          the creation of the statement was called.
+     * @param method        The method that was called on the proxy
+     * @param args          The arguments passed as part of the method call to
+     *                          the proxy
+     * @param statement     The statement object that is to be proxied
+     * @param constructor   The constructor for the desired proxy
+     * @param sql           The sql of of the statement
+     *
+     * @return  A new proxy for the Statement
+     */
     protected Object createDecorator(Object proxy, Method method, Object[] args,
                                      Object statement, Constructor<?> constructor, String sql)
     throws InstantiationException, IllegalAccessException, InvocationTargetException {
         Object result = null;
         StatementProxy<Statement> statementProxy =
-                new StatementProxy<Statement>((Statement)statement,sql);
+                new StatementProxy<>((Statement)statement,sql);
         result = constructor.newInstance(new Object[] { statementProxy });
         statementProxy.setActualProxy(result);
         statementProxy.setConnection(proxy);
@@ -160,7 +174,7 @@ public class StatementDecoratorInterceptor extends AbstractCreateStatementInterc
         private Object actualProxy;
         private Object connection;
         private String sql;
-        private Constructor constructor;
+        private Constructor<?> constructor;
 
         public StatementProxy(T delegate, String sql) {
             this.delegate = delegate;
@@ -189,10 +203,10 @@ public class StatementDecoratorInterceptor extends AbstractCreateStatementInterc
         }
 
 
-        public Constructor getConstructor() {
+        public Constructor<?> getConstructor() {
             return constructor;
         }
-        public void setConstructor(Constructor constructor) {
+        public void setConstructor(Constructor<?> constructor) {
             this.constructor = constructor;
         }
         public void closeInvoked() {

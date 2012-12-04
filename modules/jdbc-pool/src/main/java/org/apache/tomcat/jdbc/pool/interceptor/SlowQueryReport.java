@@ -16,8 +16,11 @@
  */
 package org.apache.tomcat.jdbc.pool.interceptor;
 
+import java.text.SimpleDateFormat;
 import java.util.Iterator;
+import java.util.Locale;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
 
 import javax.management.openmbean.CompositeDataSupport;
@@ -45,7 +48,7 @@ public class SlowQueryReport extends AbstractQueryReport  {
      * we will be keeping track of query stats on a per pool basis
      */
     protected static ConcurrentHashMap<String,ConcurrentHashMap<String,QueryStats>> perPoolStats =
-        new ConcurrentHashMap<String,ConcurrentHashMap<String,QueryStats>>();
+        new ConcurrentHashMap<>();
     /**
      * the queries that are used for this interceptor.
      */
@@ -116,13 +119,13 @@ public class SlowQueryReport extends AbstractQueryReport  {
     @Override
     public void prepareStatement(String sql, long time) {
         QueryStats qs = getQueryStats(sql);
-        qs.prepare(time, System.currentTimeMillis());
+        qs.prepare(time);
     }
 
     @Override
     public void prepareCall(String sql, long time) {
         QueryStats qs = getQueryStats(sql);
-        qs.prepare(time, System.currentTimeMillis());
+        qs.prepare(time);
     }
 
     /**
@@ -137,7 +140,7 @@ public class SlowQueryReport extends AbstractQueryReport  {
             //create the map to hold our stats
             //however TODO we need to improve the eviction
             //selection
-            queries = new ConcurrentHashMap<String,QueryStats>();
+            queries = new ConcurrentHashMap<>();
             if (perPoolStats.putIfAbsent(pool.getName(), queries)!=null) {
                 //there already was one
                 queries = SlowQueryReport.perPoolStats.get(pool.getName());
@@ -247,7 +250,7 @@ public class SlowQueryReport extends AbstractQueryReport  {
             "The date and time of the last invocation"
         };
 
-        static final OpenType[] FIELD_TYPES = new OpenType[] {
+        static final OpenType<?>[] FIELD_TYPES = new OpenType[] {
             SimpleType.STRING,
             SimpleType.INTEGER,
             SimpleType.LONG,
@@ -281,12 +284,15 @@ public class SlowQueryReport extends AbstractQueryReport  {
             return FIELD_DESCRIPTIONS;
         }
 
-        public static OpenType[] getFieldTypes() {
+        public static OpenType<?>[] getFieldTypes() {
             return FIELD_TYPES;
         }
 
         @Override
         public String toString() {
+            SimpleDateFormat sdf =
+                    new SimpleDateFormat("d MMM yyyy HH:mm:ss z", Locale.US);
+            sdf.setTimeZone(TimeZone.getTimeZone("GMT"));
             StringBuilder buf = new StringBuilder("QueryStats[query:");
             buf.append(query);
             buf.append(", nrOfInvocations:");
@@ -294,11 +300,11 @@ public class SlowQueryReport extends AbstractQueryReport  {
             buf.append(", maxInvocationTime:");
             buf.append(maxInvocationTime);
             buf.append(", maxInvocationDate:");
-            buf.append(new java.util.Date(maxInvocationDate).toGMTString());
+            buf.append(sdf.format(new java.util.Date(maxInvocationDate)));
             buf.append(", minInvocationTime:");
             buf.append(minInvocationTime);
             buf.append(", minInvocationDate:");
-            buf.append(new java.util.Date(minInvocationDate).toGMTString());
+            buf.append(sdf.format(new java.util.Date(minInvocationDate)));
             buf.append(", totalInvocationTime:");
             buf.append(totalInvocationTime);
             buf.append(", averageInvocationTime:");
@@ -334,7 +340,7 @@ public class SlowQueryReport extends AbstractQueryReport  {
             this.query = query;
         }
 
-        public void prepare(long invocationTime, long now) {
+        public void prepare(long invocationTime) {
             prepareCount++;
             prepareTime+=invocationTime;
 

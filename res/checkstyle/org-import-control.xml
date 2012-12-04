@@ -79,6 +79,7 @@
     </subpackage>
   </subpackage>
   <subpackage name="coyote">
+    <allow pkg="javax.servlet"/>
     <allow pkg="org.apache.coyote"/>
     <allow pkg="org.apache.juli"/>
     <allow pkg="org.apache.tomcat.jni"/>
@@ -106,6 +107,8 @@
     <allow pkg="javax.mail"/>
     <allow pkg="javax.wsdl"/>
     <allow pkg="org.apache.naming"/>
+    <allow class="org.apache.tomcat.util.buf.UDecoder"/>
+    <allow class="org.apache.tomcat.util.buf.UEncoder"/>
     <allow class="org.apache.tomcat.util.http.FastHttpDateFormat"/>
     <allow class="org.apache.tomcat.util.http.RequestUtil"/>
     <subpackage name="factory.webservices">
@@ -133,6 +136,12 @@
       <subpackage name="scan">
         <allow pkg="org.apache.tomcat" exact-match="true"/>
       </subpackage>
+    </subpackage>
+    <subpackage name="websocket">
+      <allow pkg="javax.servlet"/>
+      <allow pkg="javax.websocket"/>
+      <allow pkg="org.apache.juli"/>
+      <allow pkg="org.apache.tomcat.util"/>
     </subpackage>
   </subpackage>
 </import-control>

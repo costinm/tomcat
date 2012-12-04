@@ -250,27 +250,4 @@ public class ConstantPool implements Cloneable, Serializable {
         c = getConstant(i, Constants.CONSTANT_Utf8);
         return ((ConstantUtf8) c).getBytes();
     }
-
-
-    /**
-     * @return Length of constant pool.
-     */
-    public int getLength() {
-        return constant_pool_count;
-    }
-
-
-    /**
-     * @return String representation.
-     */
-    @Override
-    public String toString() {
-        StringBuilder buf = new StringBuilder();
-        for (int i = 1; i < constant_pool_count; i++) {
-            buf.append(i).append(")").append(constant_pool[i]).append("\n");
-        }
-        return buf.toString();
-    }
-
-
 }

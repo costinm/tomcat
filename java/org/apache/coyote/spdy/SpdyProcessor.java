@@ -22,6 +22,8 @@ import java.net.InetAddress;
 import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import javax.servlet.http.ProtocolHandler;
+
 import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.ActionCode;
 import org.apache.coyote.AsyncContextCallback;
@@ -30,7 +32,6 @@ import org.apache.coyote.OutputBuffer;
 import org.apache.coyote.Request;
 import org.apache.coyote.RequestInfo;
 import org.apache.coyote.Response;
-import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.tomcat.spdy.SpdyConnection;
 import org.apache.tomcat.spdy.SpdyContext;
 import org.apache.tomcat.spdy.SpdyFrame;
@@ -52,7 +53,6 @@ import org.apache.tomcat.util.net.SocketWrapper;
  * tomcat servlet.
  *
  * Based on the AJP processor.
- *
  */
 public class SpdyProcessor extends AbstractProcessor<Object> implements
         Runnable {
@@ -63,22 +63,22 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
     // TODO: find a way to inject an OutputBuffer, or interecept close() -
     // so we can send FIN in the last data packet.
 
-    private SpdyConnection spdy;
+    private final SpdyConnection spdy;
 
     // Associated spdy stream
-    SpdyStream spdyStream;
+    private SpdyStream spdyStream;
 
-    ByteChunk keyBuffer = new ByteChunk();
+    private final ByteChunk keyBuffer = new ByteChunk();
 
-    boolean error = false;
+    private boolean error = false;
 
     private boolean finished;
 
-    SpdyFrame inFrame = null;
+    private SpdyFrame inFrame = null;
 
-    boolean outClosed = false;
+    private boolean outClosed = false;
 
-    boolean outCommit = false;
+    private boolean outCommit = false;
 
     public SpdyProcessor(SpdyConnection spdy, AbstractEndpoint endpoint) {
         super(endpoint);
@@ -102,13 +102,12 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
             if (inFrame.remaining() == 0 && inFrame.isHalfClose()) {
                 return -1;
             }
-            
+
             int rd = Math.min(inFrame.remaining(), bchunk.getBytes().length);
             System.arraycopy(inFrame.data, inFrame.off, bchunk.getBytes(),
                     bchunk.getStart(), rd);
             inFrame.advance(rd);
             if (inFrame.remaining() == 0) {
-                spdy.getSpdyContext().releaseFrame(inFrame);
                 if (!inFrame.isHalfClose()) {
                     inFrame = null;
                 }
@@ -157,7 +156,7 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
         RequestInfo rp = request.getRequestProcessor();
         try {
             rp.setStage(org.apache.coyote.Constants.STAGE_SERVICE);
-            adapter.service(request, response);
+            getAdapter().service(request, response);
         } catch (InterruptedIOException e) {
             error = true;
         } catch (Throwable t) {
@@ -166,7 +165,7 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
             // 500 - Internal Server Error
             t.printStackTrace();
             response.setStatus(500);
-            adapter.log(request, response, 0);
+            getAdapter().log(request, response, 0);
             error = true;
         }
 
@@ -204,7 +203,7 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
         response.finish();
     }
 
-    static final byte[] EMPTY = new byte[0];
+    private static final byte[] EMPTY = new byte[0];
 
     // Processor implementation
 
@@ -214,14 +213,7 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
         }
         if (!response.isCommitted()) {
             // Validate and write response headers
-            try {
-                sendSynReply();
-            } catch (IOException e) {
-                e.printStackTrace();
-                // Set error flag
-                error = true;
-                return;
-            }
+            sendSynReply();
         }
     }
 
@@ -260,13 +252,7 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
             // transactions with the client
             maybeCommit();
 
-            try {
-                spdyStream.sendDataFrame(EMPTY, 0, 0, true);
-            } catch (IOException e) {
-                // Set error flag
-                e.printStackTrace();
-                error = true;
-            }
+            spdyStream.sendDataFrame(EMPTY, 0, 0, true);
 
         } else if (actionCode == ActionCode.REQ_SSL_ATTRIBUTE) {
 
@@ -386,8 +372,12 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
             ((AtomicBoolean) param).set(asyncStateMachine.isAsyncDispatching());
         } else if (actionCode == ActionCode.ASYNC_IS_ASYNC) {
             ((AtomicBoolean) param).set(asyncStateMachine.isAsync());
+        } else if (actionCode == ActionCode.ASYNC_IS_ASYNC_OPERATION) {
+            ((AtomicBoolean) param).set(asyncStateMachine.isAsyncOperation());
         } else if (actionCode == ActionCode.ASYNC_IS_TIMINGOUT) {
             ((AtomicBoolean) param).set(asyncStateMachine.isAsyncTimingOut());
+        } else if (actionCode == ActionCode.ASYNC_IS_ERROR) {
+            ((AtomicBoolean) param).set(asyncStateMachine.isAsyncError());
         } else {
             // TODO:
             // actionInternal(actionCode, param);
@@ -400,7 +390,7 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
      * When committing the response, we have to validate the set of headers, as
      * well as setup the response filters.
      */
-    protected void sendSynReply() throws IOException {
+    protected void sendSynReply() {
 
         response.setCommitted(true);
 
@@ -422,7 +412,7 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
         sendResponseHead();
     }
 
-    private void sendResponseHead() throws IOException {
+    private void sendResponseHead() {
         SpdyFrame rframe = spdy.getFrame(SpdyConnection.TYPE_SYN_REPLY);
         rframe.associated = 0;
 
@@ -503,7 +493,7 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
     }
 
     @Override
-    public SocketState upgradeDispatch() throws IOException {
+    public SocketState upgradeDispatch(SocketStatus status) throws IOException {
         return null;
     }
 
@@ -518,6 +508,9 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
 
         // Request received.
         MimeHeaders mimeHeaders = request.getMimeHeaders();
+
+        // Set this every time in case limit has been changed via JMX
+        mimeHeaders.setLimit(endpoint.getMaxHeaderCount());
 
         for (int i = 0; i < frame.nvCount; i++) {
             int nameLen = frame.read16();
@@ -577,8 +570,7 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
     }
 
     @Override
-    public UpgradeInbound getUpgradeInbound() {
+    public ProtocolHandler getHttpUpgradeHandler() {
         return null;
     }
-
 }

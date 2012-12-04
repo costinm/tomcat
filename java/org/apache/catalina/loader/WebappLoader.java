@@ -16,7 +16,6 @@
  */
 package org.apache.catalina.loader;
 
-
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
@@ -25,7 +24,6 @@ import java.io.FileOutputStream;
 import java.io.FilePermission;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
@@ -33,28 +31,21 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.net.URLDecoder;
-import java.net.URLStreamHandlerFactory;
 import java.util.ArrayList;
 import java.util.jar.JarFile;
 
 import javax.management.ObjectName;
-import javax.naming.NameClassPair;
-import javax.naming.NamingEnumeration;
-import javax.naming.NamingException;
-import javax.naming.directory.DirContext;
 import javax.servlet.ServletContext;
 
-import org.apache.catalina.Container;
 import org.apache.catalina.Context;
 import org.apache.catalina.Globals;
 import org.apache.catalina.Lifecycle;
 import org.apache.catalina.LifecycleException;
 import org.apache.catalina.LifecycleState;
 import org.apache.catalina.Loader;
+import org.apache.catalina.WebResource;
+import org.apache.catalina.WebResourceRoot;
 import org.apache.catalina.util.LifecycleMBeanBase;
-import org.apache.naming.resources.DirContextURLStreamHandler;
-import org.apache.naming.resources.DirContextURLStreamHandlerFactory;
-import org.apache.naming.resources.Resource;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.modeler.Registry;
 import org.apache.tomcat.util.res.StringManager;
@@ -111,21 +102,15 @@ public class WebappLoader extends LifecycleMBeanBase
 
 
     /**
-     * First load of the class.
-     */
-    private static boolean first = true;
-
-
-    /**
      * The class loader being managed by this Loader component.
      */
     private WebappClassLoader classLoader = null;
 
 
     /**
-     * The Container with which this Loader has been associated.
+     * The Context with which this Loader has been associated.
      */
-    private Container container = null;
+    private Context context = null;
 
 
     /**
@@ -157,12 +142,6 @@ public class WebappLoader extends LifecycleMBeanBase
 
 
     /**
-     * The set of repositories associated with this class loader.
-     */
-    private String repositories[] = new String[0];
-
-
-    /**
      * The string manager for this package.
      */
     protected static final StringManager sm =
@@ -172,7 +151,7 @@ public class WebappLoader extends LifecycleMBeanBase
     /**
      * The property change support for this component.
      */
-    protected PropertyChangeSupport support = new PropertyChangeSupport(this);
+    protected final PropertyChangeSupport support = new PropertyChangeSupport(this);
 
 
     /**
@@ -187,14 +166,7 @@ public class WebappLoader extends LifecycleMBeanBase
     private ArrayList<String> loaderRepositories = null;
 
 
-    /**
-     * Whether we should search the external repositories first
-     */
-    private boolean searchExternalFirst = false;
-
-
     // ------------------------------------------------------------- Properties
-
 
     /**
      * Return the Java class loader to be used by this Container.
@@ -207,40 +179,39 @@ public class WebappLoader extends LifecycleMBeanBase
     }
 
 
-    /**
-     * Return the Container with which this Logger has been associated.
-     */
     @Override
-    public Container getContainer() {
-
-        return (container);
-
+    public Context getContext() {
+        return context;
     }
 
 
-    /**
-     * Set the Container with which this Logger has been associated.
-     *
-     * @param container The associated Container
-     */
     @Override
-    public void setContainer(Container container) {
+    public void setContext(Context context) {
 
-        // Deregister from the old Container (if any)
-        if ((this.container != null) && (this.container instanceof Context))
-            ((Context) this.container).removePropertyChangeListener(this);
-
-        // Process this property change
-        Container oldContainer = this.container;
-        this.container = container;
-        support.firePropertyChange("container", oldContainer, this.container);
-
-        // Register with the new Container (if any)
-        if ((this.container != null) && (this.container instanceof Context)) {
-            setReloadable( ((Context) this.container).getReloadable() );
-            ((Context) this.container).addPropertyChangeListener(this);
+        if (this.context == context) {
+            return;
         }
 
+        if (getState().isAvailable()) {
+            throw new IllegalStateException(
+                    sm.getString("webappLoader.setContext.ise"));
+        }
+
+        // Deregister from the old Context (if any)
+        if (this.context != null) {
+            this.context.removePropertyChangeListener(this);
+        }
+
+        // Process this property change
+        Context oldContext = this.context;
+        this.context = context;
+        support.firePropertyChange("context", oldContext, this.context);
+
+        // Register with the new Container (if any)
+        if (this.context != null) {
+            setReloadable(this.context.getReloadable());
+            this.context.addPropertyChangeListener(this);
+        }
     }
 
 
@@ -323,26 +294,8 @@ public class WebappLoader extends LifecycleMBeanBase
 
     }
 
-    /**
-     * @return Returns searchExternalFirst.
-     */
-    public boolean getSearchExternalFirst() {
-        return searchExternalFirst;
-    }
-
-    /**
-     * @param searchExternalFirst Whether external repositories should be searched first
-     */
-    public void setSearchExternalFirst(boolean searchExternalFirst) {
-        this.searchExternalFirst = searchExternalFirst;
-        if (classLoader != null) {
-            classLoader.setSearchExternalFirst(searchExternalFirst);
-        }
-    }
-
 
     // --------------------------------------------------------- Public Methods
-
 
     /**
      * Add a property change listener to this component.
@@ -358,36 +311,6 @@ public class WebappLoader extends LifecycleMBeanBase
 
 
     /**
-     * Add a new repository to the set of repositories for this class loader.
-     *
-     * @param repository Repository to be added
-     */
-    @Override
-    public void addRepository(String repository) {
-
-        if (log.isDebugEnabled())
-            log.debug(sm.getString("webappLoader.addRepository", repository));
-
-        for (int i = 0; i < repositories.length; i++) {
-            if (repository.equals(repositories[i]))
-                return;
-        }
-        String results[] = new String[repositories.length + 1];
-        for (int i = 0; i < repositories.length; i++)
-            results[i] = repositories[i];
-        results[repositories.length] = repository;
-        repositories = results;
-
-        if (getState().isAvailable() && (classLoader != null)) {
-            classLoader.addRepository(repository);
-            if( loaderRepositories != null ) loaderRepositories.add(repository);
-            setClassPath();
-        }
-
-    }
-
-
-    /**
      * Execute a periodic task, such as reloading, etc. This method will be
      * invoked inside the classloading context of this container. Unexpected
      * throwables will be caught and logged.
@@ -398,13 +321,13 @@ public class WebappLoader extends LifecycleMBeanBase
             try {
                 Thread.currentThread().setContextClassLoader
                     (WebappLoader.class.getClassLoader());
-                if (container instanceof Context) {
-                    ((Context) container).reload();
+                if (context != null) {
+                    context.reload();
                 }
             } finally {
-                if (container.getLoader() != null) {
+                if (context != null && context.getLoader() != null) {
                     Thread.currentThread().setContextClassLoader
-                        (container.getLoader().getClassLoader());
+                        (context.getLoader().getClassLoader());
                 }
             }
         } else {
@@ -412,33 +335,6 @@ public class WebappLoader extends LifecycleMBeanBase
         }
     }
 
-
-    /**
-     * Return the set of repositories defined for this class loader.
-     * If none are defined, a zero-length array is returned.
-     * For security reason, returns a clone of the Array (since
-     * String are immutable).
-     */
-    @Override
-    public String[] findRepositories() {
-
-        return repositories.clone();
-
-    }
-
-    public String[] getRepositories() {
-        return repositories.clone();
-    }
-
-    /** Extra repositories for this loader
-     */
-    public String getRepositoriesString() {
-        StringBuilder sb=new StringBuilder();
-        for( int i=0; i<repositories.length ; i++ ) {
-            sb.append( repositories[i]).append(":");
-        }
-        return sb.toString();
-    }
 
     public String[] getLoaderRepositories() {
         if( loaderRepositories==null ) return  null;
@@ -508,8 +404,8 @@ public class WebappLoader extends LifecycleMBeanBase
     public String toString() {
 
         StringBuilder sb = new StringBuilder("WebappLoader[");
-        if (container != null)
-            sb.append(container.getName());
+        if (context != null)
+            sb.append(context.getName());
         sb.append("]");
         return (sb.toString());
 
@@ -529,40 +425,18 @@ public class WebappLoader extends LifecycleMBeanBase
         if (log.isDebugEnabled())
             log.debug(sm.getString("webappLoader.starting"));
 
-        if (container.getResources() == null) {
-            log.info("No resources for " + container);
+        if (context.getResources() == null) {
+            log.info("No resources for " + context);
             setState(LifecycleState.STARTING);
             return;
-        }
-
-        // Register a stream handler factory for the JNDI protocol
-        URLStreamHandlerFactory streamHandlerFactory =
-                DirContextURLStreamHandlerFactory.getInstance();
-        if (first) {
-            first = false;
-            try {
-                URL.setURLStreamHandlerFactory(streamHandlerFactory);
-            } catch (Exception e) {
-                // Log and continue anyway, this is not critical
-                log.error("Error registering jndi stream handler", e);
-            } catch (Throwable t) {
-                ExceptionUtils.handleThrowable(t);
-                // This is likely a dual registration
-                log.info("Dual registration of jndi stream handler: "
-                         + t.getMessage());
-            }
         }
 
         // Construct a class loader based on our current repositories list
         try {
 
             classLoader = createClassLoader();
-            classLoader.setResources(container.getResources());
+            classLoader.setResources(context.getResources());
             classLoader.setDelegate(this.delegate);
-            classLoader.setSearchExternalFirst(searchExternalFirst);
-            for (int i = 0; i < repositories.length; i++) {
-                classLoader.addRepository(repositories[i]);
-            }
 
             // Configure our repositories
             setRepositories();
@@ -572,17 +446,13 @@ public class WebappLoader extends LifecycleMBeanBase
 
             ((Lifecycle) classLoader).start();
 
-            // Binding the Webapp class loader to the directory context
-            DirContextURLStreamHandler.bind(classLoader,
-                    this.container.getResources());
-
-            String contextName = container.getName();
+            String contextName = context.getName();
             if (!contextName.startsWith("/")) {
                 contextName = "/" + contextName;
             }
-            ObjectName cloname = new ObjectName(container.getDomain() +
+            ObjectName cloname = new ObjectName(context.getDomain() +
                     ":type=WebappClassLoader,context=" + contextName +
-                    ",host=" + container.getParent().getName());
+                    ",host=" + context.getParent().getName());
             Registry.getRegistry(null, null)
                 .registerComponent(classLoader, cloname, null);
 
@@ -613,24 +483,20 @@ public class WebappLoader extends LifecycleMBeanBase
         setState(LifecycleState.STOPPING);
 
         // Remove context attributes as appropriate
-        if (container instanceof Context) {
-            ServletContext servletContext =
-                ((Context) container).getServletContext();
-            servletContext.removeAttribute(Globals.CLASS_PATH_ATTR);
-        }
+        ServletContext servletContext = context.getServletContext();
+        servletContext.removeAttribute(Globals.CLASS_PATH_ATTR);
 
         // Throw away our current class loader
         ((Lifecycle) classLoader).stop();
-        DirContextURLStreamHandler.unbind(classLoader);
 
         try {
-            String contextName = container.getName();
+            String contextName = context.getName();
             if (!contextName.startsWith("/")) {
                 contextName = "/" + contextName;
             }
-            ObjectName cloname = new ObjectName(container.getDomain() +
+            ObjectName cloname = new ObjectName(context.getDomain() +
                     ":type=WebappClassLoader,context=" + contextName +
-                    ",host=" + container.getParent().getName());
+                    ",host=" + context.getParent().getName());
             Registry.getRegistry(null, null).unregisterComponent(cloname);
         } catch (Exception e) {
             log.error("LifecycleException ", e);
@@ -682,7 +548,7 @@ public class WebappLoader extends LifecycleMBeanBase
         WebappClassLoader classLoader = null;
 
         if (parentClassLoader == null) {
-            parentClassLoader = container.getParentClassLoader();
+            parentClassLoader = context.getParentClassLoader();
         }
         Class<?>[] argTypes = { ClassLoader.class };
         Object[] args = { parentClassLoader };
@@ -701,12 +567,11 @@ public class WebappLoader extends LifecycleMBeanBase
 
         if (!Globals.IS_SECURITY_ENABLED)
             return;
-        if (!(container instanceof Context))
+        if (context == null)
             return;
 
         // Tell the class loader the root of the context
-        ServletContext servletContext =
-            ((Context) container).getServletContext();
+        ServletContext servletContext = context.getServletContext();
 
         // Assigning permissions for the work directory
         File workDir =
@@ -796,14 +661,13 @@ public class WebappLoader extends LifecycleMBeanBase
      */
     private void setRepositories() throws IOException {
 
-        if (!(container instanceof Context))
+        if (context == null)
             return;
-        ServletContext servletContext =
-            ((Context) container).getServletContext();
+        ServletContext servletContext = context.getServletContext();
         if (servletContext == null)
             return;
 
-        loaderRepositories=new ArrayList<String>();
+        loaderRepositories=new ArrayList<>();
         // Loading the work directory
         File workDir =
             (File) servletContext.getAttribute(ServletContext.TEMPDIR);
@@ -816,36 +680,22 @@ public class WebappLoader extends LifecycleMBeanBase
 
         classLoader.setWorkDir(workDir);
 
-        DirContext resources = container.getResources();
+        WebResourceRoot resources = context.getResources();
 
         // Setting up the class repository (/WEB-INF/classes), if it exists
 
         String classesPath = "/WEB-INF/classes";
-        DirContext classes = null;
+        WebResource classes = resources.getResource(classesPath);
 
-        try {
-            Object object = resources.lookup(classesPath);
-            if (object instanceof DirContext) {
-                classes = (DirContext) object;
-            }
-        } catch(NamingException e) {
-            // Silent catch: it's valid that no /WEB-INF/classes collection
-            // exists
-        }
-
-        if (classes != null) {
+        if (classes.isDirectory()) {
 
             File classRepository = null;
 
-            String absoluteClassesPath =
-                servletContext.getRealPath(classesPath);
+            String absoluteClassesPath = classes.getCanonicalPath();
 
             if (absoluteClassesPath != null) {
-
                 classRepository = new File(absoluteClassesPath);
-
             } else {
-
                 classRepository = new File(workDir, classesPath);
                 if (!classRepository.mkdirs() &&
                         !classRepository.isDirectory()) {
@@ -856,18 +706,15 @@ public class WebappLoader extends LifecycleMBeanBase
                     throw new IOException(
                             sm.getString("webappLoader.copyFailure"));
                 }
-
             }
 
             if(log.isDebugEnabled())
                 log.debug(sm.getString("webappLoader.classDeploy", classesPath,
                              classRepository.getAbsolutePath()));
 
-
             // Adding the repository to the class loader
-            classLoader.addRepository(classesPath + "/", classRepository);
+            classLoader.setRepository(classesPath + "/", classRepository);
             loaderRepositories.add(classesPath + "/" );
-
         }
 
         // Setting up the JAR repository (/WEB-INF/lib), if it exists
@@ -876,21 +723,12 @@ public class WebappLoader extends LifecycleMBeanBase
 
         classLoader.setJarPath(libPath);
 
-        DirContext libDir = null;
-        // Looking up directory /WEB-INF/lib in the context
-        try {
-            Object object = resources.lookup(libPath);
-            if (object instanceof DirContext)
-                libDir = (DirContext) object;
-        } catch(NamingException e) {
-            // Silent catch: it's valid that no /WEB-INF/lib collection
-            // exists
-        }
+        WebResource libDir = resources.getResource(libPath);
 
-        if (libDir != null) {
+        if (libDir.isDirectory()) {
 
             boolean copyJars = false;
-            String absoluteLibPath = servletContext.getRealPath(libPath);
+            String absoluteLibPath = libDir.getCanonicalPath();
 
             File destDir = null;
 
@@ -905,53 +743,35 @@ public class WebappLoader extends LifecycleMBeanBase
                 }
             }
 
-            // Looking up directory /WEB-INF/lib in the context
-            NamingEnumeration<NameClassPair> enumeration = null;
-            try {
-                enumeration = libDir.list("");
-            } catch (NamingException e) {
-                IOException ioe = new IOException(sm.getString(
-                        "webappLoader.namingFailure", libPath));
-                ioe.initCause(e);
-                throw ioe;
-            }
-            while (enumeration.hasMoreElements()) {
-                NameClassPair ncPair = enumeration.nextElement();
-                String filename = libPath + "/" + ncPair.getName();
-                if (!filename.endsWith(".jar"))
+            WebResource[] jars = resources.listResources(libPath);
+            for (WebResource jar : jars) {
+
+                String jarName = jar.getName();
+
+                if (!jarName.endsWith(".jar"))
                     continue;
+
+                String filename = libPath + "/" + jarName;
 
                 // Copy JAR in the work directory, always (the JAR file
                 // would get locked otherwise, which would make it
                 // impossible to update it or remove it at runtime)
-                File destFile = new File(destDir, ncPair.getName());
+                File destFile = new File(destDir, jarName);
 
-                if( log.isDebugEnabled())
-                log.debug(sm.getString("webappLoader.jarDeploy", filename,
-                                 destFile.getAbsolutePath()));
+                if (log.isDebugEnabled()) {
+                    log.debug(sm.getString("webappLoader.jarDeploy", filename,
+                            destFile.getAbsolutePath()));
+                }
 
-                // Bug 45403 - Explicitly call lookup() on the name to check
-                // that the resource is readable. We cannot use resources
-                // returned by listBindings(), because that lists all of them,
-                // but does not perform the necessary checks on each.
-                Object obj = null;
-                try {
-                    obj = libDir.lookup(ncPair.getName());
-                } catch (NamingException e) {
+                // Bug 45403 - Check that the resource is readable
+                if (!jar.canRead()) {
                     IOException ioe = new IOException(sm.getString(
-                            "webappLoader.namingFailure", filename));
-                    ioe.initCause(e);
+                            "webappLoader.readFailure", filename));
                     throw ioe;
                 }
 
-                if (!(obj instanceof Resource))
-                    continue;
-
-                Resource jarResource = (Resource) obj;
-
                 if (copyJars) {
-                    if (!copy(jarResource.streamContent(),
-                              new FileOutputStream(destFile))) {
+                    if (!copy(jar.getInputStream(),destFile)) {
                         throw new IOException(
                                 sm.getString("webappLoader.copyFailure"));
                     }
@@ -979,10 +799,9 @@ public class WebappLoader extends LifecycleMBeanBase
     private void setClassPath() {
 
         // Validate our current state information
-        if (!(container instanceof Context))
+        if (context == null)
             return;
-        ServletContext servletContext =
-            ((Context) container).getServletContext();
+        ServletContext servletContext = context.getServletContext();
         if (servletContext == null)
             return;
 
@@ -1071,41 +890,25 @@ public class WebappLoader extends LifecycleMBeanBase
     /**
      * Copy directory.
      */
-    private boolean copyDir(DirContext srcDir, File destDir) {
+    private boolean copyDir(WebResource src, File destDir) {
 
-        try {
-
-            NamingEnumeration<NameClassPair> enumeration = srcDir.list("");
-            while (enumeration.hasMoreElements()) {
-                NameClassPair ncPair = enumeration.nextElement();
-                String name = ncPair.getName();
-                Object object = srcDir.lookup(name);
-                File currentFile = new File(destDir, name);
-                if (object instanceof Resource) {
-                    InputStream is = ((Resource) object).streamContent();
-                    OutputStream os = new FileOutputStream(currentFile);
-                    if (!copy(is, os))
-                        return false;
-                } else if (object instanceof InputStream) {
-                    OutputStream os = new FileOutputStream(currentFile);
-                    if (!copy((InputStream) object, os))
-                        return false;
-                } else if (object instanceof DirContext) {
-                    if (!currentFile.isDirectory() && !currentFile.mkdir())
-                        return false;
-                    if (!copyDir((DirContext) object, currentFile))
-                        return false;
-                }
+        WebResource[] resources =
+                src.getWebResourceRoot().listResources(src.getWebappPath());
+        for (WebResource resource : resources) {
+            File currentFile = new File(destDir, resource.getName());
+            if (resource.isFile()) {
+                InputStream is = resource.getInputStream();
+                if (!copy(is, currentFile))
+                    return false;
+            } else if (resource.isDirectory()) {
+                if (!currentFile.isDirectory() && !currentFile.mkdir())
+                    return false;
+                if (!copyDir(resource, currentFile))
+                    return false;
             }
-
-        } catch (NamingException e) {
-            return false;
-        } catch (IOException e) {
-            return false;
         }
 
         return true;
-
     }
 
 
@@ -1113,9 +916,9 @@ public class WebappLoader extends LifecycleMBeanBase
      * Copy a file to the specified temp directory. This is required only
      * because Jasper depends on it.
      */
-    private boolean copy(InputStream is, OutputStream os) {
+    private boolean copy(InputStream is, File file) {
 
-        try {
+        try (FileOutputStream os = new FileOutputStream(file)){
             byte[] buf = new byte[4096];
             while (true) {
                 int len = is.read(buf);
@@ -1123,10 +926,14 @@ public class WebappLoader extends LifecycleMBeanBase
                     break;
                 os.write(buf, 0, len);
             }
-            is.close();
-            os.close();
         } catch (IOException e) {
             return false;
+        } finally {
+            try {
+                is.close();
+            } catch (IOException e) {
+                // Ignore
+            }
         }
 
         return true;
@@ -1140,7 +947,7 @@ public class WebappLoader extends LifecycleMBeanBase
 
     @Override
     protected String getDomainInternal() {
-        return container.getDomain();
+        return context.getDomain();
     }
 
 
@@ -1149,25 +956,17 @@ public class WebappLoader extends LifecycleMBeanBase
 
         StringBuilder name = new StringBuilder("type=Loader");
 
-        if (container instanceof Context) {
-            name.append(",context=");
-            Context context = (Context) container;
+        name.append(",context=");
 
-            String contextName = context.getName();
-            if (!contextName.startsWith("/")) {
-                name.append("/");
-            }
-            name.append(contextName);
-
-            name.append(",host=");
-            name.append(context.getParent().getName());
-        } else {
-            // Unlikely / impossible? Handle it to be safe
-            name.append(",container=");
-            name.append(container.getName());
+        String contextName = context.getName();
+        if (!contextName.startsWith("/")) {
+            name.append("/");
         }
+        name.append(contextName);
+
+        name.append(",host=");
+        name.append(context.getParent().getName());
 
         return name.toString();
     }
-
 }

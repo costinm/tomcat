@@ -82,4 +82,28 @@ public interface ProtocolHandler {
      * Destroy the protocol (optional).
      */
     public void destroy() throws Exception;
+
+
+    /**
+     * Requires APR/native library
+     */
+    public boolean isAprRequired();
+
+
+    /**
+     * Does this ProtocolHandler support Comet?
+     */
+    public boolean isCometSupported();
+
+
+    /**
+     * Does this ProtocolHandler support Comet timeouts?
+     */
+    public boolean isCometTimeoutSupported();
+
+
+    /**
+     * Does this ProtocolHandler support sendfile?
+     */
+    public boolean isSendfileSupported();
 }

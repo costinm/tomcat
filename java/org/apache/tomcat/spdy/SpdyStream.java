@@ -50,7 +50,7 @@ public class SpdyStream implements Runnable {
     /**
      * For blocking support.
      */
-    protected BlockingQueue<SpdyFrame> inData = new LinkedBlockingQueue<SpdyFrame>();
+    protected BlockingQueue<SpdyFrame> inData = new LinkedBlockingQueue<>();
 
     protected boolean finSent;
 
@@ -102,7 +102,7 @@ public class SpdyStream implements Runnable {
      * The base method is for client implementation - servers need to override
      * and process the frame as a request.
      */
-    public void onCtlFrame(SpdyFrame frame) throws IOException {
+    public void onCtlFrame(SpdyFrame frame) {
         // TODO: handle RST
         if (frame.type == SpdyConnection.TYPE_SYN_STREAM) {
             reqFrame = frame;
@@ -153,11 +153,11 @@ public class SpdyStream implements Runnable {
     }
 
     /**
-     * Waits and return the next frame. 
-     * 
+     * Waits and return the next frame.
+     *
      * First frame will be the control frame
      */
-    public SpdyFrame getFrame(long to) throws IOException {
+    public SpdyFrame getFrame(long to) {
         SpdyFrame in;
         try {
             synchronized (this) {
@@ -202,7 +202,7 @@ public class SpdyStream implements Runnable {
     }
 
     public synchronized void sendDataFrame(byte[] data, int start,
-            int length, boolean close) throws IOException {
+            int length, boolean close) {
 
         SpdyFrame oframe = spdy.getDataFrame();
 
@@ -222,24 +222,24 @@ public class SpdyStream implements Runnable {
         spdy.send(oframe, this);
     }
 
-    public void send() throws IOException {
+    public void send() {
         send("http", "GET");
     }
 
-    public void send(String host, String url, String scheme, String method) throws IOException {
+    public void send(String host, String url, String scheme, String method) {
         getRequest().addHeader("host", host);
         getRequest().addHeader("url", url);
 
         send(scheme, method);
     }
 
-    public void send(String scheme, String method) throws IOException {
+    public void send(String scheme, String method) {
         getRequest();
         if ("GET".equalsIgnoreCase(method)) {
             // TODO: add the others
             reqFrame.halfClose();
         }
-        getRequest().addHeader("scheme", "http"); // todo
+        getRequest().addHeader("scheme", scheme);
         getRequest().addHeader("method", method);
         getRequest().addHeader("version", "HTTP/1.1");
         if (reqFrame.isHalfClose()) {
@@ -262,21 +262,18 @@ public class SpdyStream implements Runnable {
     public InputStream getInputStream() {
         return new SpdyInputStream();
     }
-    
+
     class SpdyInputStream extends InputStream {
         SpdyFrame current = null;
         long to = 10000; // TODO
         int pos = 0;
 
-        private void fill() throws IOException {
+        private void fill() {
             if (current == null || current.off == current.endData) {
-                if (current != null) {
-                    spdy.spdyContext.releaseFrame(current);
-                }
                 current = getFrame(to);
             }
         }
-        
+
         @Override
         public int read() throws IOException {
             fill();
@@ -285,7 +282,8 @@ public class SpdyStream implements Runnable {
             }
             return current.readByte();
         }
-        
+
+        @Override
         public int read(byte b[], int off, int len) throws IOException {
             fill();
             if (current == null) {
@@ -297,15 +295,17 @@ public class SpdyStream implements Runnable {
             current.off += rd;
             return rd;
         }
-     
+
+        @Override
         public int available() throws IOException {
             return 0;
         }
+        @Override
         public void close() throws IOException {
             // send RST if not closed
         }
-        
-        
-        
+
+
+
     }
 }

@@ -76,7 +76,7 @@ public class AjpNioProcessor extends AbstractAjpProcessor<NioChannel> {
     /**
      * Selector pool for the associated endpoint.
      */
-    protected NioSelectorPool pool;
+    protected final NioSelectorPool pool;
 
 
     // --------------------------------------------------------- Public Methods
@@ -150,7 +150,7 @@ public class AjpNioProcessor extends AbstractAjpProcessor<NioChannel> {
                 log.debug(sm.getString("ajpprocessor.header.error"), t);
                 // 400 - Bad Request
                 response.setStatus(400);
-                adapter.log(request, response, 0);
+                getAdapter().log(request, response, 0);
                 error = true;
             }
 
@@ -164,7 +164,7 @@ public class AjpNioProcessor extends AbstractAjpProcessor<NioChannel> {
                     log.debug(sm.getString("ajpprocessor.request.prepare"), t);
                     // 400 - Internal Server Error
                     response.setStatus(400);
-                    adapter.log(request, response, 0);
+                    getAdapter().log(request, response, 0);
                     error = true;
                 }
             }
@@ -172,7 +172,7 @@ public class AjpNioProcessor extends AbstractAjpProcessor<NioChannel> {
             if (!error && !cping && endpoint.isPaused()) {
                 // 503 - Service unavailable
                 response.setStatus(503);
-                adapter.log(request, response, 0);
+                getAdapter().log(request, response, 0);
                 error = true;
             }
             cping = false;
@@ -181,7 +181,7 @@ public class AjpNioProcessor extends AbstractAjpProcessor<NioChannel> {
             if (!error) {
                 try {
                     rp.setStage(org.apache.coyote.Constants.STAGE_SERVICE);
-                    adapter.service(request, response);
+                    getAdapter().service(request, response);
                 } catch (InterruptedIOException e) {
                     error = true;
                 } catch (Throwable t) {
@@ -189,7 +189,7 @@ public class AjpNioProcessor extends AbstractAjpProcessor<NioChannel> {
                     log.error(sm.getString("ajpprocessor.request.process"), t);
                     // 500 - Internal Server Error
                     response.setStatus(500);
-                    adapter.log(request, response, 0);
+                    getAdapter().log(request, response, 0);
                     error = true;
                 }
             }
@@ -252,8 +252,7 @@ public class AjpNioProcessor extends AbstractAjpProcessor<NioChannel> {
 
         if (actionCode == ActionCode.ASYNC_COMPLETE) {
             if (asyncStateMachine.asyncComplete()) {
-                ((NioEndpoint)endpoint).processSocket(this.socket,
-                        SocketStatus.OPEN, false);
+                ((NioEndpoint)endpoint).dispatchForEvent(socket, SocketStatus.OPEN_READ, false);
             }
         } else if (actionCode == ActionCode.ASYNC_SETTIMEOUT) {
             if (param == null) return;
@@ -264,11 +263,9 @@ public class AjpNioProcessor extends AbstractAjpProcessor<NioChannel> {
             }
         } else if (actionCode == ActionCode.ASYNC_DISPATCH) {
             if (asyncStateMachine.asyncDispatch()) {
-                ((NioEndpoint)endpoint).processSocket(this.socket,
-                        SocketStatus.OPEN, true);
+                ((NioEndpoint)endpoint).dispatchForEvent(socket, SocketStatus.OPEN_READ, true);            }
             }
         }
-    }
 
 
     // ------------------------------------------------------ Protected Methods
@@ -276,14 +273,16 @@ public class AjpNioProcessor extends AbstractAjpProcessor<NioChannel> {
     @Override
     protected void output(byte[] src, int offset, int length)
             throws IOException {
+
+        NioEndpoint.KeyAttachment att = (NioEndpoint.KeyAttachment)socket.getAttachment(false);
+        if ( att == null ) throw new IOException("Key must be cancelled");
+
         ByteBuffer writeBuffer = socket.getBufHandler() .getWriteBuffer();
 
         writeBuffer.put(src, offset, length);
 
         writeBuffer.flip();
 
-        NioEndpoint.KeyAttachment att = (NioEndpoint.KeyAttachment)socket.getAttachment(false);
-        if ( att == null ) throw new IOException("Key must be cancelled");
         long writeTimeout = att.getTimeout();
         Selector selector = null;
         try {
@@ -294,9 +293,9 @@ public class AjpNioProcessor extends AbstractAjpProcessor<NioChannel> {
         try {
             pool.write(writeBuffer, socket, selector, writeTimeout, true);
         }finally {
+            writeBuffer.clear();
             if ( selector != null ) pool.put(selector);
         }
-        writeBuffer.clear();
     }
 
 
@@ -317,7 +316,7 @@ public class AjpNioProcessor extends AbstractAjpProcessor<NioChannel> {
             } else if (res == 0 && !block) {
                 break;
             } else {
-                throw new IOException(sm.getString("ajpprotocol.failedread"));
+                throw new IOException(sm.getString("ajpprocessor.failedread"));
             }
             block = true;
         }

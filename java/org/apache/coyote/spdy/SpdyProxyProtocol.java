@@ -52,8 +52,8 @@ import org.apache.tomcat.util.net.SocketWrapper;
 public class SpdyProxyProtocol extends AbstractProtocol {
     private static final Log log = LogFactory.getLog(SpdyProxyProtocol.class);
 
-    JIoEndpoint.Handler cHandler = new TomcatJioHandler();
-    SpdyContext spdyContext;
+    private final JIoEndpoint.Handler cHandler = new TomcatJioHandler();
+    private SpdyContext spdyContext;
 
     public SpdyProxyProtocol() {
         endpoint = new JIoEndpoint();
@@ -92,7 +92,7 @@ public class SpdyProxyProtocol extends AbstractProtocol {
             @Override
             public void onStream(SpdyConnection con, SpdyStream ch) throws IOException {
                 SpdyProcessor sp = new SpdyProcessor(con, endpoint);
-                sp.setAdapter(adapter);
+                sp.setAdapter(getAdapter());
                 sp.onSynStream(ch);
             }
         });
@@ -114,11 +114,8 @@ public class SpdyProxyProtocol extends AbstractProtocol {
         @Override
         public SocketState process(SocketWrapper<Socket> socket,
                 SocketStatus status) {
-            try {
-                spdyContext.getNetSupport().onAccept(socket.getSocket());
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+
+            spdyContext.getNetSupport().onAccept(socket.getSocket());
             return SocketState.CLOSED;
         }
 

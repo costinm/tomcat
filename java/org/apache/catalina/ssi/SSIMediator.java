@@ -16,7 +16,6 @@
  */
 package org.apache.catalina.ssi;
 
-
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Date;
@@ -26,10 +25,10 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.TimeZone;
 
-import org.apache.catalina.util.DateTool;
 import org.apache.catalina.util.Strftime;
 import org.apache.catalina.util.URLEncoder;
 import org.apache.tomcat.util.http.HttpMessages;
+
 /**
  * Allows the different SSICommand implementations to share data/talk to each
  * other
@@ -45,16 +44,15 @@ public class SSIMediator {
     protected static final String DEFAULT_CONFIG_ERR_MSG = "[an error occurred while processing this directive]";
     protected static final String DEFAULT_CONFIG_TIME_FMT = "%A, %d-%b-%Y %T %Z";
     protected static final String DEFAULT_CONFIG_SIZE_FMT = "abbrev";
-    protected static URLEncoder urlEncoder;
+    protected static final URLEncoder urlEncoder;
     protected String configErrMsg = DEFAULT_CONFIG_ERR_MSG;
     protected String configTimeFmt = DEFAULT_CONFIG_TIME_FMT;
     protected String configSizeFmt = DEFAULT_CONFIG_SIZE_FMT;
-    protected String className = getClass().getName();
-    protected SSIExternalResolver ssiExternalResolver;
-    protected long lastModifiedDate;
-    protected int debug;
+    protected final String className = getClass().getName();
+    protected final SSIExternalResolver ssiExternalResolver;
+    protected final long lastModifiedDate;
     protected Strftime strftime;
-    protected SSIConditionalState conditionalState = new SSIConditionalState();
+    protected final SSIConditionalState conditionalState = new SSIConditionalState();
     static {
         //We try to encode only the same characters that apache does
         urlEncoder = new URLEncoder();
@@ -74,10 +72,9 @@ public class SSIMediator {
 
 
     public SSIMediator(SSIExternalResolver ssiExternalResolver,
-            long lastModifiedDate, int debug) {
+            long lastModifiedDate) {
         this.ssiExternalResolver = ssiExternalResolver;
         this.lastModifiedDate = lastModifiedDate;
-        this.debug = debug;
         setConfigTimeFmt(DEFAULT_CONFIG_TIME_FMT, true);
     }
 
@@ -94,8 +91,7 @@ public class SSIMediator {
 
     public void setConfigTimeFmt(String configTimeFmt, boolean fromConstructor) {
         this.configTimeFmt = configTimeFmt;
-        //What's the story here with DateTool.LOCALE_US?? Why??
-        this.strftime = new Strftime(configTimeFmt, DateTool.LOCALE_US);
+        this.strftime = new Strftime(configTimeFmt, Locale.US);
         //Variables like DATE_LOCAL, DATE_GMT, and LAST_MODIFIED need to be
         // updated when
         //the timefmt changes. This is what Apache SSI does.
@@ -129,7 +125,7 @@ public class SSIMediator {
 
 
     public Collection<String> getVariableNames() {
-        Set<String> variableNames = new HashSet<String>();
+        Set<String> variableNames = new HashSet<>();
         //These built-in variables are supplied by the mediator ( if not
         // over-written by
         // the user ) and always exist

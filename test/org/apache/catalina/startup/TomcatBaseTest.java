@@ -39,6 +39,7 @@ import org.junit.After;
 import org.junit.Before;
 
 import org.apache.catalina.Container;
+import org.apache.catalina.Context;
 import org.apache.catalina.LifecycleException;
 import org.apache.catalina.LifecycleState;
 import org.apache.catalina.Server;
@@ -48,6 +49,7 @@ import org.apache.catalina.core.AprLifecycleListener;
 import org.apache.catalina.core.StandardServer;
 import org.apache.catalina.session.StandardManager;
 import org.apache.catalina.valves.AccessLogValve;
+import org.apache.coyote.http11.Http11NioProtocol;
 import org.apache.tomcat.util.buf.ByteChunk;
 
 /**
@@ -140,9 +142,9 @@ public abstract class TomcatBaseTest extends LoggingBaseTest {
         // Has a protocol been specified
         String protocol = System.getProperty("tomcat.test.protocol");
 
-        // Use BIO by default
+        // Use NIO by default in Tomcat 8
         if (protocol == null) {
-            protocol = "org.apache.coyote.http11.Http11Protocol";
+            protocol = Http11NioProtocol.class.getName();
         }
 
         return protocol;
@@ -200,6 +202,11 @@ public abstract class TomcatBaseTest extends LoggingBaseTest {
         return getUrl(path, out, null, resHead);
     }
 
+    public static int headUrl(String path, ByteChunk out,
+            Map<String, List<String>> resHead) throws IOException {
+        return methodUrl(path, out, 1000000, null, resHead, "HEAD");
+    }
+
     public static int getUrl(String path, ByteChunk out,
             Map<String, List<String>> reqHead,
             Map<String, List<String>> resHead) throws IOException {
@@ -209,12 +216,20 @@ public abstract class TomcatBaseTest extends LoggingBaseTest {
     public static int getUrl(String path, ByteChunk out, int readTimeout,
             Map<String, List<String>> reqHead,
             Map<String, List<String>> resHead) throws IOException {
+        return methodUrl(path, out, readTimeout, reqHead, resHead, "GET");
+    }
+
+    public static int methodUrl(String path, ByteChunk out, int readTimeout,
+            Map<String, List<String>> reqHead,
+            Map<String, List<String>> resHead,
+            String method) throws IOException {
 
         URL url = new URL(path);
         HttpURLConnection connection =
             (HttpURLConnection) url.openConnection();
         connection.setUseCaches(false);
         connection.setReadTimeout(readTimeout);
+        connection.setRequestMethod(method);
         if (reqHead != null) {
             for (Map.Entry<String, List<String>> entry : reqHead.entrySet()) {
                 StringBuilder valueList = new StringBuilder();
@@ -240,20 +255,22 @@ public abstract class TomcatBaseTest extends LoggingBaseTest {
         } else {
             is = connection.getErrorStream();
         }
-        BufferedInputStream bis = null;
-        try {
-            bis = new BufferedInputStream(is);
-            byte[] buf = new byte[2048];
-            int rd = 0;
-            while((rd = bis.read(buf)) > 0) {
-                out.append(buf, 0, rd);
-            }
-        } finally {
-            if (bis != null) {
-                try {
-                    bis.close();
-                } catch (IOException e) {
-                    // Ignore
+        if (is != null) {
+            BufferedInputStream bis = null;
+            try {
+                bis = new BufferedInputStream(is);
+                byte[] buf = new byte[2048];
+                int rd = 0;
+                while((rd = bis.read(buf)) > 0) {
+                    out.append(buf, 0, rd);
+                }
+            } finally {
+                if (bis != null) {
+                    try {
+                        bis.close();
+                    } catch (IOException e) {
+                        // Ignore
+                    }
                 }
             }
         }
@@ -272,9 +289,36 @@ public abstract class TomcatBaseTest extends LoggingBaseTest {
         return postUrl(body, path, out, null, resHead);
     }
 
-    public static int postUrl(byte[] body, String path, ByteChunk out,
+    public static int postUrl(final byte[] body, String path, ByteChunk out,
             Map<String, List<String>> reqHead,
             Map<String, List<String>> resHead) throws IOException {
+            BytesStreamer s = new BytesStreamer() {
+            boolean done = false;
+            @Override
+            public byte[] next() {
+                done = true;
+                return body;
+
+            }
+
+            @Override
+            public int getLength() {
+                return body!=null?body.length:0;
+            }
+
+            @Override
+            public int available() {
+                if (done) return 0;
+                else return getLength();
+            }
+        };
+        return postUrl(false,s,path,out,reqHead,resHead);
+    }
+
+
+    public static int postUrl(boolean stream, BytesStreamer streamer, String path, ByteChunk out,
+                Map<String, List<String>> reqHead,
+                Map<String, List<String>> resHead) throws IOException {
 
         URL url = new URL(path);
         HttpURLConnection connection =
@@ -294,15 +338,26 @@ public abstract class TomcatBaseTest extends LoggingBaseTest {
                         valueList.toString());
             }
         }
+        if (streamer != null && stream) {
+            if (streamer.getLength()>0) {
+                connection.setFixedLengthStreamingMode(streamer.getLength());
+            } else {
+                connection.setChunkedStreamingMode(1024);
+            }
+        }
+
         connection.connect();
 
         // Write the request body
         OutputStream os = null;
         try {
             os = connection.getOutputStream();
-            if (body != null) {
-                os.write(body, 0, body.length);
+            while (streamer!=null && streamer.available()>0) {
+                byte[] next = streamer.next();
+                os.write(next);
+                os.flush();
             }
+
         } finally {
             if (os != null) {
                 try {
@@ -351,12 +406,13 @@ public abstract class TomcatBaseTest extends LoggingBaseTest {
                 Container e = service.getContainer();
                 for (Container h : e.findChildren()) {
                     for (Container c : h.findChildren()) {
-                        StandardManager m = (StandardManager) c.getManager();
+                        StandardManager m =
+                                (StandardManager) ((Context) c).getManager();
                         if (m == null) {
                             m = new StandardManager();
                             m.setSecureRandomClass(
                                     "org.apache.catalina.startup.FastNonSecureRandom");
-                            c.setManager(m);
+                            ((Context) c).setManager(m);
                         }
                     }
                 }

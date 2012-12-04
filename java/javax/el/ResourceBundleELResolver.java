@@ -33,18 +33,20 @@ public class ResourceBundleELResolver extends ELResolver {
 
     @Override
     public Object getValue(ELContext context, Object base, Object property)
-            throws NullPointerException, PropertyNotFoundException, ELException {
+            throws NullPointerException, PropertyNotFoundException,
+            ELException {
+
         if (context == null) {
             throw new NullPointerException();
         }
 
         if (base instanceof ResourceBundle) {
+            context.setPropertyResolved(true);
+
             if (property != null) {
                 try {
-                    Object result = ((ResourceBundle) base).getObject(property
+                    return ((ResourceBundle) base).getObject(property
                             .toString());
-                    context.setPropertyResolved(true);
-                    return result;
                 } catch (MissingResourceException mre) {
                     return "???" + property.toString() + "???";
                 }
@@ -106,7 +108,7 @@ public class ResourceBundleELResolver extends ELResolver {
     public Iterator getFeatureDescriptors(
             ELContext context, Object base) {
         if (base instanceof ResourceBundle) {
-            List<FeatureDescriptor> feats = new ArrayList<FeatureDescriptor>();
+            List<FeatureDescriptor> feats = new ArrayList<>();
             Enumeration<String> e = ((ResourceBundle) base).getKeys();
             FeatureDescriptor feat;
             String key;

@@ -21,6 +21,7 @@ package org.apache.catalina.core;
 
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
+import java.lang.reflect.Constructor;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.Collection;
@@ -36,7 +37,6 @@ import javax.naming.NamingException;
 import javax.naming.Reference;
 import javax.naming.StringRefAddr;
 
-import org.apache.catalina.Container;
 import org.apache.catalina.ContainerEvent;
 import org.apache.catalina.ContainerListener;
 import org.apache.catalina.Context;
@@ -136,8 +136,7 @@ public class NamingContextListener
     /**
      * Objectnames hashtable.
      */
-    protected HashMap<String, ObjectName> objectNames =
-        new HashMap<String, ObjectName>();
+    protected HashMap<String, ObjectName> objectNames = new HashMap<>();
 
 
     /**
@@ -228,7 +227,7 @@ public class NamingContextListener
             if (initialized)
                 return;
 
-            Hashtable<String, Object> contextEnv = new Hashtable<String, Object>();
+            Hashtable<String, Object> contextEnv = new Hashtable<>();
             try {
                 namingContext = new NamingContext(contextEnv, getName());
             } catch (NamingException e) {
@@ -263,7 +262,7 @@ public class NamingContextListener
                 try {
                     ContextBindings.bindClassLoader
                         (container, container,
-                         ((Container) container).getLoader().getClassLoader());
+                         ((Context) container).getLoader().getClassLoader());
                 } catch (NamingException e) {
                     logger.error(sm.getString("naming.bindFailed", e));
                 }
@@ -299,7 +298,7 @@ public class NamingContextListener
             if (container instanceof Context) {
                 ContextBindings.unbindClassLoader
                     (container, container,
-                     ((Container) container).getLoader().getClassLoader());
+                     ((Context) container).getLoader().getClassLoader());
             }
 
             if (container instanceof Server) {
@@ -704,7 +703,7 @@ public class NamingContextListener
         if (container instanceof Context) {
             try {
                 compCtx.bind("Resources",
-                             ((Container) container).getResources());
+                             ((Context) container).getResources());
             } catch (NamingException e) {
                 logger.error(sm.getString("naming.bindFailed", e));
             }
@@ -844,7 +843,11 @@ public class NamingContextListener
                     }
                 }
             } else {
-                logger.error(sm.getString("naming.invalidEnvEntryType", env.getName()));
+                value = constructEnvEntry(env.getType(), env.getValue());
+                if (value == null) {
+                    logger.error(sm.getString(
+                            "naming.invalidEnvEntryType", env.getName()));
+                }
             }
         } catch (NumberFormatException e) {
             logger.error(sm.getString("naming.invalidEnvEntryValue", env.getName()));
@@ -866,6 +869,33 @@ public class NamingContextListener
 
     }
 
+
+    private Object constructEnvEntry(String type, String value) {
+        try {
+            Class<?> clazz = Class.forName(type);
+            Constructor<?> c = null;
+            try {
+                 c = clazz.getConstructor(String.class);
+                 return c.newInstance(value);
+            } catch (NoSuchMethodException e) {
+                // Ignore
+            }
+
+            if (value.length() != 1) {
+                return null;
+            }
+
+            try {
+                c = clazz.getConstructor(char.class);
+                return c.newInstance(Character.valueOf(value.charAt(0)));
+            } catch (NoSuchMethodException e) {
+                // Ignore
+            }
+        } catch (Exception e) {
+            // Ignore
+        }
+        return null;
+    }
 
     /**
      * Set the specified local EJBs in the naming context.

@@ -76,10 +76,10 @@ public final class StandardServer extends LifecycleMBeanBase implements Server {
         globalNamingResources.setContainer(this);
 
         if (isUseNaming()) {
-            if (namingContextListener == null) {
-                namingContextListener = new NamingContextListener();
-                addLifecycleListener(namingContextListener);
-            }
+            namingContextListener = new NamingContextListener();
+            addLifecycleListener(namingContextListener);
+        } else {
+            namingContextListener = null;
         }
 
     }
@@ -103,7 +103,7 @@ public final class StandardServer extends LifecycleMBeanBase implements Server {
     /**
      * The naming context listener for this web application.
      */
-    private NamingContextListener namingContextListener = null;
+    private final NamingContextListener namingContextListener;
 
 
     /**
@@ -128,6 +128,7 @@ public final class StandardServer extends LifecycleMBeanBase implements Server {
      * The set of Services associated with this Server.
      */
     private Service services[] = new Service[0];
+    private final Object servicesLock = new Object();
 
 
     /**
@@ -146,7 +147,7 @@ public final class StandardServer extends LifecycleMBeanBase implements Server {
     /**
      * The property change support for this component.
      */
-    protected PropertyChangeSupport support = new PropertyChangeSupport(this);
+    protected final PropertyChangeSupport support = new PropertyChangeSupport(this);
 
     private volatile boolean stopAwait = false;
 
@@ -336,7 +337,7 @@ public final class StandardServer extends LifecycleMBeanBase implements Server {
 
         service.setServer(this);
 
-        synchronized (services) {
+        synchronized (servicesLock) {
             Service results[] = new Service[services.length + 1];
             System.arraycopy(services, 0, results, 0, services.length);
             results[services.length] = service;
@@ -518,7 +519,7 @@ public final class StandardServer extends LifecycleMBeanBase implements Server {
         if (name == null) {
             return (null);
         }
-        synchronized (services) {
+        synchronized (servicesLock) {
             for (int i = 0; i < services.length; i++) {
                 if (name.equals(services[i].getName())) {
                     return (services[i]);
@@ -536,7 +537,7 @@ public final class StandardServer extends LifecycleMBeanBase implements Server {
     @Override
     public Service[] findServices() {
 
-        return (services);
+        return services;
 
     }
 
@@ -561,7 +562,7 @@ public final class StandardServer extends LifecycleMBeanBase implements Server {
     @Override
     public void removeService(Service service) {
 
-        synchronized (services) {
+        synchronized (servicesLock) {
             int j = -1;
             for (int i = 0; i < services.length; i++) {
                 if (service == services[i]) {
@@ -739,7 +740,7 @@ public final class StandardServer extends LifecycleMBeanBase implements Server {
         globalNamingResources.start();
 
         // Start our defined Services
-        synchronized (services) {
+        synchronized (servicesLock) {
             for (int i = 0; i < services.length; i++) {
                 services[i].start();
             }
@@ -796,11 +797,10 @@ public final class StandardServer extends LifecycleMBeanBase implements Server {
         // Populate the extension validator with JARs from common and shared
         // class loaders
         if (getCatalina() != null) {
-            ClassLoader cl =
-                    getCatalina().getParentClassLoader();
+            ClassLoader cl = getCatalina().getParentClassLoader();
             // Walk the class loader hierarchy. Stop at the system class loader.
             // This will add the shared (if present) and common class loaders
-            while (cl != ClassLoader.getSystemClassLoader()) {
+            while (cl != null && cl != ClassLoader.getSystemClassLoader()) {
                 if (cl instanceof URLClassLoader) {
                     URL[] urls = ((URLClassLoader) cl).getURLs();
                     for (URL url : urls) {

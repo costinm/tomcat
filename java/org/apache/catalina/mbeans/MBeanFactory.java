@@ -44,12 +44,10 @@ import org.apache.catalina.realm.UserDatabaseRealm;
 import org.apache.catalina.session.StandardManager;
 import org.apache.catalina.startup.ContextConfig;
 import org.apache.catalina.startup.HostConfig;
+import org.apache.tomcat.util.res.StringManager;
 
 
 /**
- * <p>A <strong>ModelMBean</strong> implementation for the
- * <code>org.apache.catalina.core.StandardServer</code> component.</p>
- *
  * @author Amy Roh
  * @version $Id$
  */
@@ -59,29 +57,13 @@ public class MBeanFactory {
     private static final org.apache.juli.logging.Log log =
         org.apache.juli.logging.LogFactory.getLog(MBeanFactory.class);
 
+    protected static final StringManager sm =
+            StringManager.getManager(Constants.Package);
+
     /**
      * The <code>MBeanServer</code> for this application.
      */
-    private static MBeanServer mserver = MBeanUtils.createServer();
-
-
-    // ----------------------------------------------------------- Constructors
-
-
-    /**
-     * Construct a <code>ModelMBean</code> with default
-     * <code>ModelMBeanInfo</code> information.
-     *
-     * @exception javax.management.MBeanException if the initializer of an
-     *  object throws an exception
-     * @exception javax.management.RuntimeOperationsException if an
-     *  IllegalArgumentException occurs
-     */
-    public MBeanFactory() {
-
-        super();
-
-    }
+    private static final MBeanServer mserver = MBeanUtils.createServer();
 
 
     // ------------------------------------------------------------- Attributes
@@ -99,25 +81,6 @@ public class MBeanFactory {
      */
     public void setContainer(Object container) {
         this.container = container;
-    }
-
-    /**
-     * Return the managed bean definition for the specified bean type
-     *
-     * @param type MBean type
-     */
-    public String findObjectName(String type) {
-
-        if (type.equals("org.apache.catalina.core.StandardContext")) {
-            return "StandardContext";
-        } else if (type.equals("org.apache.catalina.core.StandardEngine")) {
-            return "Engine";
-        } else if (type.equals("org.apache.catalina.core.StandardHost")) {
-            return "Host";
-        } else {
-            return null;
-        }
-
     }
 
 
@@ -615,8 +578,10 @@ public class MBeanFactory {
         // Add the new instance to its parent component
         ObjectName pname = new ObjectName(parent);
         Container container = getParentContainerFromParent(pname);
-        if (container != null) {
-            container.setManager(manager);
+        if (container instanceof Context) {
+            ((Context) container).setManager(manager);
+        } else {
+            throw new Exception(sm.getString("mBeanFactory.managerContext"));
         }
         ObjectName oname = manager.getObjectName();
         if (oname != null) {
@@ -715,8 +680,8 @@ public class MBeanFactory {
         // Add the new instance to its parent component
         ObjectName pname = new ObjectName(parent);
         Container container = getParentContainerFromParent(pname);
-        if (container != null) {
-            container.setLoader(loader);
+        if (container instanceof Context) {
+            ((Context) container).setLoader(loader);
         }
         // FIXME add Loader.getObjectName
         //ObjectName oname = loader.getObjectName();
@@ -852,8 +817,9 @@ public class MBeanFactory {
         ObjectName oname = new ObjectName(name);
         // Acquire a reference to the component to be removed
         Container container = getParentContainerFromChild(oname);
-        container.setLoader(null);
-
+        if (container instanceof Context) {
+            ((Context) container).setLoader(null);
+        }
     }
 
 
@@ -869,8 +835,9 @@ public class MBeanFactory {
         ObjectName oname = new ObjectName(name);
         // Acquire a reference to the component to be removed
         Container container = getParentContainerFromChild(oname);
-        container.setManager(null);
-
+        if (container instanceof Context) {
+            ((Context) container).setManager(null);
+        }
     }
 
 

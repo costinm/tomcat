@@ -16,6 +16,7 @@
   limitations under the License.
 -->
 <antlib>
+  <!-- Pure Catalina tasks -->
   <typedef
         name="list"
         classname="org.apache.catalina.ant.ListTask" />
@@ -40,9 +41,11 @@
   <typedef
         name="sessions"
         classname="org.apache.catalina.ant.SessionsTask" />
+  <!-- Jk Task -->
   <typedef
         name="jkupdate"
         classname="org.apache.catalina.ant.JKStatusUpdateTask" />
+  <!-- Manager JMX -->
   <typedef
         name="jmxManagerSet"
         classname="org.apache.catalina.ant.JMXSetTask" />
@@ -52,4 +55,15 @@
   <typedef
         name="jmxManagerQuery"
         classname="org.apache.catalina.ant.JMXQueryTask" />
+  <!-- Other -->
+<!-- These tasks are deliberately omitted here,
+  because they depend on other Tomcat components besides catalina-ant.jar
+  and thus are hard to use with antlib.
+  <typedef
+        name="validator"
+        classname="org.apache.catalina.ant.ValidatorTask" />
+  <typedef
+        name="jasper"
+        classname="org.apache.jasper.JspC" />
+-->
 </antlib>

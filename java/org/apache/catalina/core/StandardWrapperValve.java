@@ -20,6 +20,7 @@ package org.apache.catalina.core;
 
 
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.servlet.DispatcherType;
 import javax.servlet.RequestDispatcher;
@@ -67,8 +68,8 @@ final class StandardWrapperValve
     private volatile long processingTime;
     private volatile long maxTime;
     private volatile long minTime = Long.MAX_VALUE;
-    private volatile int requestCount;
-    private volatile int errorCount;
+    private final AtomicInteger requestCount = new AtomicInteger(0);
+    private final AtomicInteger errorCount = new AtomicInteger(0);
 
 
     /**
@@ -100,13 +101,13 @@ final class StandardWrapperValve
         Throwable throwable = null;
         // This should be a Request attribute...
         long t1=System.currentTimeMillis();
-        requestCount++;
+        requestCount.incrementAndGet();
         StandardWrapper wrapper = (StandardWrapper) getContainer();
         Servlet servlet = null;
         Context context = (Context) wrapper.getParent();
 
         // Check for the application being marked unavailable
-        if (!context.getAvailable()) {
+        if (!context.getState().isAvailable()) {
             response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE,
                            sm.getString("standardContext.isUnavailable"));
             unavailable = true;
@@ -175,12 +176,9 @@ final class StandardWrapperValve
         MessageBytes requestPathMB = request.getRequestPathMB();
         DispatcherType dispatcherType = DispatcherType.REQUEST;
         if (request.getDispatcherType()==DispatcherType.ASYNC) dispatcherType = DispatcherType.ASYNC;
-        request.setAttribute
-            (ApplicationFilterFactory.DISPATCHER_TYPE_ATTR,
-             dispatcherType);
-        request.setAttribute
-            (ApplicationFilterFactory.DISPATCHER_REQUEST_PATH_ATTR,
-             requestPathMB);
+        request.setAttribute(Globals.DISPATCHER_TYPE_ATTR,dispatcherType);
+        request.setAttribute(Globals.DISPATCHER_REQUEST_PATH_ATTR,
+                requestPathMB);
         // Create the filter chain for this request
         ApplicationFilterFactory factory =
             ApplicationFilterFactory.getInstance();
@@ -361,7 +359,8 @@ final class StandardWrapperValve
         Context context = (Context) wrapper.getParent();
 
         // Check for the application being marked unavailable
-        boolean unavailable = !context.getAvailable() || wrapper.isUnavailable();
+        boolean unavailable = !context.getState().isAvailable() ||
+                wrapper.isUnavailable();
 
         // Allocate a servlet instance to process this request
         try {
@@ -385,12 +384,10 @@ final class StandardWrapperValve
         }
 
         MessageBytes requestPathMB = request.getRequestPathMB();
-        request.setAttribute
-            (ApplicationFilterFactory.DISPATCHER_TYPE_ATTR,
-             DispatcherType.REQUEST);
-        request.setAttribute
-            (ApplicationFilterFactory.DISPATCHER_REQUEST_PATH_ATTR,
-             requestPathMB);
+        request.setAttribute(Globals.DISPATCHER_TYPE_ATTR,
+                DispatcherType.REQUEST);
+        request.setAttribute(Globals.DISPATCHER_REQUEST_PATH_ATTR,
+                requestPathMB);
         // Get the current (unchanged) filter chain for this request
         ApplicationFilterChain filterChain =
             (ApplicationFilterChain) request.getFilterChain();
@@ -522,40 +519,24 @@ final class StandardWrapperValve
         return processingTime;
     }
 
-    public void setProcessingTime(long processingTime) {
-        this.processingTime = processingTime;
-    }
-
     public long getMaxTime() {
         return maxTime;
-    }
-
-    public void setMaxTime(long maxTime) {
-        this.maxTime = maxTime;
     }
 
     public long getMinTime() {
         return minTime;
     }
 
-    public void setMinTime(long minTime) {
-        this.minTime = minTime;
-    }
-
     public int getRequestCount() {
-        return requestCount;
-    }
-
-    public void setRequestCount(int requestCount) {
-        this.requestCount = requestCount;
+        return requestCount.get();
     }
 
     public int getErrorCount() {
-        return errorCount;
+        return errorCount.get();
     }
 
-    public void setErrorCount(int errorCount) {
-        this.errorCount = errorCount;
+    public void incrementErrorCount() {
+        errorCount.incrementAndGet();
     }
 
     @Override

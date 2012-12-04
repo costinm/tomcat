@@ -16,9 +16,6 @@
  */
 package org.apache.catalina.authenticator;
 
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -36,6 +33,7 @@ import org.apache.catalina.deploy.SecurityConstraint;
 import org.apache.catalina.startup.TesterServlet;
 import org.apache.catalina.startup.Tomcat;
 import org.apache.catalina.startup.TomcatBaseTest;
+import org.apache.catalina.util.ConcurrentMessageDigest;
 import org.apache.catalina.util.MD5Encoder;
 import org.apache.tomcat.util.buf.ByteChunk;
 
@@ -206,10 +204,8 @@ public class TestSSOnonLoginAndDigestAuthenticator extends TomcatBaseTest {
             boolean expectedReject, int expectedRC)
             throws Exception {
 
-        Map<String,List<String>> reqHeaders =
-                new HashMap<String,List<String>>();
-        Map<String,List<String>> respHeaders =
-                new HashMap<String,List<String>>();
+        Map<String,List<String>> reqHeaders = new HashMap<>();
+        Map<String,List<String>> respHeaders = new HashMap<>();
 
         ByteChunk bc = new ByteChunk();
         if (addCookies) {
@@ -238,11 +234,9 @@ public class TestSSOnonLoginAndDigestAuthenticator extends TomcatBaseTest {
 
         String digestUri= uri;
 
-        List<String> auth = new ArrayList<String>();
-        Map<String,List<String>> reqHeaders1 =
-                new HashMap<String,List<String>>();
-        Map<String,List<String>> respHeaders1 =
-                new HashMap<String,List<String>>();
+        List<String> auth = new ArrayList<>();
+        Map<String,List<String>> reqHeaders1 = new HashMap<>();
+        Map<String,List<String>> respHeaders1 = new HashMap<>();
 
         // the first access attempt should be challenged
         auth.add(buildDigestResponse(user, pwd, digestUri, REALM, "null",
@@ -265,10 +259,8 @@ public class TestSSOnonLoginAndDigestAuthenticator extends TomcatBaseTest {
         }
 
         // Second request should succeed (if we use the server nonce)
-        Map<String,List<String>> reqHeaders2 =
-                new HashMap<String,List<String>>();
-        Map<String,List<String>> respHeaders2 =
-                new HashMap<String,List<String>>();
+        Map<String,List<String>> reqHeaders2 = new HashMap<>();
+        Map<String,List<String>> respHeaders2 = new HashMap<>();
 
         auth.clear();
         if (useServerNonce) {
@@ -418,7 +410,7 @@ public class TestSSOnonLoginAndDigestAuthenticator extends TomcatBaseTest {
      */
     private static String buildDigestResponse(String user, String pwd,
             String uri, String realm, String nonce, String opaque, String nc,
-            String cnonce, String qop) throws NoSuchAlgorithmException {
+            String cnonce, String qop) {
 
         String a1 = user + ":" + realm + ":" + pwd;
         String a2 = "GET:" + uri;
@@ -451,14 +443,12 @@ public class TestSSOnonLoginAndDigestAuthenticator extends TomcatBaseTest {
         auth.append(md5response);
         auth.append("\"");
         if (qop != null) {
-            auth.append(", qop=\"");
+            auth.append(", qop=");
             auth.append(qop);
-            auth.append("\"");
         }
         if (nc != null) {
-            auth.append(", nc=\"");
+            auth.append(", nc=");
             auth.append(nc);
-            auth.append("\"");
         }
         if (cnonce != null) {
             auth.append(", cnonce=\"");
@@ -469,13 +459,9 @@ public class TestSSOnonLoginAndDigestAuthenticator extends TomcatBaseTest {
         return auth.toString();
     }
 
-    private static String digest(String input) throws NoSuchAlgorithmException {
-        // This is slow but should be OK as this is only a test
-        MessageDigest md5 = MessageDigest.getInstance("MD5");
-        MD5Encoder encoder = new MD5Encoder();
-
-        md5.update(input.getBytes());
-        return encoder.encode(md5.digest());
+    private static String digest(String input) {
+        return MD5Encoder.encode(
+                ConcurrentMessageDigest.digestMD5(input.getBytes()));
     }
 
     /*

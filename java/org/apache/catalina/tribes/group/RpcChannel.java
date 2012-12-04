@@ -48,7 +48,8 @@ public class RpcChannel implements ChannelListener{
     private byte[] rpcId;
     private int replyMessageOptions = 0;
 
-    private HashMap<RpcCollectorKey, RpcCollector> responseMap = new HashMap<RpcCollectorKey, RpcCollector>();
+    private final HashMap<RpcCollectorKey, RpcCollector> responseMap =
+            new HashMap<>();
 
     /**
      * Create an RPC channel. You can have several RPC channels attached to a group
@@ -88,7 +89,7 @@ public class RpcChannel implements ChannelListener{
             channelOptions & ~Channel.SEND_OPTIONS_SYNCHRONIZED_ACK;
 
         RpcCollectorKey key = new RpcCollectorKey(UUIDGenerator.randomUUID(false));
-        RpcCollector collector = new RpcCollector(key,rpcOptions,destination.length,timeout);
+        RpcCollector collector = new RpcCollector(key,rpcOptions,destination.length);
         try {
             synchronized (collector) {
                 if ( rpcOptions != NO_REPLY ) responseMap.put(key, collector);
@@ -226,17 +227,15 @@ public class RpcChannel implements ChannelListener{
      * @version 1.0
      */
     public static class RpcCollector {
-        public ArrayList<Response> responses = new ArrayList<Response>();
-        public RpcCollectorKey key;
-        public int options;
+        public final ArrayList<Response> responses = new ArrayList<>();
+        public final RpcCollectorKey key;
+        public final int options;
         public int destcnt;
-        public long timeout;
 
-        public RpcCollector(RpcCollectorKey key, int options, int destcnt, long timeout) {
+        public RpcCollector(RpcCollectorKey key, int options, int destcnt) {
             this.key = key;
             this.options = options;
             this.destcnt = destcnt;
-            this.timeout = timeout;
         }
 
         public void addResponse(Serializable message, Member sender){
@@ -280,7 +279,7 @@ public class RpcChannel implements ChannelListener{
     }
 
     public static class RpcCollectorKey {
-        byte[] id;
+        final byte[] id;
         public RpcCollectorKey(byte[] id) {
             this.id = id;
         }
@@ -299,14 +298,4 @@ public class RpcChannel implements ChannelListener{
         }
 
     }
-
-    protected static String bToS(byte[] data) {
-        StringBuilder buf = new StringBuilder(4*16);
-        buf.append("{");
-        for (int i=0; data!=null && i<data.length; i++ ) buf.append(String.valueOf(data[i])).append(" ");
-        buf.append("}");
-        return buf.toString();
-    }
-
-
 }

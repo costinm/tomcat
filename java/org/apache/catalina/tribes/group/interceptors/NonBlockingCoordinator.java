@@ -148,7 +148,7 @@ public class NonBlockingCoordinator extends ChannelInterceptorBase {
     /**
      * Time to wait for coordination timeout
      */
-    protected long waitForCoordMsgTimeout = 15000;
+    protected final long waitForCoordMsgTimeout = 15000;
     /**
      * Our current view
      */
@@ -173,9 +173,9 @@ public class NonBlockingCoordinator extends ChannelInterceptorBase {
     protected boolean started = false;
     protected final int startsvc = 0xFFFF;
 
-    protected Object electionMutex = new Object();
+    protected final Object electionMutex = new Object();
 
-    protected AtomicBoolean coordMsgReceived = new AtomicBoolean(false);
+    protected final AtomicBoolean coordMsgReceived = new AtomicBoolean(false);
 
     public NonBlockingCoordinator() {
         super();
@@ -225,19 +225,22 @@ public class NonBlockingCoordinator extends ChannelInterceptorBase {
                     coordMsgReceived.set(false);
                     fireInterceptorEvent(new CoordinationEvent(CoordinationEvent.EVT_WAIT_FOR_MSG,this,"Election, waiting for request"));
                     electionMutex.wait(waitForCoordMsgTimeout);
-                }catch ( InterruptedException x ) {
-                    Thread.interrupted();
+                } catch (InterruptedException x) {
+                    Thread.currentThread().interrupt();
                 }
-                if ( suggestedviewId == null && (!coordMsgReceived.get())) {
-                    //no message arrived, send the coord msg
-//                    fireInterceptorEvent(new CoordinationEvent(CoordinationEvent.EVT_WAIT_FOR_MSG,this,"Election, waiting timed out."));
-//                    startElection(true);
-                    fireInterceptorEvent(new CoordinationEvent(CoordinationEvent.EVT_ELECT_ABANDONED,this,"Election abandoned, waiting timed out."));
+                String msg;
+                if (suggestedviewId == null && !coordMsgReceived.get()) {
+                    if (Thread.interrupted()) {
+                        msg = "Election abandoned, waiting interrupted.";
+                    } else {
+                        msg = "Election abandoned, waiting timed out.";
+                    }
                 } else {
-                    fireInterceptorEvent(new CoordinationEvent(CoordinationEvent.EVT_ELECT_ABANDONED,this,"Election abandoned, received a message"));
+                    msg = "Election abandoned, received a message";
                 }
-            }//end if
-
+                fireInterceptorEvent(new CoordinationEvent(
+                        CoordinationEvent.EVT_ELECT_ABANDONED, this, msg));
+            }
         }
     }
 
@@ -312,7 +315,6 @@ public class NonBlockingCoordinator extends ChannelInterceptorBase {
             coordMsgReceived.set(true);
             synchronized (electionMutex) { electionMutex.notifyAll();}
         }
-        msg.timestamp = System.currentTimeMillis();
         Membership merged = mergeOnArrive(msg);
         if (isViewConf(msg)) handleViewConf(msg, merged);
         else handleToken(msg, merged);
@@ -622,13 +624,12 @@ public class NonBlockingCoordinator extends ChannelInterceptorBase {
 
     public static class CoordinationMessage {
         //X{A-ldr, A-src, mbrs-A,B,C,D}
-        protected XByteBuffer buf;
+        protected final XByteBuffer buf;
         protected MemberImpl leader;
         protected MemberImpl source;
         protected MemberImpl[] view;
         protected UniqueId id;
         protected byte[] type;
-        protected long timestamp = System.currentTimeMillis();
 
         public CoordinationMessage(XByteBuffer buf) {
             this.buf = buf;
@@ -770,13 +771,13 @@ public class NonBlockingCoordinator extends ChannelInterceptorBase {
         public static final int EVT_CONF_RX = 12;
         public static final int EVT_ELECT_ABANDONED = 13;
 
-        int type;
-        ChannelInterceptor interceptor;
-        Member coord;
-        Member[] mbrs;
-        String info;
-        Membership view;
-        Membership suggestedView;
+        final int type;
+        final ChannelInterceptor interceptor;
+        final Member coord;
+        final Member[] mbrs;
+        final String info;
+        final Membership view;
+        final Membership suggestedView;
         public CoordinationEvent(int type,ChannelInterceptor interceptor, String info) {
             this.type = type;
             this.interceptor = interceptor;

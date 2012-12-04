@@ -17,8 +17,7 @@
 package org.apache.catalina.authenticator;
 
 import java.io.IOException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.servlet.http.HttpServletResponse;
 
@@ -33,6 +32,7 @@ import org.apache.catalina.core.StandardContext;
 import org.apache.catalina.deploy.LoginConfig;
 import org.apache.catalina.filters.TesterResponse;
 import org.apache.catalina.startup.TestTomcat.MapRealm;
+import org.apache.catalina.util.ConcurrentMessageDigest;
 import org.apache.catalina.util.MD5Encoder;
 
 public class TesterDigestAuthenticatorPerformance {
@@ -47,12 +47,14 @@ public class TesterDigestAuthenticatorPerformance {
     private static String REALM = "TestRealm";
     private static String QOP = "auth";
 
+    private static final AtomicInteger nonceCount = new AtomicInteger(0);
+
     private DigestAuthenticator authenticator = new DigestAuthenticator();
 
 
     @Test
     public void testSimple() throws Exception {
-        doTest(100, 1000000);
+        doTest(4, 1000000);
     }
 
     public void doTest(int threadCount, int requestCount) throws Exception {
@@ -60,9 +62,12 @@ public class TesterDigestAuthenticatorPerformance {
         TesterRunnable runnables[] = new TesterRunnable[threadCount];
         Thread threads[] = new Thread[threadCount];
 
+        String nonce = authenticator.generateNonce(new TesterDigestRequest());
+
         // Create the runnables & threads
         for (int i = 0; i < threadCount; i++) {
-            runnables[i] = new TesterRunnable(requestCount);
+            runnables[i] =
+                    new TesterRunnable(authenticator, nonce, requestCount);
             threads[i] = new Thread(runnables[i]);
         }
 
@@ -100,6 +105,8 @@ public class TesterDigestAuthenticatorPerformance {
     @Before
     public void setUp() throws Exception {
 
+        ConcurrentMessageDigest.init("MD5");
+
         // Configure the Realm
         MapRealm realm = new MapRealm();
         realm.addUser(USER, PWD);
@@ -117,16 +124,15 @@ public class TesterDigestAuthenticatorPerformance {
 
         // Make the Context and Realm visible to the Authenticator
         authenticator.setContainer(context);
+        authenticator.setNonceCountWindowSize(8 * 1024);
 
-        // Prevent caching of cnonces so we can the same one for all requests
-        authenticator.setCnonceCacheSize(0);
         authenticator.start();
     }
 
 
-    private class TesterRunnable implements Runnable {
+    private static class TesterRunnable implements Runnable {
 
-        // Number of valid requests required
+        private String nonce;
         private int requestCount;
 
         private int success = 0;
@@ -134,14 +140,26 @@ public class TesterDigestAuthenticatorPerformance {
 
         private TesterDigestRequest request;
         private HttpServletResponse response;
+        private DigestAuthenticator authenticator;
+
+        private static final String A1 = USER + ":" + REALM + ":" + PWD;
+        private static final String A2 = METHOD + ":" + CONTEXT_PATH + URI;
+
+        private static final String MD5A1 = MD5Encoder.encode(
+                ConcurrentMessageDigest.digest("MD5", A1.getBytes()));
+        private static final String MD5A2 = MD5Encoder.encode(
+                ConcurrentMessageDigest.digest("MD5", A2.getBytes()));
+
+
 
         // All init code should be in here. run() needs to be quick
-        public TesterRunnable(int requestCount) throws Exception {
+        public TesterRunnable(DigestAuthenticator authenticator,
+                String nonce, int requestCount) throws Exception {
+            this.authenticator = authenticator;
+            this.nonce = nonce;
             this.requestCount = requestCount;
 
             request = new TesterDigestRequest();
-            String nonce = authenticator.generateNonce(request);
-            request.setAuthHeader(buildDigestResponse(nonce));
             request.setContext(authenticator.context);
 
             response = new TesterResponse();
@@ -152,9 +170,12 @@ public class TesterDigestAuthenticatorPerformance {
             long start = System.currentTimeMillis();
             for (int i = 0; i < requestCount; i++) {
                 try {
+                    request.setAuthHeader(buildDigestResponse(nonce));
                     if (authenticator.authenticate(request, response)) {
                         success++;
                     }
+                    // Clear out authenticated user ready for next iteration
+                    request.setUserPrincipal(null);
                 } catch (IOException ioe) {
                     // Ignore
                 }
@@ -170,26 +191,17 @@ public class TesterDigestAuthenticatorPerformance {
             return time;
         }
 
-        private String buildDigestResponse(String nonce)
-                throws NoSuchAlgorithmException {
+        private String buildDigestResponse(String nonce) {
 
-            String ncString = "00000001";
+            String ncString = String.format("%1$08x",
+                    Integer.valueOf(nonceCount.incrementAndGet()));
             String cnonce = "cnonce";
 
-            String a1 = USER + ":" + REALM + ":" + PWD;
-            String a2 = METHOD + ":" + CONTEXT_PATH + URI;
+            String response = MD5A1 + ":" + nonce + ":" + ncString + ":" +
+                    cnonce + ":" + QOP + ":" + MD5A2;
 
-            MessageDigest digester = MessageDigest.getInstance("MD5");
-            MD5Encoder encoder = new MD5Encoder();
-
-            String md5a1 = encoder.encode(digester.digest(a1.getBytes()));
-            String md5a2 = encoder.encode(digester.digest(a2.getBytes()));
-
-            String response = md5a1 + ":" + nonce + ":" + ncString + ":" +
-                    cnonce + ":" + QOP + ":" + md5a2;
-
-            String md5response =
-                encoder.encode(digester.digest(response.getBytes()));
+            String md5response = MD5Encoder.encode(
+                    ConcurrentMessageDigest.digest("MD5", response.getBytes()));
 
             StringBuilder auth = new StringBuilder();
             auth.append("Digest username=\"");
@@ -205,12 +217,10 @@ public class TesterDigestAuthenticatorPerformance {
             auth.append("\", response=\"");
             auth.append(md5response);
             auth.append("\"");
-            auth.append(", qop=\"");
+            auth.append(", qop=");
             auth.append(QOP);
-            auth.append("\"");
-            auth.append(", nc=\"");
+            auth.append(", nc=");
             auth.append(ncString);
-            auth.append("\"");
             auth.append(", cnonce=\"");
             auth.append(cnonce);
             auth.append("\"");
@@ -256,6 +266,5 @@ public class TesterDigestAuthenticatorPerformance {
         public String getRequestURI() {
             return CONTEXT_PATH + URI;
         }
-
     }
 }

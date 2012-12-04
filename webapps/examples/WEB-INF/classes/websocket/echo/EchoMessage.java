@@ -21,9 +21,10 @@ import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 
 import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
 
-import org.apache.catalina.websocket.MessageInbound;
-import org.apache.catalina.websocket.StreamInbound;
+import org.apache.catalina.websocket.MessageHandler;
+import org.apache.catalina.websocket.StreamHandler;
 import org.apache.catalina.websocket.WebSocketServlet;
 
 
@@ -42,24 +43,31 @@ public class EchoMessage extends WebSocketServlet {
 
     public int getInitParameterIntValue(String name, int defaultValue) {
         String val = this.getInitParameter(name);
-        int result = defaultValue;
-        try {
-            result = Integer.parseInt(val);
-        }catch (Exception x) {
+        int result;
+        if(null != val) {
+            try {
+                result = Integer.parseInt(val);
+            }catch (Exception x) {
+                result = defaultValue;
+            }
+        } else {
+            result = defaultValue;
         }
+
         return result;
     }
 
 
 
     @Override
-    protected StreamInbound createWebSocketInbound(String subProtocol) {
-        return new EchoMessageInbound(byteBufSize,charBufSize);
+    protected StreamHandler createWebSocketHandler(String subProtocol,
+            HttpServletRequest request) {
+        return new EchoMessageHandler(byteBufSize,charBufSize);
     }
 
-    private static final class EchoMessageInbound extends MessageInbound {
+    private static final class EchoMessageHandler extends MessageHandler {
 
-        public EchoMessageInbound(int byteBufferMaxSize, int charBufferMaxSize) {
+        public EchoMessageHandler(int byteBufferMaxSize, int charBufferMaxSize) {
             super();
             setByteBufferMaxSize(byteBufferMaxSize);
             setCharBufferMaxSize(charBufferMaxSize);

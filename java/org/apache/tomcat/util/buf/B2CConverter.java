@@ -48,7 +48,7 @@ public class B2CConverter {
         StringManager.getManager(Constants.Package);
 
     private static final Map<String, Charset> encodingToCharsetCache =
-        new HashMap<String, Charset>();
+            new HashMap<>();
 
     public static final Charset ISO_8859_1;
     public static final Charset UTF_8;
@@ -81,12 +81,21 @@ public class B2CConverter {
         // Encoding names should all be ASCII
         String lowerCaseEnc = enc.toLowerCase(Locale.US);
 
+        return getCharsetLower(lowerCaseEnc);
+    }
+
+    /**
+     * Only to be used when it is known that the encoding name is in lower case.
+     */
+    public static Charset getCharsetLower(String lowerCaseEnc)
+            throws UnsupportedEncodingException{
+
         Charset charset = encodingToCharsetCache.get(lowerCaseEnc);
 
         if (charset == null) {
             // Pre-population of the cache means this must be invalid
             throw new UnsupportedEncodingException(
-                    sm.getString("b2cConverter.unknownEncoding", enc));
+                    sm.getString("b2cConverter.unknownEncoding", lowerCaseEnc));
         }
         return charset;
     }

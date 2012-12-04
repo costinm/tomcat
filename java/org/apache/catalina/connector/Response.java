@@ -16,10 +16,8 @@
  */
 package org.apache.catalina.connector;
 
-
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.io.StringReader;
 import java.net.MalformedURLException;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
@@ -27,6 +25,7 @@ import java.security.PrivilegedActionException;
 import java.security.PrivilegedExceptionAction;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Enumeration;
 import java.util.List;
@@ -44,8 +43,6 @@ import org.apache.catalina.Globals;
 import org.apache.catalina.Session;
 import org.apache.catalina.Wrapper;
 import org.apache.catalina.security.SecurityUtil;
-import org.apache.catalina.util.CharsetMapper;
-import org.apache.catalina.util.DateTool;
 import org.apache.catalina.util.RequestUtil;
 import org.apache.catalina.util.SessionConfig;
 import org.apache.tomcat.util.buf.CharChunk;
@@ -53,9 +50,7 @@ import org.apache.tomcat.util.buf.UEncoder;
 import org.apache.tomcat.util.http.FastHttpDateFormat;
 import org.apache.tomcat.util.http.MimeHeaders;
 import org.apache.tomcat.util.http.ServerCookie;
-import org.apache.tomcat.util.http.parser.AstMediaType;
-import org.apache.tomcat.util.http.parser.HttpParser;
-import org.apache.tomcat.util.http.parser.ParseException;
+import org.apache.tomcat.util.http.parser.MediaTypeCache;
 import org.apache.tomcat.util.net.URL;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -72,6 +67,9 @@ public class Response
 
 
     // ----------------------------------------------------------- Constructors
+
+    private static final MediaTypeCache MEDIA_TYPE_CACHE =
+            new MediaTypeCache(100);
 
     /**
      * Compliance with SRV.15.2.22.1. A call to Response.getWriter() if no
@@ -114,20 +112,12 @@ public class Response
 
     // ------------------------------------------------------------- Properties
 
-
-    /**
-     * Associated Catalina connector.
-     */
-    protected Connector connector;
-
-
     /**
      * Set the Connector through which this Request was received.
      *
      * @param connector The new connector
      */
     public void setConnector(Connector connector) {
-        this.connector = connector;
         if("AJP/1.3".equals(connector.getProtocol())) {
             // default size to size of one ajp-packet
             outputBuffer = new OutputBuffer(8184);
@@ -152,6 +142,10 @@ public class Response
     public void setCoyoteResponse(org.apache.coyote.Response coyoteResponse) {
         this.coyoteResponse = coyoteResponse;
         outputBuffer.setResponse(coyoteResponse);
+    }
+
+    public org.apache.coyote.Response getCoyoteResponse() {
+        return this.coyoteResponse;
     }
 
 
@@ -219,13 +213,13 @@ public class Response
     /**
      * URL encoder.
      */
-    protected UEncoder urlEncoder = new UEncoder();
+    protected final UEncoder urlEncoder = new UEncoder();
 
 
     /**
      * Recyclable buffer to hold the redirect URL.
      */
-    protected CharChunk redirectURLCC = new CharChunk();
+    protected final CharChunk redirectURLCC = new CharChunk();
 
 
     // --------------------------------------------------------- Public Methods
@@ -668,6 +662,16 @@ public class Response
     @Override
     public void setContentLength(int length) {
 
+        setContentLengthLong(length);
+    }
+
+
+
+    /**
+     * TODO SERVLET 3.1
+     */
+    @Override
+    public void setContentLengthLong(long length) {
         if (isCommitted()) {
             return;
         }
@@ -704,24 +708,20 @@ public class Response
             return;
         }
 
-        AstMediaType m = null;
-        HttpParser hp = new HttpParser(new StringReader(type));
-        try {
-             m = hp.MediaType();
-        } catch (ParseException e) {
+        String[] m = MEDIA_TYPE_CACHE.parse(type);
+        if (m == null) {
             // Invalid - Assume no charset and just pass through whatever
             // the user provided.
             coyoteResponse.setContentTypeNoCharset(type);
             return;
         }
 
-        coyoteResponse.setContentTypeNoCharset(m.toStringNoCharset());
+        coyoteResponse.setContentTypeNoCharset(m[0]);
 
-        String charset = m.getCharset();
-        if (charset != null) {
+        if (m[1] != null) {
             // Ignore charset if getWriter() has already been called
             if (!usingWriter) {
-                coyoteResponse.setCharacterEncoding(charset);
+                coyoteResponse.setCharacterEncoding(m[1]);
                 isCharacterEncodingSet = true;
             }
         }
@@ -788,41 +788,28 @@ public class Response
             return;
         }
 
-        CharsetMapper cm = getContext().getCharsetMapper();
-        String charset = cm.getCharset( locale );
-        if ( charset != null ){
+        String charset = getContext().getCharset(locale);
+        if (charset != null) {
             coyoteResponse.setCharacterEncoding(charset);
         }
-
     }
 
 
     // --------------------------------------------------- HttpResponse Methods
 
 
-    /**
-     * Return the value for the specified header, or <code>null</code> if this
-     * header has not been set.  If more than one value was added for this
-     * name, only the first is returned; use {@link #getHeaders(String)} to
-     * retrieve all of them.
-     *
-     * @param name Header name to look up
-     */
     @Override
     public String getHeader(String name) {
         return coyoteResponse.getMimeHeaders().getHeader(name);
     }
 
 
-    /**
-     * Return an Iterable of all the header names set for this response.
-     */
     @Override
     public Collection<String> getHeaderNames() {
 
         MimeHeaders headers = coyoteResponse.getMimeHeaders();
         int n = headers.size();
-        List<String> result = new ArrayList<String>(n);
+        List<String> result = new ArrayList<>(n);
         for (int i = 0; i < n; i++) {
             result.add(headers.getName(i).toString());
         }
@@ -831,18 +818,12 @@ public class Response
     }
 
 
-    /**
-     * Return a Collection of all the header values associated with the
-     * specified header name.
-     *
-     * @param name Header name to look up
-     */
     @Override
     public Collection<String> getHeaders(String name) {
 
         Enumeration<String> enumeration =
             coyoteResponse.getMimeHeaders().values(name);
-        Vector<String> result = new Vector<String>();
+        Vector<String> result = new Vector<>();
         while (enumeration.hasMoreElements()) {
             result.addElement(enumeration.nextElement());
         }
@@ -859,9 +840,6 @@ public class Response
     }
 
 
-    /**
-     * Return the HTTP status code associated with this Response.
-     */
     @Override
     public int getStatus() {
         return coyoteResponse.getStatus();
@@ -975,7 +953,7 @@ public class Response
         }
 
         if (format == null) {
-            format = new SimpleDateFormat(DateTool.HTTP_RESPONSE_DATE_HEADER,
+            format = new SimpleDateFormat(FastHttpDateFormat.RFC1123_DATE,
                                           Locale.US);
             format.setTimeZone(TimeZone.getTimeZone("GMT"));
         }
@@ -1019,8 +997,8 @@ public class Response
 
     /**
      * An extended version of this exists in {@link org.apache.coyote.Response}.
-     * This check is required here to ensure that the usingWriter checks in
-     * {@link #setContentType(String)} are applied since usingWriter is not
+     * This check is required here to ensure that the usingWriter check in
+     * {@link #setContentType(String)} is applied since usingWriter is not
      * visible to {@link org.apache.coyote.Response}
      *
      * Called from set/addHeader.
@@ -1130,7 +1108,14 @@ public class Response
     @Override
     public String encodeURL(String url) {
 
-        String absolute = toAbsolute(url);
+        String absolute;
+        try {
+            absolute = toAbsolute(url);
+        } catch (IllegalArgumentException iae) {
+            // Relative URL
+            return url;
+        }
+
         if (isEncodeable(absolute)) {
             // W3c spec clearly said
             if (url.equalsIgnoreCase("")) {
@@ -1314,7 +1299,7 @@ public class Response
         }
 
         if (format == null) {
-            format = new SimpleDateFormat(DateTool.HTTP_RESPONSE_DATE_HEADER,
+            format = new SimpleDateFormat(FastHttpDateFormat.RFC1123_DATE,
                                           Locale.US);
             format.setTimeZone(TimeZone.getTimeZone("GMT"));
         }
@@ -1560,7 +1545,7 @@ public class Response
             redirectURLCC.recycle();
             // Add the scheme
             String scheme = request.getScheme();
-                try {
+            try {
                 redirectURLCC.append(scheme, 0, scheme.length());
                 redirectURLCC.append(':');
                 redirectURLCC.append(location, 0, location.length());
@@ -1619,6 +1604,8 @@ public class Response
                     redirectURLCC.append('/');
                 }
                 redirectURLCC.append(location, 0, location.length());
+
+                normalize(redirectURLCC);
             } catch (IOException e) {
                 IllegalArgumentException iae =
                     new IllegalArgumentException(location);
@@ -1634,6 +1621,99 @@ public class Response
 
         }
 
+    }
+
+    /*
+     * Removes /./ and /../ sequences from absolute URLs.
+     * Code borrowed heavily from CoyoteAdapter.normalize()
+     */
+    private void normalize(CharChunk cc) {
+        // Strip query string and/or fragment first as doing it this way makes
+        // the normalization logic a lot simpler
+        int truncate = cc.indexOf('?');
+        if (truncate == -1) {
+            truncate = cc.indexOf('#');
+        }
+        char[] truncateCC = null;
+        if (truncate > -1) {
+            truncateCC = Arrays.copyOfRange(cc.getBuffer(),
+                    cc.getStart() + truncate, cc.getEnd());
+            cc.setEnd(cc.getStart() + truncate);
+        }
+
+        if (cc.endsWith("/.") || cc.endsWith("/..")) {
+            try {
+                cc.append('/');
+            } catch (IOException e) {
+                throw new IllegalArgumentException(cc.toString(), e);
+            }
+        }
+
+        char[] c = cc.getChars();
+        int start = cc.getStart();
+        int end = cc.getEnd();
+        int index = 0;
+        int startIndex = 0;
+
+        // Advance past the first three / characters (should place index just
+        // scheme://host[:port]
+
+        for (int i = 0; i < 3; i++) {
+            startIndex = cc.indexOf('/', startIndex + 1);
+        }
+
+        // Remove /./
+        index = startIndex;
+        while (true) {
+            index = cc.indexOf("/./", 0, 3, index);
+            if (index < 0) {
+                break;
+            }
+            copyChars(c, start + index, start + index + 2,
+                      end - start - index - 2);
+            end = end - 2;
+            cc.setEnd(end);
+        }
+
+        // Remove /../
+        index = startIndex;
+        int pos;
+        while (true) {
+            index = cc.indexOf("/../", 0, 4, index);
+            if (index < 0) {
+                break;
+            }
+            // Can't go above the server root
+            if (index == startIndex) {
+                throw new IllegalArgumentException();
+            }
+            int index2 = -1;
+            for (pos = start + index - 1; (pos >= 0) && (index2 < 0); pos --) {
+                if (c[pos] == (byte) '/') {
+                    index2 = pos;
+                }
+            }
+            copyChars(c, start + index2, start + index + 3,
+                      end - start - index - 3);
+            end = end + index2 - index - 3;
+            cc.setEnd(end);
+            index = index2;
+        }
+
+        // Add the query string and/or fragment (if present) back in
+        if (truncateCC != null) {
+            try {
+                cc.append(truncateCC, 0, truncateCC.length);
+            } catch (IOException ioe) {
+                throw new IllegalArgumentException(ioe);
+            }
+        }
+    }
+
+    private void copyChars(char[] c, int dest, int src, int len) {
+        for (int pos = 0; pos < len; pos++) {
+            c[pos + dest] = c[pos + src];
+        }
     }
 
 

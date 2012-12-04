@@ -796,7 +796,7 @@ public interface PoolConfiguration {
     /**
      * Set to true if you want the connection pool to commit any pending transaction when a connection is returned.
      * The default value is false, as this could result in committing data.
-     * This parameter is only looked at if the {@link java.sql.Connection#getAutoCommit()} returns false
+     * This parameter is only looked at if the {@link #getDefaultAutoCommit()} returns false
      * @param commitOnReturn set to true if the pool should call {@link java.sql.Connection#commit()} when a connection is returned to the pool.
      * Default is false
      */
@@ -810,7 +810,7 @@ public interface PoolConfiguration {
     /**
      * Set to true if you want the connection pool to rollback any pending transaction when a connection is returned.
      * The default value is false, as this could result in committing data.
-     * This parameter is only looked at if the {@link java.sql.Connection#getAutoCommit()} returns false
+     * This parameter is only looked at if the {@link #getDefaultAutoCommit()} returns false
      * @param rollbackOnReturn set to true if the pool should call {@link java.sql.Connection#rollback()} when a connection is returned to the pool.
      * Default is false
      */
@@ -846,5 +846,22 @@ public interface PoolConfiguration {
      * @return true if errors that happen during validation will be logged
      */
     public boolean getLogValidationErrors();
+
+    /**
+     * Returns true if the pool is configured to propagate interrupt state of a thread.
+     * A thread waiting for a connection, can have its wait interrupted, and by default
+     * will clear the interrupt flag and throw a {@link PoolExhaustedException}
+     * @return true if the pool is configured to propagate and not clear the thread interrupt state
+     */
+    public boolean getPropagateInterruptState();
+
+    /**
+     * Configure the pool to propagate interrupt state for interrupted threads waiting for a connection
+     * A thread waiting for a connection, can have its wait interrupted, and by default
+     * will clear the interrupt flag and throw a {@link PoolExhaustedException}
+     * If set to true, this behavior will change, while the {@link PoolExhaustedException} is still thrown, the threads interrupted state is still set.
+     * @param propagateInterruptState - set to true to not clear, but propagate, a threads interrupted state.
+     */
+    public void setPropagateInterruptState(boolean propagateInterruptState);
 
 }

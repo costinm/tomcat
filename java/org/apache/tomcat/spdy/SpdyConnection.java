@@ -23,8 +23,6 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -51,7 +49,7 @@ public abstract class SpdyConnection { // implements Runnable {
     protected CompressSupport compressSupport;
 
     // Fields stored for each spdy connection
-    Map<Integer, SpdyStream> channels = new HashMap<Integer, SpdyStream>();
+    Map<Integer, SpdyStream> channels = new HashMap<>();
 
     // --------------
     protected static final Logger log = Logger.getLogger(SpdyConnection.class
@@ -116,9 +114,9 @@ public abstract class SpdyConnection { // implements Runnable {
     int outStreamId = 1;
 
     // TODO: finer handling of priorities
-    LinkedList<SpdyFrame> prioriyQueue = new LinkedList<SpdyFrame>();
+    LinkedList<SpdyFrame> prioriyQueue = new LinkedList<>();
 
-    LinkedList<SpdyFrame> outQueue = new LinkedList<SpdyFrame>();
+    LinkedList<SpdyFrame> outQueue = new LinkedList<>();
 
     // --------------
 
@@ -250,7 +248,8 @@ public abstract class SpdyConnection { // implements Runnable {
                         out.streamId = outStreamId;
                         outStreamId += 2;
                         synchronized(channels) {
-                            channels.put(out.streamId, out.stream);
+                            channels.put(Integer.valueOf(out.streamId),
+                                    out.stream);
                         }
                     }
 
@@ -290,7 +289,7 @@ public abstract class SpdyConnection { // implements Runnable {
                             out.stream.finSent = true;
                         }
                         if (out.stream.finRcvd && out.stream.finSent) {
-                            channels.remove(out.streamId);
+                            channels.remove(Integer.valueOf(out.streamId));
                         }
                     }
                 }
@@ -309,8 +308,7 @@ public abstract class SpdyConnection { // implements Runnable {
      *
      * With a nb transport it should call drain directly.
      */
-    public void nonBlockingSend(SpdyFrame oframe, SpdyStream proc) 
-            throws IOException {
+    public void nonBlockingSend(SpdyFrame oframe, SpdyStream proc) {
         queueFrame(oframe, proc, oframe.pri == 0 ? outQueue : prioriyQueue);
         getSpdyContext().getExecutor().execute(nbDrain);
     }
@@ -326,16 +324,15 @@ public abstract class SpdyConnection { // implements Runnable {
 
     /**
      * Add the frame to the queue and send until the queue is empty.
-     * 
+     *
      */
-    public void send(SpdyFrame oframe, SpdyStream proc)
-            throws IOException {
+    public void send(SpdyFrame oframe, SpdyStream proc) {
         queueFrame(oframe, proc, oframe.pri == 0 ? outQueue : prioriyQueue);
         drain();
     }
 
     private void queueFrame(SpdyFrame oframe, SpdyStream proc,
-            LinkedList<SpdyFrame> queue) throws IOException {
+            LinkedList<SpdyFrame> queue) {
 
         oframe.endData = oframe.off;
         oframe.off = 0;
@@ -345,7 +342,7 @@ public abstract class SpdyConnection { // implements Runnable {
 
         // all sync for adding/removing is on outQueue
         synchronized (outQueue) {
-            queue.add(oframe);            
+            queue.add(oframe);
         }
     }
 
@@ -497,7 +494,6 @@ public abstract class SpdyConnection { // implements Runnable {
             if (inFrame != null) {
                 inFrame.recyle();
                 if (nextFrame != null) {
-                    getSpdyContext().releaseFrame(inFrame);
                     inFrame = nextFrame;
                     nextFrame = null;
                 }
@@ -516,7 +512,7 @@ public abstract class SpdyConnection { // implements Runnable {
         System.err.println(msg);
         inClosed = true;
 
-        List<Integer> ch = new ArrayList<Integer>(channels.keySet());
+        List<Integer> ch = new ArrayList<>(channels.keySet());
         for (Integer i: ch) {
             SpdyStream stream = channels.remove(i);
             if (stream != null) {
@@ -529,9 +525,9 @@ public abstract class SpdyConnection { // implements Runnable {
         System.err.println(msg);
         inClosed = true;
 
-        List<Integer> ch = new ArrayList<Integer>(channels.keySet());
+        List<Integer> ch = new ArrayList<>(channels.keySet());
         for (Integer i: ch) {
-            if (i > last) {
+            if (i.intValue() > last) {
                 SpdyStream stream = channels.remove(i);
                 if (stream != null) {
                     stream.onReset();
@@ -541,7 +537,7 @@ public abstract class SpdyConnection { // implements Runnable {
     }
 
     /**
-     * Process a SPDY connection. Called in the input thread, should not 
+     * Process a SPDY connection. Called in the input thread, should not
      * block.
      *
      * @throws IOException
@@ -552,9 +548,9 @@ public abstract class SpdyConnection { // implements Runnable {
             case TYPE_SETTINGS: {
                 int cnt = inFrame.readInt();
                 for (int i = 0; i < cnt; i++) {
-                    int flag = inFrame.readByte();
-                    int id = inFrame.read24();
-                    int value = inFrame.readInt();
+                    inFrame.readByte();
+                    inFrame.read24();
+                    inFrame.readInt();
                 }
                 // TODO: save/interpret settings
                 break;
@@ -577,11 +573,12 @@ public abstract class SpdyConnection { // implements Runnable {
                             + inFrame.streamId
                             + " "
                             + ((errCode < RST_ERRORS.length) ? RST_ERRORS[errCode]
-                                    : errCode));
+                                    : Integer.valueOf(errCode)));
                 }
                 SpdyStream sch;
                 synchronized(channels) {
-                        sch = channels.remove(inFrame.streamId);
+                        sch = channels.remove(
+                                Integer.valueOf(inFrame.streamId));
                 }
                 // if RST stream is for a closed channel - we can ignore.
                 if (sch != null) {
@@ -596,7 +593,7 @@ public abstract class SpdyConnection { // implements Runnable {
                 SpdyStream ch = getSpdyContext().getStream(this);
 
                 synchronized (channels) {
-                    channels.put(inFrame.streamId, ch);
+                    channels.put(Integer.valueOf(inFrame.streamId), ch);
                 }
 
                 try {
@@ -613,7 +610,7 @@ public abstract class SpdyConnection { // implements Runnable {
             case TYPE_SYN_REPLY: {
                 SpdyStream sch;
                 synchronized(channels) {
-                    sch = channels.get(inFrame.streamId);
+                    sch = channels.get(Integer.valueOf(inFrame.streamId));
                 }
                 if (sch == null) {
                     abort("Missing channel");
@@ -646,7 +643,7 @@ public abstract class SpdyConnection { // implements Runnable {
             // Data frame
             SpdyStream sch;
             synchronized (channels) {
-                sch = channels.get(inFrame.streamId);
+                sch = channels.get(Integer.valueOf(inFrame.streamId));
             }
             if (sch == null) {
                 abort("Missing channel");
@@ -655,7 +652,7 @@ public abstract class SpdyConnection { // implements Runnable {
             sch.onDataFrame(inFrame);
             synchronized (channels) {
                 if (sch.finRcvd && sch.finSent) {
-                    channels.remove(inFrame.streamId);
+                    channels.remove(Integer.valueOf(inFrame.streamId));
                 }
             }
             inFrame = null;
@@ -667,7 +664,7 @@ public abstract class SpdyConnection { // implements Runnable {
         return spdyContext;
     }
 
-    public SpdyStream get(String host, String url) throws IOException {
+    public SpdyStream get(String host, String url) {
         SpdyStream sch = new SpdyStream(this);
         sch.getRequest().addHeader("host", host);
         sch.getRequest().addHeader("url", url);

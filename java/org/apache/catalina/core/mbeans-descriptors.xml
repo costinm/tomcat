@@ -70,10 +70,6 @@
                is="true"
                type="boolean"/>
 
-    <attribute name="aliases"
-               description="List of resource aliases"
-               type="java.lang.String" />
-
     <attribute name="altDDName"
                description="The alternate deployment descriptor name."
                type="java.lang.String" />
@@ -1180,6 +1176,10 @@
                description="The name of the LifecycleState that this component is currently in"
                type="java.lang.String"
                writeable="false"/>
+
+    <attribute name="undeployOldVersions"
+               description="Determines if old versions of applications deployed using parallel deployment are automatically undeployed when no longer used. Requires autoDeploy to be enabled."
+               type="boolean"/>
 
     <attribute name="unpackWARs"
                description="Unpack WARs property"

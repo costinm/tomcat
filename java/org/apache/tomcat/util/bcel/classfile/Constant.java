@@ -18,7 +18,6 @@
 package org.apache.tomcat.util.bcel.classfile;
 
 import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.Serializable;
 
@@ -68,24 +67,12 @@ public abstract class Constant implements Cloneable, Serializable {
     }
 
 
-    public abstract void dump( DataOutputStream file ) throws IOException;
-
-
     /**
      * @return Tag of constant, i.e., its type. No setTag() method to avoid
      * confusion.
      */
     public final byte getTag() {
         return tag;
-    }
-
-
-    /**
-     * @return String representation.
-     */
-    @Override
-    public String toString() {
-        return Constants.CONSTANT_NAMES[tag] + "[" + tag + "]";
     }
 
 
@@ -127,9 +114,22 @@ public abstract class Constant implements Cloneable, Serializable {
                 return new ConstantNameAndType(file);
             case Constants.CONSTANT_Utf8:
                 return new ConstantUtf8(file);
+            case Constants.CONSTANT_MethodHandle:
+                return new ConstantMethodHandle(file);
+            case Constants.CONSTANT_MethodType:
+                return new ConstantMethodType(file);
+            case Constants.CONSTANT_InvokeDynamic:
+                return new ConstantInvokeDynamic(file);
             default:
                 throw new ClassFormatException("Invalid byte tag in constant pool: " + b);
         }
+    }
+
+
+
+    @Override
+    public String toString() {
+        return "[" + tag + "]";
     }
 
 

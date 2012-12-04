@@ -14,8 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-
 package org.apache.catalina.core;
 
 import java.io.IOException;
@@ -37,6 +35,7 @@ import javax.servlet.UnavailableException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.apache.catalina.AsyncDispatcher;
 import org.apache.catalina.Context;
 import org.apache.catalina.Globals;
 import org.apache.catalina.InstanceEvent;
@@ -63,9 +62,7 @@ import org.apache.tomcat.util.res.StringManager;
  * @author Craig R. McClanahan
  * @version $Id$
  */
-
-final class ApplicationDispatcher
-    implements RequestDispatcher {
+final class ApplicationDispatcher implements AsyncDispatcher, RequestDispatcher {
 
     protected static final boolean STRICT_SERVLET_COMPLIANCE;
 
@@ -88,11 +85,10 @@ final class ApplicationDispatcher
 
     protected class PrivilegedForward
             implements PrivilegedExceptionAction<Void> {
-        private ServletRequest request;
-        private ServletResponse response;
+        private final ServletRequest request;
+        private final ServletResponse response;
 
-        PrivilegedForward(ServletRequest request, ServletResponse response)
-        {
+        PrivilegedForward(ServletRequest request, ServletResponse response) {
             this.request = request;
             this.response = response;
         }
@@ -106,20 +102,34 @@ final class ApplicationDispatcher
 
     protected class PrivilegedInclude implements
             PrivilegedExceptionAction<Void> {
-        private ServletRequest request;
-        private ServletResponse response;
+        private final ServletRequest request;
+        private final ServletResponse response;
 
-        PrivilegedInclude(ServletRequest request, ServletResponse response)
-        {
+        PrivilegedInclude(ServletRequest request, ServletResponse response) {
             this.request = request;
             this.response = response;
         }
 
         @Override
         public Void run() throws ServletException, IOException {
-            DispatcherType type = DispatcherType.INCLUDE;
-            if (request.getDispatcherType()==DispatcherType.ASYNC) type = DispatcherType.ASYNC;
-            doInclude(request,response,type);
+            doInclude(request, response);
+            return null;
+        }
+    }
+
+    protected class PrivilegedDispatch implements
+            PrivilegedExceptionAction<Void> {
+        private final ServletRequest request;
+        private final ServletResponse response;
+
+        PrivilegedDispatch(ServletRequest request, ServletResponse response) {
+            this.request = request;
+            this.response = response;
+        }
+
+        @Override
+        public Void run() throws ServletException, IOException {
+            doDispatch(request, response);
             return null;
         }
     }
@@ -223,37 +233,37 @@ final class ApplicationDispatcher
     /**
      * The Context this RequestDispatcher is associated with.
      */
-    private Context context = null;
+    private final Context context;
 
 
     /**
      * The servlet name for a named dispatcher.
      */
-    private String name = null;
+    private final String name;
 
 
     /**
      * The extra path information for this RequestDispatcher.
      */
-    private String pathInfo = null;
+    private final String pathInfo;
 
 
     /**
      * The query string parameters for this RequestDispatcher.
      */
-    private String queryString = null;
+    private final String queryString;
 
 
     /**
      * The request URI for this RequestDispatcher.
      */
-    private String requestURI = null;
+    private final String requestURI;
 
 
     /**
      * The servlet path for this RequestDispatcher.
      */
-    private String servletPath = null;
+    private final String servletPath;
 
 
     /**
@@ -267,14 +277,14 @@ final class ApplicationDispatcher
      * The InstanceSupport instance associated with our Wrapper (used to
      * send "before dispatch" and "after dispatch" events.
      */
-    private InstanceSupport support = null;
+    private final InstanceSupport support;
 
 
     /**
      * The Wrapper associated with the resource that will be forwarded to
      * or included.
      */
-    private Wrapper wrapper = null;
+    private final Wrapper wrapper;
 
 
     // --------------------------------------------------------- Public Methods
@@ -382,6 +392,12 @@ final class ApplicationDispatcher
             processRequest(request,response,state);
         }
 
+        if (request.getAsyncContext() != null) {
+            // An async request was started during the forward, don't close the
+            // response as it may be written to during the async handling
+            return;
+        }
+
         // This is not a real close in order to support error processing
         if (wrapper.getLogger().isDebugEnabled() )
             wrapper.getLogger().debug(" Disabling the response for futher output");
@@ -431,7 +447,7 @@ final class ApplicationDispatcher
                                 State state)
         throws IOException, ServletException {
 
-        DispatcherType disInt = (DispatcherType) request.getAttribute(ApplicationFilterFactory.DISPATCHER_TYPE_ATTR);
+        DispatcherType disInt = (DispatcherType) request.getAttribute(Globals.DISPATCHER_TYPE_ATTR);
         if (disInt != null) {
             boolean doInvoke = true;
 
@@ -442,12 +458,12 @@ final class ApplicationDispatcher
 
             if (doInvoke) {
                 if (disInt != DispatcherType.ERROR) {
-                    state.outerRequest.setAttribute
-                        (ApplicationFilterFactory.DISPATCHER_REQUEST_PATH_ATTR,
-                         getCombinedPath());
-                    state.outerRequest.setAttribute
-                        (ApplicationFilterFactory.DISPATCHER_TYPE_ATTR,
-                         DispatcherType.FORWARD);
+                    state.outerRequest.setAttribute(
+                            Globals.DISPATCHER_REQUEST_PATH_ATTR,
+                            getCombinedPath());
+                    state.outerRequest.setAttribute(
+                            Globals.DISPATCHER_TYPE_ATTR,
+                            DispatcherType.FORWARD);
                     invoke(state.outerRequest, response, state);
                 } else {
                     invoke(state.outerRequest, response, state);
@@ -505,15 +521,13 @@ final class ApplicationDispatcher
                 throw (IOException) e;
             }
         } else {
-            DispatcherType type = DispatcherType.INCLUDE;
-            if (request.getDispatcherType()==DispatcherType.ASYNC) type = DispatcherType.ASYNC;
-            doInclude(request,response,type);
+            doInclude(request, response);
         }
     }
 
-    private void doInclude(ServletRequest request, ServletResponse response, DispatcherType type)
-        throws ServletException, IOException
-    {
+    private void doInclude(ServletRequest request, ServletResponse response)
+            throws ServletException, IOException {
+
         // Set up to handle the specified request and response
         State state = new State(request, response, true);
 
@@ -533,10 +547,9 @@ final class ApplicationDispatcher
             wrequest.setAttribute(Globals.NAMED_DISPATCHER_ATTR, name);
             if (servletPath != null)
                 wrequest.setServletPath(servletPath);
-            wrequest.setAttribute(ApplicationFilterFactory.DISPATCHER_TYPE_ATTR,
-                    type);
-            wrequest.setAttribute(
-                    ApplicationFilterFactory.DISPATCHER_REQUEST_PATH_ATTR,
+            wrequest.setAttribute(Globals.DISPATCHER_TYPE_ATTR,
+                    DispatcherType.INCLUDE);
+            wrequest.setAttribute(Globals.DISPATCHER_REQUEST_PATH_ATTR,
                     getCombinedPath());
             invoke(state.outerRequest, state.outerResponse, state);
         }
@@ -565,14 +578,66 @@ final class ApplicationDispatcher
                 wrequest.setQueryParams(queryString);
             }
 
-            wrequest.setAttribute(ApplicationFilterFactory.DISPATCHER_TYPE_ATTR,
-                    type);
-            wrequest.setAttribute(
-                    ApplicationFilterFactory.DISPATCHER_REQUEST_PATH_ATTR,
+            wrequest.setAttribute(Globals.DISPATCHER_TYPE_ATTR,
+                    DispatcherType.INCLUDE);
+            wrequest.setAttribute(Globals.DISPATCHER_REQUEST_PATH_ATTR,
                     getCombinedPath());
             invoke(state.outerRequest, state.outerResponse, state);
         }
 
+    }
+
+
+    @Override
+    public void dispatch(ServletRequest request, ServletResponse response)
+            throws ServletException, IOException {
+        if (Globals.IS_SECURITY_ENABLED) {
+            try {
+                PrivilegedDispatch dp = new PrivilegedDispatch(request,response);
+                AccessController.doPrivileged(dp);
+            } catch (PrivilegedActionException pe) {
+                Exception e = pe.getException();
+
+                if (e instanceof ServletException)
+                    throw (ServletException) e;
+                throw (IOException) e;
+            }
+        } else {
+            doDispatch(request, response);
+        }
+    }
+
+    private void doDispatch(ServletRequest request, ServletResponse response)
+            throws ServletException, IOException {
+
+        // Set up to handle the specified request and response
+        State state = new State(request, response, false);
+
+        // Create a wrapped response to use for this request
+        wrapResponse(state);
+
+        ApplicationHttpRequest wrequest =
+            (ApplicationHttpRequest) wrapRequest(state);
+
+        if (queryString != null) {
+            wrequest.setQueryParams(queryString);
+        }
+
+        wrequest.setAttribute(Globals.DISPATCHER_TYPE_ATTR,
+                DispatcherType.ASYNC);
+        wrequest.setAttribute(Globals.DISPATCHER_REQUEST_PATH_ATTR,
+                getCombinedPath());
+
+        wrequest.setContextPath(context.getPath());
+        wrequest.setRequestURI(requestURI);
+        wrequest.setServletPath(servletPath);
+        wrequest.setPathInfo(pathInfo);
+        if (queryString != null) {
+            wrequest.setQueryString(queryString);
+            wrequest.setQueryParams(queryString);
+        }
+
+        invoke(state.outerRequest, state.outerResponse, state);
     }
 
 
@@ -759,6 +824,12 @@ final class ApplicationDispatcher
         if (state.wrapRequest == null)
             return;
 
+        if (state.outerRequest.isAsyncStarted()) {
+            if (!state.outerRequest.getAsyncContext().hasOriginalRequestAndResponse()) {
+                return;
+            }
+        }
+
         ServletRequest previous = null;
         ServletRequest current = state.outerRequest;
         while (current != null) {
@@ -794,6 +865,12 @@ final class ApplicationDispatcher
 
         if (state.wrapResponse == null)
             return;
+
+        if (state.outerRequest.isAsyncStarted()) {
+            if (!state.outerRequest.getAsyncContext().hasOriginalRequestAndResponse()) {
+                return;
+            }
+        }
 
         ServletResponse previous = null;
         ServletResponse current = state.outerResponse;

@@ -18,6 +18,7 @@ package org.apache.catalina.util;
 
 
 import java.util.HashMap;
+import java.util.Map;
 
 import org.apache.tomcat.util.digester.Digester;
 import org.xml.sax.EntityResolver;
@@ -36,21 +37,20 @@ public class SchemaResolver implements EntityResolver {
     /**
      * The digester instance for which this class is the entity resolver.
      */
-    protected Digester digester;
+    protected final Digester digester;
 
 
     /**
      * The URLs of dtds and schemas that have been registered, keyed by the
      * public identifier that corresponds.
      */
-    protected HashMap<String,String> entityValidator =
-        new HashMap<String,String>();
+    protected final Map<String,String> entityValidator = new HashMap<>();
 
 
     /**
      * Extension to make the difference between DTD and Schema.
      */
-    protected String schemaExtension = "xsd";
+    protected final String schemaExtension = "xsd";
 
 
     /**

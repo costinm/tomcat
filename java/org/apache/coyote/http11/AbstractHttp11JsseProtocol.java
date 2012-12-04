@@ -18,8 +18,8 @@ package org.apache.coyote.http11;
 
 import org.apache.tomcat.util.net.SSLImplementation;
 
-public abstract class AbstractHttp11JsseProtocol
-        extends AbstractHttp11Protocol {
+public abstract class AbstractHttp11JsseProtocol<S>
+        extends AbstractHttp11Protocol<S> {
 
     protected SSLImplementation sslImplementation = null;
 
@@ -50,6 +50,7 @@ public abstract class AbstractHttp11JsseProtocol
 
     public String getCiphers() { return endpoint.getCiphers();}
     public void setCiphers(String s) { endpoint.setCiphers(s);}
+    public String[] getCiphersUsed() { return endpoint.getCiphersUsed();}
 
     public String getKeyAlias() { return endpoint.getKeyAlias();}
     public void setKeyAlias(String s ) { endpoint.setKeyAlias(s);}

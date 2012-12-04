@@ -44,12 +44,11 @@ public final class ClassParser {
     private DataInputStream file;
     private String file_name;
     private int class_name_index, superclass_name_index;
-    private int major, minor; // Compiler version
     private int access_flags; // Access rights of parsed class
     private int[] interfaces; // Names of implemented interfaces
     private ConstantPool constant_pool; // collection of constants
-    private Field[] fields; // class fields, i.e., its variables
-    private Method[] methods; // methods defined in the class
+    private FieldOrMethod[] fields; // class fields, i.e., its variables
+    private FieldOrMethod[] methods; // methods defined in the class
     private Attribute[] attributes; // attributes defined in the class
     private static final int BUFSIZE = 8192;
 
@@ -117,8 +116,8 @@ public final class ClassParser {
         //      }
 
         // Return the information we have gathered in a new object
-        return new JavaClass(class_name_index, superclass_name_index, file_name, major, minor,
-                access_flags, constant_pool, interfaces, fields, methods, attributes);
+        return new JavaClass(class_name_index, superclass_name_index,
+                access_flags, constant_pool, interfaces, attributes);
     }
 
 
@@ -177,9 +176,9 @@ public final class ClassParser {
     private final void readFields() throws IOException, ClassFormatException {
         int fields_count;
         fields_count = file.readUnsignedShort();
-        fields = new Field[fields_count];
+        fields = new FieldOrMethod[fields_count];
         for (int i = 0; i < fields_count; i++) {
-            fields[i] = new Field(file, constant_pool);
+            fields[i] = new FieldOrMethod(file, constant_pool);
         }
     }
 
@@ -222,9 +221,9 @@ public final class ClassParser {
     private final void readMethods() throws IOException, ClassFormatException {
         int methods_count;
         methods_count = file.readUnsignedShort();
-        methods = new Method[methods_count];
+        methods = new FieldOrMethod[methods_count];
         for (int i = 0; i < methods_count; i++) {
-            methods[i] = new Method(file, constant_pool);
+            methods[i] = new FieldOrMethod(file, constant_pool);
         }
     }
 
@@ -235,7 +234,7 @@ public final class ClassParser {
      * @throws  ClassFormatException
      */
     private final void readVersion() throws IOException, ClassFormatException {
-        minor = file.readUnsignedShort();
-        major = file.readUnsignedShort();
+        file.readUnsignedShort();   // Unused minor
+        file.readUnsignedShort();   // Unused major
     }
 }

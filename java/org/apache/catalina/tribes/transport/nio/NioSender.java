@@ -20,7 +20,6 @@ package org.apache.catalina.tribes.transport.nio;
 import java.io.EOFException;
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
 import java.nio.channels.SelectionKey;
@@ -63,8 +62,8 @@ public class NioSender extends AbstractSender {
      */
     protected ByteBuffer readbuf = null;
     protected ByteBuffer writebuf = null;
-    protected byte[] current = null;
-    protected XByteBuffer ackbuf = new XByteBuffer(128,true);
+    protected volatile byte[] current = null;
+    protected final XByteBuffer ackbuf = new XByteBuffer(128,true);
     protected int remaining = 0;
     protected boolean complete;
 
@@ -132,13 +131,9 @@ public class NioSender extends AbstractSender {
         return false;
     }
 
-    private void completeConnect() throws SocketException {
-        //we connected, register ourselves for writing
-        setConnected(true);
-        connecting = false;
-        setRequestCount(0);
-        setConnectTime(System.currentTimeMillis());
+    private void configureSocket() throws IOException {
         if (socketChannel!=null) {
+            socketChannel.configureBlocking(false);
             socketChannel.socket().setSendBufferSize(getTxBufSize());
             socketChannel.socket().setReceiveBufferSize(getRxBufSize());
             socketChannel.socket().setSoTimeout((int)getTimeout());
@@ -150,12 +145,21 @@ public class NioSender extends AbstractSender {
             socketChannel.socket().setSoLinger(getSoLingerOn(),getSoLingerTime());
             socketChannel.socket().setTrafficClass(getSoTrafficClass());
         } else if (dataChannel!=null) {
+            dataChannel.configureBlocking(false);
             dataChannel.socket().setSendBufferSize(getUdpTxBufSize());
             dataChannel.socket().setReceiveBufferSize(getUdpRxBufSize());
             dataChannel.socket().setSoTimeout((int)getTimeout());
             dataChannel.socket().setReuseAddress(getSoReuseAddress());
             dataChannel.socket().setTrafficClass(getSoTrafficClass());
         }
+    }
+
+    private void completeConnect() {
+        //we connected, register ourselves for writing
+        setConnected(true);
+        connecting = false;
+        setRequestCount(0);
+        setConnectTime(System.currentTimeMillis());
     }
 
 
@@ -232,7 +236,7 @@ public class NioSender extends AbstractSender {
             InetSocketAddress daddr = new InetSocketAddress(getAddress(),getUdpPort());
             if ( dataChannel != null ) throw new IOException("Datagram channel has already been established. Connection might be in progress.");
             dataChannel = DatagramChannel.open();
-            dataChannel.configureBlocking(false);
+            configureSocket();
             dataChannel.connect(daddr);
             completeConnect();
             dataChannel.register(getSelector(),SelectionKey.OP_WRITE, this);
@@ -241,7 +245,7 @@ public class NioSender extends AbstractSender {
             InetSocketAddress addr = new InetSocketAddress(getAddress(),getPort());
             if ( socketChannel != null ) throw new IOException("Socket channel has already been established. Connection might be in progress.");
             socketChannel = SocketChannel.open();
-            socketChannel.configureBlocking(false);
+            configureSocket();
             if ( socketChannel.connect(addr) ) {
                 completeConnect();
                 socketChannel.register(getSelector(), SelectionKey.OP_WRITE, this);
@@ -262,27 +266,43 @@ public class NioSender extends AbstractSender {
         try {
             connecting = false;
             setConnected(false);
-            if ( socketChannel != null ) {
+            if (socketChannel != null) {
                 try {
-                    try {socketChannel.socket().close();}catch ( Exception x){}
+                    try {
+                        socketChannel.socket().close();
+                    } catch (Exception x) {
+                        // Ignore
+                    }
                     //error free close, all the way
                     //try {socket.shutdownOutput();}catch ( Exception x){}
                     //try {socket.shutdownInput();}catch ( Exception x){}
                     //try {socket.close();}catch ( Exception x){}
-                    try {socketChannel.close();}catch ( Exception x){}
-                }finally {
+                    try {
+                        socketChannel.close();
+                    } catch (Exception x) {
+                        // Ignore
+                    }
+                } finally {
                     socketChannel = null;
                 }
             }
-            if ( dataChannel != null ) {
+            if (dataChannel != null) {
                 try {
-                    try {dataChannel.socket().close();}catch ( Exception x){}
+                    try {
+                        dataChannel.socket().close();
+                    } catch (Exception x) {
+                        // Ignore
+                    }
                     //error free close, all the way
                     //try {socket.shutdownOutput();}catch ( Exception x){}
                     //try {socket.shutdownInput();}catch ( Exception x){}
                     //try {socket.close();}catch ( Exception x){}
-                    try {dataChannel.close();}catch ( Exception x){}
-                }finally {
+                    try {
+                        dataChannel.close();
+                    } catch (Exception x) {
+                        // Ignore
+                    }
+                } finally {
                     dataChannel = null;
                 }
             }
@@ -329,38 +349,41 @@ public class NioSender extends AbstractSender {
     * @throws IOException
     * TODO Implement this org.apache.catalina.tribes.transport.IDataSender method
     */
-   public synchronized void setMessage(byte[] data) throws IOException {
-       setMessage(data,0,data.length);
-   }
+    public void setMessage(byte[] data) throws IOException {
+        setMessage(data,0,data.length);
+    }
 
-   public synchronized void setMessage(byte[] data,int offset, int length) throws IOException {
-       if ( data != null ) {
-           current = data;
-           remaining = length;
-           ackbuf.clear();
-           if ( writebuf != null ) writebuf.clear();
-           else writebuf = getBuffer(length);
-           if ( writebuf.capacity() < length ) writebuf = getBuffer(length);
+    public void setMessage(byte[] data,int offset, int length) throws IOException {
+        if (data != null) {
+            synchronized (this) {
+                current = data;
+                remaining = length;
+                ackbuf.clear();
+                if (writebuf != null) {
+                    writebuf.clear();
+                } else {
+                    writebuf = getBuffer(length);
+                }
+                if (writebuf.capacity() < length) {
+                    writebuf = getBuffer(length);
+                }
 
-           //TODO use ByteBuffer.wrap to avoid copying the data.
-           writebuf.put(data,offset,length);
-           //writebuf.rewind();
-           //set the limit so that we don't write non wanted data
-           //writebuf.limit(length);
-           writebuf.flip();
-           if (isConnected()) {
-               if (isUdpBased())
-                   dataChannel.register(getSelector(), SelectionKey.OP_WRITE, this);
-               else
-                   socketChannel.register(getSelector(), SelectionKey.OP_WRITE, this);
-           }
-       }
-   }
+                // TODO use ByteBuffer.wrap to avoid copying the data.
+                writebuf.put(data,offset,length);
+                writebuf.flip();
+                if (isConnected()) {
+                    if (isUdpBased())
+                        dataChannel.register(getSelector(), SelectionKey.OP_WRITE, this);
+                    else
+                        socketChannel.register(getSelector(), SelectionKey.OP_WRITE, this);
+                }
+            }
+        }
+    }
 
-   public byte[] getMessage() {
-       return current;
-   }
-
+    public byte[] getMessage() {
+        return current;
+    }
 
 
     public boolean isComplete() {

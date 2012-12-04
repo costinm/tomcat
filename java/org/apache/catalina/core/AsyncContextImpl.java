@@ -30,7 +30,6 @@ import javax.naming.NamingException;
 import javax.servlet.AsyncContext;
 import javax.servlet.AsyncEvent;
 import javax.servlet.AsyncListener;
-import javax.servlet.DispatcherType;
 import javax.servlet.RequestDispatcher;
 import javax.servlet.ServletContext;
 import javax.servlet.ServletException;
@@ -39,8 +38,11 @@ import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.apache.catalina.AsyncDispatcher;
 import org.apache.catalina.Context;
 import org.apache.catalina.Globals;
+import org.apache.catalina.Host;
+import org.apache.catalina.Valve;
 import org.apache.catalina.connector.Request;
 import org.apache.coyote.ActionCode;
 import org.apache.coyote.AsyncContextCallback;
@@ -64,7 +66,7 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
 
     private ServletRequest servletRequest = null;
     private ServletResponse servletResponse = null;
-    private List<AsyncListenerWrapper> listeners = new ArrayList<AsyncListenerWrapper>();
+    private final List<AsyncListenerWrapper> listeners = new ArrayList<>();
     private boolean hasOriginalRequestAndResponse = true;
     private volatile Runnable dispatch = null;
     private Context context = null;
@@ -92,39 +94,124 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
 
     @Override
     public void fireOnComplete() {
-        List<AsyncListenerWrapper> listenersCopy =
-            new ArrayList<AsyncListenerWrapper>();
+        List<AsyncListenerWrapper> listenersCopy = new ArrayList<>();
         listenersCopy.addAll(listeners);
-        for (AsyncListenerWrapper listener : listenersCopy) {
-            try {
-                listener.fireOnComplete(event);
-            } catch (IOException ioe) {
-                log.warn("onComplete() failed for listener of type [" +
-                        listener.getClass().getName() + "]", ioe);
+
+        ClassLoader oldCL;
+        if (Globals.IS_SECURITY_ENABLED) {
+            PrivilegedAction<ClassLoader> pa = new PrivilegedGetTccl();
+            oldCL = AccessController.doPrivileged(pa);
+        } else {
+            oldCL = Thread.currentThread().getContextClassLoader();
+        }
+        ClassLoader newCL = context.getLoader().getClassLoader();
+
+        try {
+            if (Globals.IS_SECURITY_ENABLED) {
+                PrivilegedAction<Void> pa = new PrivilegedSetTccl(newCL);
+                AccessController.doPrivileged(pa);
+            } else {
+                Thread.currentThread().setContextClassLoader(newCL);
+            }
+            for (AsyncListenerWrapper listener : listenersCopy) {
+                try {
+                    listener.fireOnComplete(event);
+                } catch (IOException ioe) {
+                    log.warn("onComplete() failed for listener of type [" +
+                            listener.getClass().getName() + "]", ioe);
+                }
+            }
+        } finally {
+            if (Globals.IS_SECURITY_ENABLED) {
+                PrivilegedAction<Void> pa = new PrivilegedSetTccl(oldCL);
+                AccessController.doPrivileged(pa);
+            } else {
+                Thread.currentThread().setContextClassLoader(oldCL);
             }
         }
     }
 
-    public boolean timeout() throws IOException {
+    public boolean canRead() throws IOException {
+        if (request.getCoyoteRequest().getReadListener()==null) return false;
+
+        ClassLoader oldCL = Thread.currentThread().getContextClassLoader();
+        ClassLoader newCL = request.getContext().getLoader().getClassLoader();
+        try {
+            Thread.currentThread().setContextClassLoader(newCL);
+            request.getCoyoteRequest().getReadListener().onDataAvailable();
+            if (request.getInputStream().isFinished()) {
+                request.getCoyoteRequest().getReadListener().onAllDataRead();
+            }
+        }finally {
+            Thread.currentThread().setContextClassLoader(oldCL);
+        }
+        return true;
+    }
+
+    public boolean canWrite() {
+        if (request.getResponse().getCoyoteResponse().getWriteListener()==null) return false;
+        ClassLoader oldCL = Thread.currentThread().getContextClassLoader();
+        ClassLoader newCL = request.getContext().getLoader().getClassLoader();
+        try {
+            Thread.currentThread().setContextClassLoader(newCL);
+            request.getResponse().getCoyoteResponse().getWriteListener().onWritePossible();
+        }finally {
+            Thread.currentThread().setContextClassLoader(oldCL);
+    }
+        return true;
+    }
+
+    public boolean notifyWriteError(Throwable error) {
+        if (request.getResponse().getCoyoteResponse().getWriteListener()==null) return false;
+        ClassLoader oldCL = Thread.currentThread().getContextClassLoader();
+        ClassLoader newCL = request.getContext().getLoader().getClassLoader();
+        try {
+            Thread.currentThread().setContextClassLoader(newCL);
+            request.getResponse().getCoyoteResponse().getWriteListener().onError(error);
+            return true;
+        } finally {
+            Thread.currentThread().setContextClassLoader(oldCL);
+        }
+    }
+
+    public boolean notifyReadError(Throwable error) {
+        if (request.getCoyoteRequest().getReadListener()==null) return false;
+        ClassLoader oldCL = Thread.currentThread().getContextClassLoader();
+        ClassLoader newCL = request.getContext().getLoader().getClassLoader();
+        try {
+            Thread.currentThread().setContextClassLoader(newCL);
+            request.getCoyoteRequest().getReadListener().onError(error);
+            return true;
+        } finally {
+            Thread.currentThread().setContextClassLoader(oldCL);
+        }
+    }
+
+    public boolean timeout() {
         AtomicBoolean result = new AtomicBoolean();
         request.getCoyoteRequest().action(ActionCode.ASYNC_TIMEOUT, result);
 
         if (result.get()) {
-            boolean listenerInvoked = false;
-            List<AsyncListenerWrapper> listenersCopy =
-                new ArrayList<AsyncListenerWrapper>();
-            listenersCopy.addAll(listeners);
-            for (AsyncListenerWrapper listener : listenersCopy) {
-                listener.fireOnTimeout(event);
-                listenerInvoked = true;
-            }
-            if (listenerInvoked) {
+
+            ClassLoader oldCL = Thread.currentThread().getContextClassLoader();
+            ClassLoader newCL = request.getContext().getLoader().getClassLoader();
+            try {
+                Thread.currentThread().setContextClassLoader(newCL);
+                List<AsyncListenerWrapper> listenersCopy = new ArrayList<>();
+                listenersCopy.addAll(listeners);
+                for (AsyncListenerWrapper listener : listenersCopy) {
+                    try {
+                        listener.fireOnTimeout(event);
+                    } catch (IOException ioe) {
+                        log.warn("onTimeout() failed for listener of type [" +
+                                listener.getClass().getName() + "]", ioe);
+                    }
+                }
                 request.getCoyoteRequest().action(
                         ActionCode.ASYNC_IS_TIMINGOUT, result);
                 return !result.get();
-            } else {
-                // No listeners, container calls complete
-                complete();
+            } finally {
+                Thread.currentThread().setContextClassLoader(oldCL);
             }
         }
         return true;
@@ -153,30 +240,32 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
         }
         check();
         if (request.getAttribute(ASYNC_REQUEST_URI)==null) {
-            request.setAttribute(ASYNC_REQUEST_URI, request.getRequestURI()+"?"+request.getQueryString());
+            request.setAttribute(ASYNC_REQUEST_URI, request.getRequestURI());
             request.setAttribute(ASYNC_CONTEXT_PATH, request.getContextPath());
             request.setAttribute(ASYNC_SERVLET_PATH, request.getServletPath());
+            request.setAttribute(ASYNC_PATH_INFO, request.getPathInfo());
             request.setAttribute(ASYNC_QUERY_STRING, request.getQueryString());
         }
         final RequestDispatcher requestDispatcher = context.getRequestDispatcher(path);
-        final HttpServletRequest servletRequest = (HttpServletRequest)getRequest();
-        final HttpServletResponse servletResponse = (HttpServletResponse)getResponse();
+        if (!(requestDispatcher instanceof AsyncDispatcher)) {
+            throw new UnsupportedOperationException(
+                    sm.getString("asyncContextImpl.noAsyncDispatcher"));
+        }
+        final AsyncDispatcher applicationDispatcher =
+                (AsyncDispatcher) requestDispatcher;
+        final HttpServletRequest servletRequest =
+                (HttpServletRequest) getRequest();
+        final HttpServletResponse servletResponse =
+                (HttpServletResponse) getResponse();
         Runnable run = new Runnable() {
             @Override
             public void run() {
                 request.getCoyoteRequest().action(ActionCode.ASYNC_DISPATCHED, null);
-                DispatcherType type = (DispatcherType)request.getAttribute(Globals.DISPATCHER_TYPE_ATTR);
                 try {
-                    //piggy back on the request dispatcher to ensure that filters etc get called.
-                    //TODO SERVLET3 - async should this be include/forward or a new dispatch type
-                    //javadoc suggests include with the type of DispatcherType.ASYNC
-                    request.setAttribute(Globals.DISPATCHER_TYPE_ATTR, DispatcherType.ASYNC);
-                    requestDispatcher.include(servletRequest, servletResponse);
+                    applicationDispatcher.dispatch(servletRequest, servletResponse);
                 }catch (Exception x) {
                     //log.error("Async.dispatch",x);
                     throw new RuntimeException(x);
-                }finally {
-                    request.setAttribute(Globals.DISPATCHER_TYPE_ATTR, type);
                 }
             }
         };
@@ -224,7 +313,6 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
         listeners.add(wrapper);
     }
 
-    @SuppressWarnings("unchecked")
     @Override
     public <T extends AsyncListener> T createListener(Class<T> clazz)
             throws ServletException {
@@ -288,8 +376,7 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
         this.hasOriginalRequestAndResponse = originalRequestResponse;
         this.event = new AsyncEvent(this, request, response);
 
-        List<AsyncListenerWrapper> listenersCopy =
-            new ArrayList<AsyncListenerWrapper>();
+        List<AsyncListenerWrapper> listenersCopy = new ArrayList<>();
         listenersCopy.addAll(listeners);
         for (AsyncListenerWrapper listener : listenersCopy) {
             try {
@@ -346,20 +433,49 @@ public class AsyncContextImpl implements AsyncContext, AsyncContextCallback {
     }
 
 
-    public void setErrorState(Throwable t) {
+    public void setErrorState(Throwable t, boolean fireOnError) {
         if (t!=null) request.setAttribute(RequestDispatcher.ERROR_EXCEPTION, t);
         request.getCoyoteRequest().action(ActionCode.ASYNC_ERROR, null);
-        AsyncEvent errorEvent = new AsyncEvent(event.getAsyncContext(),
-                event.getSuppliedRequest(), event.getSuppliedResponse(), t);
-        List<AsyncListenerWrapper> listenersCopy =
-            new ArrayList<AsyncListenerWrapper>();
-        listenersCopy.addAll(listeners);
-        for (AsyncListenerWrapper listener : listenersCopy) {
-            try {
-                listener.fireOnError(errorEvent);
-            } catch (IOException ioe) {
-                log.warn("onStartAsync() failed for listener of type [" +
-                        listener.getClass().getName() + "]", ioe);
+
+        if (fireOnError) {
+            AsyncEvent errorEvent = new AsyncEvent(event.getAsyncContext(),
+                    event.getSuppliedRequest(), event.getSuppliedResponse(), t);
+            List<AsyncListenerWrapper> listenersCopy = new ArrayList<>();
+            listenersCopy.addAll(listeners);
+            for (AsyncListenerWrapper listener : listenersCopy) {
+                try {
+                    listener.fireOnError(errorEvent);
+                } catch (IOException ioe) {
+                    log.warn("onError() failed for listener of type [" +
+                            listener.getClass().getName() + "]", ioe);
+                }
+            }
+        }
+
+
+        AtomicBoolean result = new AtomicBoolean();
+        request.getCoyoteRequest().action(ActionCode.ASYNC_IS_ERROR, result);
+        if (result.get()) {
+            // No listener called dispatch() or complete(). This is an error.
+            // SRV.2.3.3.3 (search for "error dispatch")
+            if (servletResponse instanceof HttpServletResponse) {
+                ((HttpServletResponse) servletResponse).setStatus(
+                        HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+            }
+
+            Host host = (Host) context.getParent();
+            Valve stdHostValve = host.getPipeline().getBasic();
+            if (stdHostValve instanceof StandardHostValve) {
+                ((StandardHostValve) stdHostValve).throwable(request,
+                        request.getResponse(), t);
+            }
+
+            request.getCoyoteRequest().action(
+                    ActionCode.ASYNC_IS_ERROR, result);
+            if (result.get()) {
+                // Still in the error state. The error page did not call
+                // complete() or dispatch(). Complete the async processing.
+                complete();
             }
         }
     }

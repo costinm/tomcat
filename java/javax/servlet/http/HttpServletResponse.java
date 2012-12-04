@@ -29,8 +29,6 @@ import javax.servlet.ServletResponse;
  * The servlet container creates an <code>HttpServletResponse</code> object and
  * passes it as an argument to the servlet's service methods (<code>doGet</code>, <code>doPost</code>, etc).
  *
- * @author Various
- * @version $Version$
  * @see javax.servlet.ServletResponse
  */
 public interface HttpServletResponse extends ServletResponse {
@@ -118,13 +116,13 @@ public interface HttpServletResponse extends ServletResponse {
     public String encodeRedirectUrl(String url);
 
     /**
-     * Sends an error response to the client using the specified status. The
-     * server defaults to creating the response to look like an HTML-formatted
-     * server error page containing the specified message, setting the content
-     * type to "text/html", leaving cookies and other headers unmodified. If an
-     * error-page declaration has been made for the web application
-     * corresponding to the status code passed in, it will be served back in
-     * preference to the suggested msg parameter.
+     * Sends an error response to the client using the specified status code and
+     * clears the output buffer. The server defaults to creating the response to
+     * look like an HTML-formatted server error page containing the specified
+     * message, setting the content type to "text/html", leaving cookies and
+     * other headers unmodified. If an error-page declaration has been made for
+     * the web application corresponding to the status code passed in, it will
+     * be served back in preference to the suggested msg parameter.
      * <p>
      * If the response has already been committed, this method throws an
      * IllegalStateException. After using this method, the response should be
@@ -143,11 +141,8 @@ public interface HttpServletResponse extends ServletResponse {
 
     /**
      * Sends an error response to the client using the specified status code and
-     * clearing the buffer.
-     * <p>
-     * If the response has already been committed, this method throws an
-     * IllegalStateException. After using this method, the response should be
-     * considered to be committed and should not be written to.
+     * clears the buffer. This is equivalent to calling {@link #sendError(int,
+     * String)} with the same status code and <code>null</code> for the message.
      *
      * @param sc
      *            the error status code
@@ -301,28 +296,38 @@ public interface HttpServletResponse extends ServletResponse {
     public void setStatus(int sc, String sm);
 
     /**
-     * @return TODO
-     * @since Servlet 3.0 TODO SERVLET3 - Add comments
+     * Return the HTTP status code associated with this Response.
+     *
+     * @since Servlet 3.0
      */
     public int getStatus();
 
     /**
-     * @param name
-     * @return TODO
-     * @since Servlet 3.0 TODO SERVLET3 - Add comments
+     * Return the value for the specified header, or <code>null</code> if this
+     * header has not been set.  If more than one value was added for this
+     * name, only the first is returned; use {@link #getHeaders(String)} to
+     * retrieve all of them.
+     *
+     * @param name Header name to look up
+     *
+     * @since Servlet 3.0
      */
     public String getHeader(String name);
 
     /**
-     * @param name
-     * @return TODO
-     * @since Servlet 3.0 TODO SERVLET3 - Add comments
+     * Return a Collection of all the header values associated with the
+     * specified header name.
+     *
+     * @param name Header name to look up
+     *
+     * @since Servlet 3.0
      */
     public Collection<String> getHeaders(String name);
 
     /**
-     * @return TODO
-     * @since Servlet 3.0 TODO SERVLET3 - Add comments
+     * Return an Iterable of all the header names set for this response.
+     *
+     * @since Servlet 3.0
      */
     public Collection<String> getHeaderNames();
 

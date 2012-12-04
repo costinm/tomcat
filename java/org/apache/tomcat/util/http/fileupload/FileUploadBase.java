@@ -298,7 +298,7 @@ public abstract class FileUploadBase {
      */
     public List<FileItem> parseRequest(RequestContext ctx)
             throws FileUploadException {
-        List<FileItem> items = new ArrayList<FileItem>();
+        List<FileItem> items = new ArrayList<>();
         boolean successful = false;
         try {
             FileItemIterator iter = getItemIterator(ctx);
@@ -958,32 +958,23 @@ public abstract class FileUploadBase {
      * {@link FileUploadException} in an {@link IOException}.
      */
     public static class FileUploadIOException extends IOException {
-        /** The exceptions UID, for serializing an instance.
-         */
-        private static final long serialVersionUID = -7047616958165584154L;
-        /** The exceptions cause; we overwrite the parent
-         * classes field, which is available since Java
-         * 1.4 only.
-         */
-        private final FileUploadException cause;
 
-        /**
-         * Creates a <code>FileUploadIOException</code> with the
-         * given cause.
-         * @param pCause The exceptions cause, if any, or null.
-         */
-        public FileUploadIOException(FileUploadException pCause) {
-            // We're not doing super(pCause) cause of 1.3 compatibility.
-            cause = pCause;
+        private static final long serialVersionUID = -3082868232248803474L;
+
+        public FileUploadIOException() {
+            super();
         }
 
-        /**
-         * Returns the exceptions cause.
-         * @return The exceptions cause, if any, or null.
-         */
-        @Override
-        public Throwable getCause() {
-            return cause;
+        public FileUploadIOException(String message, Throwable cause) {
+            super(message, cause);
+        }
+
+        public FileUploadIOException(String message) {
+            super(message);
+        }
+
+        public FileUploadIOException(Throwable cause) {
+            super(cause);
         }
     }
 
@@ -1019,32 +1010,23 @@ public abstract class FileUploadBase {
      * Thrown to indicate an IOException.
      */
     public static class IOFileUploadException extends FileUploadException {
-        /** The exceptions UID, for serializing an instance.
-         */
-        private static final long serialVersionUID = 1749796615868477269L;
-        /** The exceptions cause; we overwrite the parent
-         * classes field, which is available since Java
-         * 1.4 only.
-         */
-        private final IOException cause;
 
-        /**
-         * Creates a new instance with the given cause.
-         * @param pMsg The detail message.
-         * @param pException The exceptions cause.
-         */
-        public IOFileUploadException(String pMsg, IOException pException) {
-            super(pMsg);
-            cause = pException;
+        private static final long serialVersionUID = -5858565745868986701L;
+
+        public IOFileUploadException() {
+            super();
         }
 
-        /**
-         * Returns the exceptions cause.
-         * @return The exceptions cause, if any, or null.
-         */
-        @Override
-        public Throwable getCause() {
-            return cause;
+        public IOFileUploadException(String message, Throwable cause) {
+            super(message, cause);
+        }
+
+        public IOFileUploadException(String message) {
+            super(message);
+        }
+
+        public IOFileUploadException(Throwable cause) {
+            super(cause);
         }
     }
 

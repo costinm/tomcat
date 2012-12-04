@@ -105,9 +105,19 @@ public interface ServletRequest {
      * same as the value of the CGI variable CONTENT_LENGTH.
      *
      * @return an integer containing the length of the request body or -1 if the
-     *         length is not known
+     *         length is not known or is greater than {@link Integer#MAX_VALUE}
      */
     public int getContentLength();
+
+    /**
+     * Returns the length, in bytes, of the request body and made available by
+     * the input stream, or -1 if the length is not known. For HTTP servlets,
+     * same as the value of the CGI variable CONTENT_LENGTH.
+     *
+     * @return a long integer containing the length of the request body or -1 if
+     *         the length is not known
+     */
+    public long getContentLengthLong();
 
     /**
      * Returns the MIME type of the body of the request, or <code>null</code> if
@@ -438,7 +448,7 @@ public interface ServletRequest {
      *             If async is not supported for this request
      * @since Servlet 3.0 TODO SERVLET3 - Add comments
      */
-    public AsyncContext startAsync();
+    public AsyncContext startAsync() throws IllegalStateException;
 
     /**
      * @param servletRequest
@@ -448,7 +458,7 @@ public interface ServletRequest {
      * @since Servlet 3.0 TODO SERVLET3 - Add comments
      */
     public AsyncContext startAsync(ServletRequest servletRequest,
-            ServletResponse servletResponse);
+            ServletResponse servletResponse) throws IllegalStateException;
 
     /**
      * @return TODO

@@ -162,6 +162,9 @@ public abstract class AbstractInputBuffer<S> implements InputBuffer{
     protected int lastActiveFilter;
 
 
+    // ------------------------------------------------------------- TODO SERVLET 3.1 IN PROGRESS
+    public abstract boolean supportsNonBlocking();
+
     // ------------------------------------------------------------- Properties
 
 
@@ -247,6 +250,11 @@ public abstract class AbstractInputBuffer<S> implements InputBuffer{
 
         // Recycle Request object
         request.recycle();
+
+        // Recycle filters
+        for (int i = 0; i <= lastActiveFilter; i++) {
+            activeFilters[i].recycle();
+        }
 
         lastValid = 0;
         pos = 0;

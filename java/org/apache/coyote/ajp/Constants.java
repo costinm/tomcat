@@ -14,13 +14,9 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
-
 package org.apache.coyote.ajp;
 
 import java.util.Hashtable;
-
-import org.apache.tomcat.util.buf.ByteChunk;
-
 
 /**
  * Constants.
@@ -29,10 +25,6 @@ import org.apache.tomcat.util.buf.ByteChunk;
  */
 public final class Constants {
 
-
-    // -------------------------------------------------------------- Constants
-
-
     /**
      * Package name.
      */
@@ -40,14 +32,12 @@ public final class Constants {
 
     public static final int DEFAULT_CONNECTION_LINGER = -1;
     public static final int DEFAULT_CONNECTION_TIMEOUT = -1;
-    public static final int DEFAULT_CONNECTION_UPLOAD_TIMEOUT = 300000;
     public static final boolean DEFAULT_TCP_NO_DELAY = true;
-    public static final boolean DEFAULT_USE_SENDFILE = false;
 
     // Prefix codes for message types from server to container
     public static final byte JK_AJP13_FORWARD_REQUEST   = 2;
-    public static final byte JK_AJP13_SHUTDOWN          = 7;
-    public static final byte JK_AJP13_PING_REQUEST      = 8;
+    public static final byte JK_AJP13_SHUTDOWN          = 7;    // XXX Unused
+    public static final byte JK_AJP13_PING_REQUEST      = 8;    // XXX Unused
     public static final byte JK_AJP13_CPING_REQUEST     = 10;
 
     // Prefix codes for message types from container to server
@@ -81,7 +71,7 @@ public final class Constants {
     public static final byte SC_A_SSL_CERT      = 7;
     public static final byte SC_A_SSL_CIPHER    = 8;
     public static final byte SC_A_SSL_SESSION   = 9;
-    public static final byte SC_A_SSL_KEYSIZE   = 11;
+    public static final byte SC_A_SSL_KEY_SIZE  = 11;
     public static final byte SC_A_SECRET        = 12;
     public static final byte SC_A_STORED_METHOD = 13;
 
@@ -176,8 +166,6 @@ public final class Constants {
     public static final int SC_REQ_PRAGMA          = 12;
     public static final int SC_REQ_REFERER         = 13;
     public static final int SC_REQ_USER_AGENT      = 14;
-    // AJP14 new header
-    public static final byte SC_A_SSL_KEY_SIZE  = 11; // XXX ???
 
     // Translates integer codes to request header names
     private static final String [] headerTransArray = {
@@ -231,7 +219,7 @@ public final class Constants {
     }
 
     private static final Hashtable<String,Integer>  responseTransHash =
-        new Hashtable<String,Integer>(20);
+            new Hashtable<>(20);
 
     static {
         try {
@@ -254,169 +242,4 @@ public final class Constants {
         else
             return i.intValue();
     }
-
-
-    /**
-     * CRLF.
-     */
-    public static final String CRLF = "\r\n";
-
-
-    /**
-     * Server string.
-     */
-    public static final byte[] SERVER_BYTES =
-        ByteChunk.convertToBytes("Server: Apache-Coyote/1.1" + CRLF);
-
-
-    /**
-     * CR.
-     */
-    public static final byte CR = (byte) '\r';
-
-
-    /**
-     * LF.
-     */
-    public static final byte LF = (byte) '\n';
-
-
-    /**
-     * SP.
-     */
-    public static final byte SP = (byte) ' ';
-
-
-    /**
-     * HT.
-     */
-    public static final byte HT = (byte) '\t';
-
-
-    /**
-     * COLON.
-     */
-    public static final byte COLON = (byte) ':';
-
-
-    /**
-     * 'A'.
-     */
-    public static final byte A = (byte) 'A';
-
-
-    /**
-     * 'a'.
-     */
-    public static final byte a = (byte) 'a';
-
-
-    /**
-     * 'Z'.
-     */
-    public static final byte Z = (byte) 'Z';
-
-
-    /**
-     * '?'.
-     */
-    public static final byte QUESTION = (byte) '?';
-
-
-    /**
-     * Lower case offset.
-     */
-    public static final byte LC_OFFSET = A - a;
-
-
-    /**
-     * Default HTTP header buffer size.
-     */
-    public static final int DEFAULT_HTTP_HEADER_BUFFER_SIZE = 48 * 1024;
-
-
-    /* Various constant "strings" */
-    public static final byte[] CRLF_BYTES = ByteChunk.convertToBytes(CRLF);
-    public static final byte[] COLON_BYTES = ByteChunk.convertToBytes(": ");
-    public static final String CONNECTION = "Connection";
-    public static final String CLOSE = "close";
-    public static final byte[] CLOSE_BYTES =
-        ByteChunk.convertToBytes(CLOSE);
-    public static final String KEEPALIVE = "keep-alive";
-    public static final byte[] KEEPALIVE_BYTES =
-        ByteChunk.convertToBytes(KEEPALIVE);
-    public static final String CHUNKED = "chunked";
-    public static final byte[] ACK_BYTES =
-        ByteChunk.convertToBytes("HTTP/1.1 100 Continue" + CRLF + CRLF);
-    public static final String TRANSFERENCODING = "Transfer-Encoding";
-    public static final byte[] _200_BYTES =
-        ByteChunk.convertToBytes("200");
-    public static final byte[] _400_BYTES =
-        ByteChunk.convertToBytes("400");
-    public static final byte[] _404_BYTES =
-        ByteChunk.convertToBytes("404");
-
-
-    /**
-     * Identity filters (input and output).
-     */
-    public static final int IDENTITY_FILTER = 0;
-
-
-    /**
-     * Chunked filters (input and output).
-     */
-    public static final int CHUNKED_FILTER = 1;
-
-
-    /**
-     * Void filters (input and output).
-     */
-    public static final int VOID_FILTER = 2;
-
-
-    /**
-     * GZIP filter (output).
-     */
-    public static final int GZIP_FILTER = 3;
-
-
-    /**
-     * Buffered filter (input)
-     */
-    public static final int BUFFERED_FILTER = 3;
-
-
-    /**
-     * HTTP/1.0.
-     */
-    public static final String HTTP_10 = "HTTP/1.0";
-
-
-    /**
-     * HTTP/1.1.
-     */
-    public static final String HTTP_11 = "HTTP/1.1";
-    public static final byte[] HTTP_11_BYTES =
-        ByteChunk.convertToBytes(HTTP_11);
-
-
-    /**
-     * GET.
-     */
-    public static final String GET = "GET";
-
-
-    /**
-     * HEAD.
-     */
-    public static final String HEAD = "HEAD";
-
-
-    /**
-     * POST.
-     */
-    public static final String POST = "POST";
-
-
 }

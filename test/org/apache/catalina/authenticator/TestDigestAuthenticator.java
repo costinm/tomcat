@@ -16,8 +16,6 @@
  */
 package org.apache.catalina.authenticator;
 
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -36,6 +34,7 @@ import org.apache.catalina.startup.TestTomcat.MapRealm;
 import org.apache.catalina.startup.TesterServlet;
 import org.apache.catalina.startup.Tomcat;
 import org.apache.catalina.startup.TomcatBaseTest;
+import org.apache.catalina.util.ConcurrentMessageDigest;
 import org.apache.catalina.util.MD5Encoder;
 import org.apache.tomcat.util.buf.ByteChunk;
 
@@ -176,14 +175,13 @@ public class TestDigestAuthenticator extends TomcatBaseTest {
         } else {
             digestUri = uri;
         }
-        List<String> auth = new ArrayList<String>();
+        List<String> auth = new ArrayList<>();
         auth.add(buildDigestResponse(user, pwd, digestUri, realm, "null",
                 "null", nc1, cnonce, qop));
-        Map<String,List<String>> reqHeaders = new HashMap<String,List<String>>();
+        Map<String,List<String>> reqHeaders = new HashMap<>();
         reqHeaders.put(CLIENT_AUTH_HEADER, auth);
 
-        Map<String,List<String>> respHeaders =
-            new HashMap<String,List<String>>();
+        Map<String,List<String>> respHeaders = new HashMap<>();
 
         // The first request will fail - but we need to extract the nonce
         ByteChunk bc = new ByteChunk();
@@ -310,7 +308,7 @@ public class TestDigestAuthenticator extends TomcatBaseTest {
      */
     private static String buildDigestResponse(String user, String pwd,
             String uri, String realm, String nonce, String opaque, String nc,
-            String cnonce, String qop) throws NoSuchAlgorithmException {
+            String cnonce, String qop) {
 
         String a1 = user + ":" + realm + ":" + pwd;
         String a2 = "GET:" + uri;
@@ -343,14 +341,13 @@ public class TestDigestAuthenticator extends TomcatBaseTest {
         auth.append(md5response);
         auth.append("\"");
         if (qop != null) {
-            auth.append(", qop=\"");
+            auth.append(", qop=");
             auth.append(qop);
-            auth.append("\"");
+            auth.append("");
         }
         if (nc != null) {
-            auth.append(", nc=\"");
+            auth.append(", nc=");
             auth.append(nc);
-            auth.append("\"");
         }
         if (cnonce != null) {
             auth.append(", cnonce=\"");
@@ -361,12 +358,8 @@ public class TestDigestAuthenticator extends TomcatBaseTest {
         return auth.toString();
     }
 
-    private static String digest(String input) throws NoSuchAlgorithmException {
-        // This is slow but should be OK as this is only a test
-        MessageDigest md5 = MessageDigest.getInstance("MD5");
-        MD5Encoder encoder = new MD5Encoder();
-
-        md5.update(input.getBytes());
-        return encoder.encode(md5.digest());
+    private static String digest(String input) {
+        return MD5Encoder.encode(
+                ConcurrentMessageDigest.digestMD5(input.getBytes()));
     }
 }

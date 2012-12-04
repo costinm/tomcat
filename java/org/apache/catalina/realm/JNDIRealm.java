@@ -126,8 +126,10 @@ import org.ietf.jgss.GSSCredential;
  *         property.</li>
  *     <li>The <code>roleSearch</code> pattern optionally includes pattern
  *         replacements "{0}" for the distinguished name, and/or "{1}" for
- *         the username, of the authenticated user for which roles will be
- *         retrieved.</li>
+ *         the username, and/or "{2}" the value of an attribute from the
+ *         user's directory entry (the attribute is specified by the
+ *         <code>userRoleAttribute</code> property), of the authenticated user
+ *         for which roles will be retrieved.</li>
  *     <li>The <code>roleBase</code> property can be set to the element that
  *         is the base of the search for matching roles.  If not specified,
  *         the entire context will be searched.</li>
@@ -292,6 +294,14 @@ public class JNDIRealm extends RealmBase {
      */
     protected String userPassword = null;
 
+    /**
+     * The name of the attribute inside the users
+     * directory entry where the value will be
+     * taken to search for roles
+     * This attribute is not used during a nested search
+     */
+    protected String userRoleAttribute = null;
+
 
     /**
      * A string of LDAP user patterns or paths, ":"-separated
@@ -353,7 +363,8 @@ public class JNDIRealm extends RealmBase {
 
     /**
      * The message format used to select roles for a user, with "{0}" marking
-     * the spot where the distinguished name of the user goes.
+     * the spot where the distinguished name of the user goes. The "{1}"
+     * and "{2}" are described in the Configuration Reference.
      */
     protected String roleSearch = null;
 
@@ -764,6 +775,14 @@ public class JNDIRealm extends RealmBase {
     }
 
 
+    public boolean isRoleSearchAsUser() {
+        return roleSearchAsUser;
+    }
+
+    public void setRoleSearchAsUser(boolean roleSearchAsUser) {
+        this.roleSearchAsUser = roleSearchAsUser;
+    }
+
     /**
      * Return the "search subtree for roles" flag.
      */
@@ -829,6 +848,14 @@ public class JNDIRealm extends RealmBase {
     }
 
 
+    public String getUserRoleAttribute() {
+        return userRoleAttribute;
+    }
+
+    public void setUserRoleAttribute(String userRoleAttribute) {
+        this.userRoleAttribute = userRoleAttribute;
+    }
+
     /**
      * Return the message format pattern for selecting users in this Realm.
      */
@@ -837,6 +864,8 @@ public class JNDIRealm extends RealmBase {
         return (this.userPattern);
 
     }
+
+
 
 
     /**
@@ -1225,11 +1254,14 @@ public class JNDIRealm extends RealmBase {
         User user = null;
 
         // Get attributes to retrieve from user entry
-        ArrayList<String> list = new ArrayList<String>();
+        ArrayList<String> list = new ArrayList<>();
         if (userPassword != null)
             list.add(userPassword);
         if (userRoleName != null)
             list.add(userRoleName);
+        if (userRoleAttribute != null) {
+            list.add(userRoleAttribute);
+        }
         String[] attrIds = new String[list.size()];
         list.toArray(attrIds);
 
@@ -1265,7 +1297,7 @@ public class JNDIRealm extends RealmBase {
 
         // If no attributes are requested, no need to look for them
         if (attrIds == null || attrIds.length == 0) {
-            return new User(username, dn, null, null);
+            return new User(username, dn, null, null,null);
         }
 
         // Get required attributes from user entry
@@ -1283,12 +1315,17 @@ public class JNDIRealm extends RealmBase {
         if (userPassword != null)
             password = getAttributeValue(userPassword, attrs);
 
+        String userRoleAttrValue = null;
+        if (userRoleAttribute != null) {
+            userRoleAttrValue = getAttributeValue(userRoleAttribute, attrs);
+        }
+
         // Retrieve values of userRoleName attribute
         ArrayList<String> roles = null;
         if (userRoleName != null)
             roles = addAttributeValues(userRoleName, attrs, roles);
 
-        return new User(username, dn, password, roles);
+        return new User(username, dn, password, roles, userRoleAttrValue);
     }
 
 
@@ -1427,12 +1464,17 @@ public class JNDIRealm extends RealmBase {
         if (userPassword != null)
             password = getAttributeValue(userPassword, attrs);
 
+        String userRoleAttrValue = null;
+        if (userRoleAttribute != null) {
+            userRoleAttrValue = getAttributeValue(userRoleAttribute, attrs);
+        }
+
         // Retrieve values of userRoleName attribute
         ArrayList<String> roles = null;
         if (userRoleName != null)
             roles = addAttributeValues(userRoleName, attrs, roles);
 
-        return new User(username, dn, password, roles);
+        return new User(username, dn, password, roles, userRoleAttrValue);
     }
 
 
@@ -1675,6 +1717,7 @@ public class JNDIRealm extends RealmBase {
 
         String dn = user.getDN();
         String username = user.getUserName();
+        String userRoleId = user.getUserRoleId();
 
         if (dn == null || username == null)
             return (null);
@@ -1683,7 +1726,7 @@ public class JNDIRealm extends RealmBase {
             containerLog.trace("  getRoles(" + dn + ")");
 
         // Start with roles retrieved from the user entry
-        List<String> list = new ArrayList<String>();
+        List<String> list = new ArrayList<>();
         List<String> userRoles = user.getRoles();
         if (userRoles != null) {
             list.addAll(userRoles);
@@ -1702,7 +1745,7 @@ public class JNDIRealm extends RealmBase {
             return (list);
 
         // Set up parameters for an appropriate search
-        String filter = roleFormat.format(new String[] { doRFC2254Encoding(dn), username });
+        String filter = roleFormat.format(new String[] { doRFC2254Encoding(dn), username, userRoleId });
         SearchControls controls = new SearchControls();
         if (roleSubtree)
             controls.setSearchScope(SearchControls.SUBTREE_SCOPE);
@@ -1737,7 +1780,7 @@ public class JNDIRealm extends RealmBase {
         if (results == null)
             return (list);  // Should never happen, but just in case ...
 
-        HashMap<String, String> groupMap = new HashMap<String, String>();
+        HashMap<String, String> groupMap = new HashMap<>();
         try {
             while (results.hasMore()) {
                 SearchResult result = results.next();
@@ -1770,12 +1813,12 @@ public class JNDIRealm extends RealmBase {
             // Directory Groups". It avoids group slurping and handles cyclic group memberships as well.
             // See http://middleware.internet2.edu/dir/ for details
 
-            Map<String, String> newGroups = new HashMap<String,String>(groupMap);
+            Map<String, String> newGroups = new HashMap<>(groupMap);
             while (!newGroups.isEmpty()) {
-                Map<String, String> newThisRound = new HashMap<String, String>(); // Stores the groups we find in this iteration
+                Map<String, String> newThisRound = new HashMap<>(); // Stores the groups we find in this iteration
 
                 for (Entry<String, String> group : newGroups.entrySet()) {
-                    filter = roleFormat.format(new String[] { group.getKey(), group.getValue() });
+                    filter = roleFormat.format(new String[] { group.getKey(), group.getValue(), group.getValue() });
 
                     if (containerLog.isTraceEnabled()) {
                         containerLog.trace("Perform a nested group search with base "+ roleBase + " and filter " + filter);
@@ -1868,7 +1911,7 @@ public class JNDIRealm extends RealmBase {
         if (attrId == null || attrs == null)
             return values;
         if (values == null)
-            values = new ArrayList<String>();
+            values = new ArrayList<>();
         Attribute attr = attrs.get(attrId);
         if (attr == null)
             return (values);
@@ -2116,7 +2159,7 @@ public class JNDIRealm extends RealmBase {
      */
     protected Hashtable<String,String> getDirectoryContextEnvironment() {
 
-        Hashtable<String,String> env = new Hashtable<String,String>();
+        Hashtable<String,String> env = new Hashtable<>();
 
         // Configure our directory context environment.
         if (containerLog.isDebugEnabled() && connectionAttempt == 0)
@@ -2215,7 +2258,7 @@ public class JNDIRealm extends RealmBase {
     protected String[] parseUserPatternString(String userPatternString) {
 
         if (userPatternString != null) {
-            ArrayList<String> pathList = new ArrayList<String>();
+            ArrayList<String> pathList = new ArrayList<>();
             int startParenLoc = userPatternString.indexOf('(');
             if (startParenLoc == -1) {
                 // no parens here; return whole thing
@@ -2359,9 +2402,11 @@ public class JNDIRealm extends RealmBase {
         private final String dn;
         private final String password;
         private final List<String> roles;
+        private final String userRoleId;
+
 
         public User(String username, String dn, String password,
-                List<String> roles) {
+                List<String> roles, String userRoleId) {
             this.username = username;
             this.dn = dn;
             this.password = password;
@@ -2370,6 +2415,7 @@ public class JNDIRealm extends RealmBase {
             } else {
                 this.roles = Collections.unmodifiableList(roles);
             }
+            this.userRoleId = userRoleId;
         }
 
         public String getUserName() {
@@ -2387,6 +2433,12 @@ public class JNDIRealm extends RealmBase {
         public List<String> getRoles() {
             return roles;
         }
+
+        public String getUserRoleId() {
+            return userRoleId;
+        }
+
+
     }
 }
 

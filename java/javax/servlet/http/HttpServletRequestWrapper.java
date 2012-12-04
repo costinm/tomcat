@@ -279,7 +279,13 @@ public class HttpServletRequestWrapper extends ServletRequestWrapper implements
     }
 
     /**
-     * @since Servlet 3.0 TODO SERVLET3 - Add comments
+     * {@inheritDoc}
+     * <p>
+     * The default behavior of this method is to return
+     * {@link HttpServletRequest#authenticate(HttpServletResponse)}
+     * on the wrapped request object.
+     *
+     * @since Servlet 3.0
      */
     @Override
     public boolean authenticate(HttpServletResponse response)
@@ -288,7 +294,13 @@ public class HttpServletRequestWrapper extends ServletRequestWrapper implements
     }
 
     /**
-     * @since Servlet 3.0 TODO SERVLET3 - Add comments
+     * {@inheritDoc}
+     * <p>
+     * The default behavior of this method is to return
+     * {@link HttpServletRequest#login(String, String)}
+     * on the wrapped request object.
+     *
+     * @since Servlet 3.0
      */
     @Override
     public void login(String username, String password) throws ServletException {
@@ -296,7 +308,13 @@ public class HttpServletRequestWrapper extends ServletRequestWrapper implements
     }
 
     /**
-     * @since Servlet 3.0 TODO SERVLET3 - Add comments
+     * {@inheritDoc}
+     * <p>
+     * The default behavior of this method is to return
+     * {@link HttpServletRequest#logout()}
+     * on the wrapped request object.
+     *
+     * @since Servlet 3.0
      */
     @Override
     public void logout() throws ServletException {
@@ -304,23 +322,46 @@ public class HttpServletRequestWrapper extends ServletRequestWrapper implements
     }
 
     /**
-     * @since Servlet 3.0 TODO SERVLET3 - Add comments
+     * {@inheritDoc}
+     * <p>
+     * The default behavior of this method is to return
+     * {@link HttpServletRequest#getParts()}
+     * on the wrapped request object.
+     *
+     * @since Servlet 3.0
      */
     @Override
-    public Collection<Part> getParts() throws IllegalStateException,
-            IOException, ServletException {
+    public Collection<Part> getParts() throws IOException,
+            ServletException {
         return this._getHttpServletRequest().getParts();
     }
 
     /**
-     * @throws ServletException
-     * @throws IOException
-     * @throws IllegalStateException
-     * @since Servlet 3.0 TODO SERVLET3 - Add comments
+     * {@inheritDoc}
+     * <p>
+     * The default behavior of this method is to return
+     * {@link HttpServletRequest#getPart(String)}
+     * on the wrapped request object.
+     *
+     * @since Servlet 3.0
      */
     @Override
-    public Part getPart(String name) throws IllegalStateException, IOException,
+    public Part getPart(String name) throws IOException,
             ServletException {
         return this._getHttpServletRequest().getPart(name);
+    }
+
+    /**
+     * {@inheritDoc}
+     * <p>
+     * The default behavior of this method is to return
+     * {@link HttpServletRequest#upgrade(ProtocolHandler)}
+     * on the wrapped request object.
+     *
+     * @since Servlet 3.1
+     */
+    @Override
+    public void upgrade(ProtocolHandler handler) throws java.io.IOException {
+        this._getHttpServletRequest().upgrade(handler);
     }
 }

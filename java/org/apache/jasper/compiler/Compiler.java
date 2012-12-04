@@ -108,7 +108,7 @@ public abstract class Compiler {
 
         // Setup page info area
         pageInfo = new PageInfo(new BeanRepository(ctxt.getClassLoader(),
-                errDispatcher), ctxt.getJspFile());
+                errDispatcher), ctxt.getJspFile(), ctxt.isTagFile());
 
         JspConfig jspConfig = options.getJspConfig();
         JspConfig.JspProperty jspProperty = jspConfig.findJspProperty(ctxt
@@ -496,7 +496,7 @@ public abstract class Compiler {
             try {
                 String key = include.getKey();
                 URL includeUrl;
-                if (key.startsWith("jar:")) {
+                if (key.startsWith("jar:") || key.startsWith("file:")) {
                     includeUrl = new URL(key);
                 } else {
                     includeUrl = ctxt.getResource(include.getKey());

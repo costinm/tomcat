@@ -37,12 +37,11 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import junit.framework.Assert;
-
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 
+import org.junit.Assert;
 import org.junit.Test;
 
 import org.apache.catalina.Context;
@@ -142,7 +141,7 @@ public class TestRemoteIpFilter extends TomcatBaseTest {
 
     @Test
     public void testCommaDelimitedListToStringArrayEmptyList() {
-        List<String> elements = new ArrayList<String>();
+        List<String> elements = new ArrayList<>();
         String actual = RemoteIpFilter.listToCommaDelimitedString(elements);
         assertEquals("", actual);
     }
@@ -510,7 +509,7 @@ public class TestRemoteIpFilter extends TomcatBaseTest {
     public void testWithTomcatServer() throws Exception {
 
         // mostly default configuration : enable "x-forwarded-proto"
-        Map<String, String> remoteIpFilterParameter = new HashMap<String, String>();
+        Map<String, String> remoteIpFilterParameter = new HashMap<>();
         remoteIpFilterParameter.put("protocolHeader", "x-forwarded-proto");
 
         // SETUP

@@ -58,7 +58,7 @@ public class NioSelectorPool {
     protected AtomicInteger active = new AtomicInteger(0);
     protected AtomicInteger spare = new AtomicInteger(0);
     protected ConcurrentLinkedQueue<Selector> selectors =
-        new ConcurrentLinkedQueue<Selector>();
+            new ConcurrentLinkedQueue<>();
 
     protected Selector getSharedSelector() throws IOException {
         if (SHARED && SHARED_SELECTOR == null) {
@@ -77,6 +77,7 @@ public class NioSelectorPool {
         return  SHARED_SELECTOR;
     }
 
+    @SuppressWarnings("resource") // s is closed in put()
     public Selector get() throws IOException{
         if ( SHARED ) {
             return getSharedSelector();
@@ -196,7 +197,13 @@ public class NioSelectorPool {
                     //register OP_WRITE to the selector
                     if (key==null) key = socket.getIOChannel().register(selector, SelectionKey.OP_WRITE);
                     else key.interestOps(SelectionKey.OP_WRITE);
-                    keycount = selector.select(writeTimeout);
+                    if (writeTimeout==0) {
+                        timedout = buf.hasRemaining();
+                    } else if (writeTimeout<0) {
+                        keycount = selector.select();
+                    } else {
+                        keycount = selector.select(writeTimeout);
+                    }
                 }
                 if (writeTimeout > 0 && (selector == null || keycount == 0) ) timedout = (System.currentTimeMillis()-time)>=writeTimeout;
             }//while
@@ -264,7 +271,13 @@ public class NioSelectorPool {
                     //register OP_WRITE to the selector
                     if (key==null) key = socket.getIOChannel().register(selector, SelectionKey.OP_READ);
                     else key.interestOps(SelectionKey.OP_READ);
-                    keycount = selector.select(readTimeout);
+                    if (readTimeout==0) {
+                        timedout = (read==0);
+                    } else if (readTimeout<0) {
+                        keycount = selector.select();
+                    } else {
+                        keycount = selector.select(readTimeout);
+                    }
                 }
                 if (readTimeout > 0 && (selector == null || keycount == 0) ) timedout = (System.currentTimeMillis()-time)>=readTimeout;
             }//while

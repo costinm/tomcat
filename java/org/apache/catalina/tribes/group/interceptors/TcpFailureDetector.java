@@ -36,6 +36,7 @@ import org.apache.catalina.tribes.io.ChannelData;
 import org.apache.catalina.tribes.io.XByteBuffer;
 import org.apache.catalina.tribes.membership.MemberImpl;
 import org.apache.catalina.tribes.membership.Membership;
+import org.apache.catalina.tribes.membership.StaticMember;
 
 /**
  * <p>Title: A perfect failure detector </p>
@@ -61,7 +62,7 @@ public class TcpFailureDetector extends ChannelInterceptorBase {
 
     private static final org.apache.juli.logging.Log log = org.apache.juli.logging.LogFactory.getLog( TcpFailureDetector.class );
 
-    protected static byte[] TCP_FAIL_DETECT = new byte[] {
+    protected static final byte[] TCP_FAIL_DETECT = new byte[] {
         79, -89, 115, 72, 121, -126, 67, -55, -97, 111, -119, -128, -95, 91, 7, 20,
         125, -39, 82, 91, -21, -15, 67, -102, -73, 126, -66, -113, -127, 103, 30, -74,
         55, 21, -66, -121, 69, 126, 76, -88, -65, 10, 77, 19, 83, 56, 21, 50,
@@ -79,9 +80,9 @@ public class TcpFailureDetector extends ChannelInterceptorBase {
 
     protected Membership membership = null;
 
-    protected HashMap<Member, Long> removeSuspects = new HashMap<Member, Long>();
+    protected final HashMap<Member, Long> removeSuspects = new HashMap<>();
 
-    protected HashMap<Member, Long> addSuspects = new HashMap<Member, Long>();
+    protected final HashMap<Member, Long> addSuspects = new HashMap<>();
 
     @Override
     public void sendMessage(Member[] destination, ChannelMessage msg, InterceptorPayload payload) throws ChannelException {
@@ -157,6 +158,9 @@ public class TcpFailureDetector extends ChannelInterceptorBase {
                 //not correct, we need to maintain the map
                 membership.removeMember( (MemberImpl) member);
                 removeSuspects.remove(member);
+                if (member instanceof StaticMember) {
+                    addSuspects.put(member, Long.valueOf(System.currentTimeMillis()));
+                }
                 notify = true;
             } else {
                 //add the member as suspect
@@ -228,6 +232,9 @@ public class TcpFailureDetector extends ChannelInterceptorBase {
                 if (membership.getMember(members[i])!=null) {
                     membership.removeMember((MemberImpl)members[i]);
                     removeSuspects.remove(members[i]);
+                    if (members[i] instanceof StaticMember) {
+                        addSuspects.put(members[i], Long.valueOf(System.currentTimeMillis()));
+                    }
                     super.memberDisappeared(members[i]);
                 }
             } //end if
@@ -239,6 +246,10 @@ public class TcpFailureDetector extends ChannelInterceptorBase {
         //update all alive times
         Member[] members = super.getMembers();
         for (int i = 0; members != null && i < members.length; i++) {
+            if (addSuspects.containsKey(members[i]) && membership.getMember(members[i]) == null) {
+                // avoid temporary adding member.
+                continue;
+            }
             if (membership.memberAlive( (MemberImpl) members[i])) {
                 //we don't have this one in our membership, check to see if he/she is alive
                 if (memberAlive(members[i])) {

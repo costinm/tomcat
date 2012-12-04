@@ -59,7 +59,9 @@ public final class TldConfig  implements LifecycleListener {
 
     private static final String TLD_EXT = ".tld";
     private static final String WEB_INF = "/WEB-INF/";
+    private static final String WEB_INF_CLASSES = "/WEB-INF/classes/";
     private static final String WEB_INF_LIB = "/WEB-INF/lib/";
+
 
     // Names of JARs that are known not to contain any TLDs
     private static volatile Set<String> noTldJars = null;
@@ -76,7 +78,7 @@ public final class TldConfig  implements LifecycleListener {
     /**
      * The <code>Digester</code>s available to process tld files.
      */
-    private static Digester[] tldDigesters = new Digester[4];
+    private static final Digester[] tldDigesters = new Digester[4];
 
     /**
      * Create (if necessary) and return a Digester configured to process the
@@ -119,6 +121,47 @@ public final class TldConfig  implements LifecycleListener {
     }
 
 
+    static {
+        // Set the default list of JARs to skip for TLDs
+        StringBuilder jarList = new StringBuilder(System.getProperty(
+                Constants.DEFAULT_JARS_TO_SKIP, ""));
+
+        String tldJars = System.getProperty(Constants.TLD_JARS_TO_SKIP, "");
+        if (tldJars.length() > 0) {
+            if (jarList.length() > 0) {
+                jarList.append(',');
+            }
+            jarList.append(tldJars);
+        }
+
+        if (jarList.length() > 0) {
+            setNoTldJars(jarList.toString());
+        }
+    }
+
+    /**
+     * Sets the list of JARs that are known not to contain any TLDs.
+     *
+     * @param jarNames List of comma-separated names of JAR files that are
+     * known not to contain any TLDs.
+     */
+    public static synchronized void setNoTldJars(String jarNames) {
+        if (jarNames == null) {
+            noTldJars = null;
+        } else {
+            if (noTldJars == null) {
+                noTldJars = new HashSet<>();
+            } else {
+                noTldJars.clear();
+            }
+            StringTokenizer tokenizer = new StringTokenizer(jarNames, ",");
+            while (tokenizer.hasMoreElements()) {
+                noTldJars.add(tokenizer.nextToken());
+            }
+        }
+    }
+
+
     // ----------------------------------------------------- Instance Variables
 
     /**
@@ -139,11 +182,11 @@ public final class TldConfig  implements LifecycleListener {
      * correct processing priority. Only the TLD associated with the first
      * instance of any URI will be processed.
      */
-    private Set<String> taglibUris = new HashSet<String>();
+    private final Set<String> taglibUris = new HashSet<>();
 
-    private Set<String> webxmlTaglibUris = new HashSet<String>();
+    private final Set<String> webxmlTaglibUris = new HashSet<>();
 
-    private ArrayList<String> listeners = new ArrayList<String>();
+    private final ArrayList<String> listeners = new ArrayList<>();
 
     // --------------------------------------------------------- Public Methods
 
@@ -168,41 +211,12 @@ public final class TldConfig  implements LifecycleListener {
         return webxmlTaglibUris.contains(uri);
     }
 
-    /**
-     * Sets the list of JARs that are known not to contain any TLDs.
-     *
-     * @param jarNames List of comma-separated names of JAR files that are
-     * known not to contain any TLDs.
-     */
-    public static void setNoTldJars(String jarNames) {
-        if (jarNames == null) {
-            noTldJars = null;
-        } else {
-            if (noTldJars == null) {
-                noTldJars = new HashSet<String>();
-            } else {
-                noTldJars.clear();
-            }
-            StringTokenizer tokenizer = new StringTokenizer(jarNames, ",");
-            while (tokenizer.hasMoreElements()) {
-                noTldJars.add(tokenizer.nextToken());
-            }
-        }
-    }
-
-    public Context getContext() {
-        return context;
-    }
-
-    public void setContext(Context context) {
-        this.context = context;
-    }
-
     public void addApplicationListener( String s ) {
         if(log.isDebugEnabled())
             log.debug( "Add tld listener " + s);
         listeners.add(s);
     }
+
 
     public String[] getTldListeners() {
         String result[]=new String[listeners.size()];
@@ -243,7 +257,7 @@ public final class TldConfig  implements LifecycleListener {
         tldScanWebXml();
 
         // Stage 3a - TLDs under WEB-INF (not lib or classes)
-        tldScanResourcePaths(WEB_INF);
+        tldScanResourcePaths(WEB_INF, false);
 
         // Stages 3b & 4
         JarScanner jarScanner = context.getJarScanner();
@@ -282,6 +296,11 @@ public final class TldConfig  implements LifecycleListener {
             if (metaInf.isDirectory()) {
                 tldScanDir(metaInf);
             }
+        }
+
+        @Override
+        public void scanWebInfClasses() throws IOException {
+            tldScanResourcePaths(WEB_INF_CLASSES, true);
         }
     }
 
@@ -351,11 +370,12 @@ public final class TldConfig  implements LifecycleListener {
      *
      * Initially, rootPath equals /WEB-INF/. The /WEB-INF/classes and
      * /WEB-INF/lib sub-directories are excluded from the search, as per the
-     * JSP 2.0 spec.
+     * JSP 2.0 spec unless the JarScanner is configured to treat
+     * /WEB-INF/classes/ as an exploded JAR.
      *
      * Keep in sync with o.a.j.comiler.TldLocationsCache
      */
-    private void tldScanResourcePaths(String startPath) {
+    private void tldScanResourcePaths(String startPath, boolean webInfAsJar) {
 
         if (log.isTraceEnabled()) {
             log.trace(sm.getString("tldConfig.webinfScan", startPath));
@@ -370,7 +390,8 @@ public final class TldConfig  implements LifecycleListener {
                 String path = it.next();
                 if (!path.endsWith(TLD_EXT)
                         && (path.startsWith(WEB_INF_LIB)
-                                || path.startsWith("/WEB-INF/classes/"))) {
+                                || path.startsWith("/WEB-INF/classes/")
+                                   && !webInfAsJar)) {
                     continue;
                 }
                 if (path.endsWith(TLD_EXT)) {
@@ -395,7 +416,7 @@ public final class TldConfig  implements LifecycleListener {
                         }
                     }
                 } else {
-                    tldScanResourcePaths(path);
+                    tldScanResourcePaths(path, false);
                 }
             }
         }

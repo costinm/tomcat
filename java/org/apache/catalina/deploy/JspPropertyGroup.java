@@ -35,13 +35,13 @@ public class JspPropertyGroup {
     }
     public Boolean getElIgnored() { return elIgnored; }
 
-    private Set<String> includeCodas = new LinkedHashSet<String>();
+    private final Set<String> includeCodas = new LinkedHashSet<>();
     public void addIncludeCoda(String includeCoda) {
         includeCodas.add(includeCoda);
     }
     public Set<String> getIncludeCodas() { return includeCodas; }
 
-    private Set<String> includePreludes = new LinkedHashSet<String>();
+    private final Set<String> includePreludes = new LinkedHashSet<>();
     public void addIncludePrelude(String includePrelude) {
         includePreludes.add(includePrelude);
     }
@@ -71,11 +71,11 @@ public class JspPropertyGroup {
     }
     public Boolean getTrimWhitespace() { return trimWhitespace; }
 
-    private String urlPattern = null;
-    public void setUrlPattern(String urlPattern) {
-        this.urlPattern = urlPattern;
+    private LinkedHashSet<String> urlPattern = new LinkedHashSet<>();
+    public void addUrlPattern(String urlPattern) {
+        this.urlPattern.add(urlPattern);
     }
-    public String getUrlPattern() { return this.urlPattern; }
+    public Set<String> getUrlPatterns() { return this.urlPattern; }
 
     private String defaultContentType = null;
     public void setDefaultContentType(String defaultContentType) {
@@ -98,5 +98,4 @@ public class JspPropertyGroup {
     public Boolean getErrorOnUndeclaredNamespace() {
         return this.errorOnUndeclaredNamespace;
     }
-
 }

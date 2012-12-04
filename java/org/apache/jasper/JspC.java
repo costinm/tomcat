@@ -56,7 +56,8 @@ import org.apache.jasper.servlet.JspCServletContext;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tools.ant.AntClassLoader;
-import org.apache.tools.ant.Project;
+import org.apache.tools.ant.BuildException;
+import org.apache.tools.ant.Task;
 import org.apache.tools.ant.util.FileUtils;
 
 /**
@@ -91,7 +92,7 @@ import org.apache.tools.ant.util.FileUtils;
  * @author Costin Manolache
  * @author Yoav Shapira
  */
-public class JspC implements Options {
+public class JspC extends Task implements Options {
 
     public static final String DEFAULT_IE_CLASS_ID =
             "clsid:8AD9C840-044E-11D1-B3E9-00805F499D93";
@@ -131,7 +132,7 @@ public class JspC implements Options {
     protected static final int ALL_WEBXML = 20;
     protected static final int DEFAULT_DIE_LEVEL = 1;
     protected static final int NO_DIE_LEVEL = 0;
-    protected static final Set<String> insertBefore = new HashSet<String>();
+    protected static final Set<String> insertBefore = new HashSet<>();
 
     static {
         insertBefore.add("</web-app>");
@@ -164,15 +165,13 @@ public class JspC implements Options {
     protected String targetClassName;
     protected String uriBase;
     protected String uriRoot;
-    protected Project project;
     protected int dieLevel;
     protected boolean helpNeeded = false;
     protected boolean compile = false;
     protected boolean smapSuppressed = true;
     protected boolean smapDumped = false;
     protected boolean caching = true;
-    protected final Map<String, TagLibraryInfo> cache =
-        new HashMap<String, TagLibraryInfo>();
+    protected final Map<String, TagLibraryInfo> cache = new HashMap<>();
 
     protected String compiler = null;
 
@@ -196,7 +195,7 @@ public class JspC implements Options {
     /**
      * The pages.
      */
-    protected final List<String> pages = new Vector<String>();
+    protected final List<String> pages = new Vector<>();
 
     /**
      * Needs better documentation, this data member does.
@@ -259,6 +258,11 @@ public class JspC implements Options {
                     jspc.execute();
                 }
             } catch (JasperException je) {
+                System.err.println(je);
+                if (jspc.dieLevel != NO_DIE_LEVEL) {
+                    System.exit(jspc.dieLevel);
+                }
+            } catch (BuildException je) {
                 System.err.println(je);
                 if (jspc.dieLevel != NO_DIE_LEVEL) {
                     System.exit(jspc.dieLevel);
@@ -770,30 +774,11 @@ public class JspC implements Options {
     protected void addExtension(final String extension) {
         if(extension != null) {
             if(extensions == null) {
-                extensions = new Vector<String>();
+                extensions = new Vector<>();
             }
 
             extensions.add(extension);
         }
-    }
-
-    /**
-     * Sets the Ant project.
-     *
-     * @param theProject The project
-     */
-    public void setProject(final Project theProject) {
-        project = theProject;
-    }
-
-    /**
-     * Returns the project: may be <code>null</code> if not running
-     * inside an Ant project.
-     *
-     * @return The project
-     */
-    public Project getProject() {
-        return project;
     }
 
     /**
@@ -1236,7 +1221,7 @@ public class JspC implements Options {
      * jsps are specified.
      */
     public void scanFiles( File base ) throws JasperException {
-        Stack<String> dirs = new Stack<String>();
+        Stack<String> dirs = new Stack<>();
         dirs.push(base.toString());
 
         // Make sure default extensions are always included
@@ -1271,10 +1256,9 @@ public class JspC implements Options {
 
     /**
      * Executes the compilation.
-     *
-     * @throws JasperException If an error occurs
      */
-    public void execute() throws JasperException {
+    @Override
+    public void execute() {
         if(log.isDebugEnabled()) {
             log.debug("execute() starting for " + pages.size() + " pages.");
         }
@@ -1349,7 +1333,7 @@ public class JspC implements Options {
             }
 
         } catch (IOException ioe) {
-            throw new JasperException(ioe);
+            throw new BuildException(ioe);
 
         } catch (JasperException je) {
             Throwable rootCause = je;
@@ -1360,7 +1344,7 @@ public class JspC implements Options {
             if (rootCause != je) {
                 rootCause.printStackTrace();
             }
-            throw je;
+            throw new BuildException(je);
         } finally {
             if (loader != null) {
                 LogFactory.release(loader);
@@ -1463,7 +1447,7 @@ public class JspC implements Options {
         }
 
         // Turn the classPath into URLs
-        ArrayList<URL> urls = new ArrayList<URL>();
+        ArrayList<URL> urls = new ArrayList<>();
         StringTokenizer tokenizer = new StringTokenizer(classPath,
                                                         File.pathSeparator);
         while (tokenizer.hasMoreTokens()) {

@@ -208,9 +208,9 @@ class TagLibraryInfoImpl extends TagLibraryInfo implements TagConstants {
      */
     private void parseTLD(String uri, InputStream in, JarResource jarResource)
             throws JasperException {
-        Vector<TagInfo> tagVector = new Vector<TagInfo>();
-        Vector<TagFileInfo> tagFileVector = new Vector<TagFileInfo>();
-        Hashtable<String, FunctionInfo> functionTable = new Hashtable<String, FunctionInfo>();
+        Vector<TagInfo> tagVector = new Vector<>();
+        Vector<TagFileInfo> tagFileVector = new Vector<>();
+        Hashtable<String, FunctionInfo> functionTable = new Hashtable<>();
 
         // Create an iterator over the child elements of our <taglib> element
         ParserUtils pu = new ParserUtils();
@@ -303,6 +303,7 @@ class TagLibraryInfoImpl extends TagLibraryInfo implements TagConstants {
      * the name of the TLD entry in the jar file, which is hardcoded to
      * META-INF/taglib.tld.
      */
+    @SuppressWarnings("null") // url can't be null
     private TldLocation generateTLDLocation(String uri, JspCompilationContext ctxt)
             throws JasperException {
 
@@ -351,8 +352,8 @@ class TagLibraryInfoImpl extends TagLibraryInfo implements TagConstants {
         String largeIcon = null;
         boolean dynamicAttributes = false;
 
-        Vector<TagAttributeInfo> attributeVector = new Vector<TagAttributeInfo>();
-        Vector<TagVariableInfo> variableVector = new Vector<TagVariableInfo>();
+        Vector<TagAttributeInfo> attributeVector = new Vector<>();
+        Vector<TagVariableInfo> variableVector = new Vector<>();
         Iterator<TreeNode> list = elem.findChildren();
         while (list.hasNext()) {
             TreeNode element = list.next();
@@ -469,7 +470,10 @@ class TagLibraryInfoImpl extends TagLibraryInfo implements TagConstants {
             }
         }
 
-        if (path.startsWith("/META-INF/tags")) {
+        if (path == null) {
+            // path is required
+            err.jspError("jsp.error.tagfile.missingPath");
+        } else if (path.startsWith("/META-INF/tags")) {
             // Tag file packaged in JAR
             // See https://issues.apache.org/bugzilla/show_bug.cgi?id=46471
             // This needs to be removed once all the broken code that depends on
@@ -631,7 +635,7 @@ class TagLibraryInfoImpl extends TagLibraryInfo implements TagConstants {
             throws JasperException {
 
         String validatorClass = null;
-        Map<String,Object> initParams = new Hashtable<String,Object>();
+        Map<String,Object> initParams = new Hashtable<>();
 
         Iterator<TreeNode> list = elem.findChildren();
         while (list.hasNext()) {

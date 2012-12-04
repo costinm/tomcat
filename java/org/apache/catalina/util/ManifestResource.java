@@ -42,8 +42,8 @@ public class ManifestResource {
     private ArrayList<Extension> availableExtensions = null;
     private ArrayList<Extension> requiredExtensions = null;
 
-    private String resourceName = null;
-    private int resourceType = -1;
+    private final String resourceName;
+    private final int resourceType;
 
     public ManifestResource(String resourceName, Manifest manifest,
                             int resourceType) {
@@ -97,16 +97,6 @@ public class ManifestResource {
      */
     public int getRequiredExtensionCount() {
         return (requiredExtensions != null) ? requiredExtensions.size() : 0;
-    }
-
-    /**
-     * Convenience method to check if this <code>ManifestResource</code>
-     * has an requires extensions.
-     *
-     * @return true if required extensions are present
-     */
-    public boolean requiresExtensions() {
-        return (requiredExtensions != null) ? true : false;
     }
 
     /**
@@ -173,7 +163,7 @@ public class ManifestResource {
         if (names == null)
             return null;
 
-        ArrayList<Extension> extensionList = new ArrayList<Extension>();
+        ArrayList<Extension> extensionList = new ArrayList<>();
         names += " ";
 
         while (true) {
@@ -220,7 +210,7 @@ public class ManifestResource {
         if (name == null)
             return null;
 
-        ArrayList<Extension> extensionList = new ArrayList<Extension>();
+        ArrayList<Extension> extensionList = new ArrayList<>();
 
         Extension extension = new Extension();
         extension.setExtensionName(name);
