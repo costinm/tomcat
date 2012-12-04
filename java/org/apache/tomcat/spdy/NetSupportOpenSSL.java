@@ -1,56 +1,72 @@
 /*
+ *  Licensed to the Apache Software Foundation (ASF) under one or more
+ *  contributor license agreements.  See the NOTICE file distributed with
+ *  this work for additional information regarding copyright ownership.
+ *  The ASF licenses this file to You under the Apache License, Version 2.0
+ *  (the "License"); you may not use this file except in compliance with
+ *  the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
  */
 package org.apache.tomcat.spdy;
 
 import java.io.IOException;
-import java.net.Socket;
-import java.nio.channels.ByteChannel;
-import java.util.Arrays;
-import java.util.List;
-
-import javax.net.ssl.SSLEngine;
 
 import org.apache.tomcat.jni.SSLExt;
 import org.apache.tomcat.jni.Status;
 import org.apache.tomcat.jni.socket.AprSocket;
 import org.apache.tomcat.jni.socket.AprSocketContext;
 import org.apache.tomcat.jni.socket.AprSocketContext.NonBlockingPollHandler;
-import org.apache.tomcat.jni.socket.AprSocketContext.TlsCertVerifier;
 
-
+/**
+ * Support SPDY NPN using apr and openssl (jni).
+ * Requires latest tomcat jni and openssl > 1.0. 
+ */
 public class NetSupportOpenSSL extends SpdyContext.NetSupport {
 
-    List<String> protos = Arrays.asList(new String[] {"spdy/2", "http/1.1"});
     AprSocketContext con;
 
     public NetSupportOpenSSL() {
         con = new AprSocketContext();
         //if (insecureCerts) {
-        con.customVerification(new TlsCertVerifier() {
-            @Override
-            public void handshakeDone(AprSocket ch) {
-            }
-        });
+//        con.customVerification(new TlsCertVerifier() {
+//            @Override
+//            public void handshakeDone(AprSocket ch) {
+//            }
+//        });
         //}
-        con.setNpn("spdy/2");        
+        con.setNpn(npnSupportedBytes);
     }
-    
+
     @Override
-    public boolean isSpdy(Object socketW) {
+    public String getNpn(Object socketW) {
         byte[] proto = new byte[32];
-        int len = SSLExt.getNPN((Long) socketW, proto);
-        return len == 6; // todo: check spdy/2
+        int len = SSLExt.getNPN(((Long) socketW).longValue(), proto);
+        if (len < 1) {
+            return null;
+        }
+        return new String(proto, 0, len);
     }
-    
+
     @Override
     public SpdyConnection getConnection(String host, int port) throws IOException {
-        SpdyConnectionAprSocket spdy = new SpdyConnectionAprSocket(ctx);
 
         AprSocket ch = con.socket(host, port, ctx.tls);
 
-        spdy.setSocket(ch);
-
         ch.connect();
+        String proto = ch.getHost().getNpn();
+        if (ctx.tls && !proto.startsWith("spdy/")) {
+            throw new IOException("SPDY not supported");
+        }
+
+        SpdyConnectionAprSocket spdy = new SpdyConnectionAprSocket(ctx, proto);
+        spdy.setSocket(ch);
 
         ch.setHandler(new SpdySocketHandler(spdy));
 
@@ -65,12 +81,12 @@ public class NetSupportOpenSSL extends SpdyContext.NetSupport {
     }
 
     @Override
-    public void onAccept(Object socket) throws IOException {
-        onAcceptLong((Long) socket);
+    public void onAccept(Object socket, String proto) {
+        onAcceptLong((Long) socket, proto);
     }
     
-    public void onAcceptLong(long socket) throws IOException {
-        SpdyConnectionAprSocket spdy = new SpdyConnectionAprSocket(ctx);
+    public void onAcceptLong(long socket, String proto) {
+        SpdyConnectionAprSocket spdy = new SpdyConnectionAprSocket(ctx, proto);
         AprSocket s = con.socket(socket);
         spdy.setSocket(s);
 
@@ -83,13 +99,12 @@ public class NetSupportOpenSSL extends SpdyContext.NetSupport {
         return con;
     }
 
-
     @Override
     public void listen(final int port, String cert, String key) throws IOException {
         con = new AprSocketContext() {
             @Override
-            protected void onSocket(AprSocket s) throws IOException {
-                SpdyConnectionAprSocket spdy = new SpdyConnectionAprSocket(ctx);
+            protected void onSocket(AprSocket s) {
+                SpdyConnectionAprSocket spdy = new SpdyConnectionAprSocket(ctx, s.getHost().getNpn());
                 spdy.setSocket(s);
 
                 SpdySocketHandler handler = new SpdySocketHandler(spdy);
@@ -97,7 +112,7 @@ public class NetSupportOpenSSL extends SpdyContext.NetSupport {
             }
         };
 
-        con.setNpn(SpdyContext.SPDY_NPN_OUT);
+        con.setNpn(npnSupportedBytes);
         con.setKeys(cert, key);
 
         con.listen(port);
@@ -149,8 +164,8 @@ public class NetSupportOpenSSL extends SpdyContext.NetSupport {
     public static class SpdyConnectionAprSocket extends SpdyConnection {
         AprSocket socket;
 
-        public SpdyConnectionAprSocket(SpdyContext spdyContext) {
-            super(spdyContext);
+        public SpdyConnectionAprSocket(SpdyContext spdyContext, String proto) {
+            super(spdyContext, proto);
         }
 
         public void setSocket(AprSocket ch) {
@@ -199,5 +214,9 @@ public class NetSupportOpenSSL extends SpdyContext.NetSupport {
         }
     }
 
-    
+    public byte[] getProtocolBytes() {
+        return npnSupportedBytes;
+    }
+
+
 }

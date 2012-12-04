@@ -17,76 +17,100 @@
 package org.apache.tomcat.spdy;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
 /**
- * Will implement polling/reuse of heavy objects, allow additional
- * configuration.
- *
- * The abstract methods allow integration with different libraries (
- * compression, request handling )
- *
- * In 'external' mode it must be used with APR library and compression.
- *
- * In 'intranet' mode - it is supposed to be used behind a load balancer that
- * handles SSL and compression. Test with: --user-data-dir=/tmp/test
- * --use-spdy=no-compress,no-ssl
+ * Entry point for the SPDY implementation.
+ * 
+ * Use this to create SpdyConnection objects in client mode, or to listen to
+ * connections using SpdyHandler callback.
  */
 public final class SpdyContext {
-
-    public static final byte[] SPDY_NPN;
-
-    public static final byte[] SPDY_NPN_OUT;
-    static {
-        SPDY_NPN = "spdy/2".getBytes();
-        SPDY_NPN_OUT = new byte[SPDY_NPN.length + 2];
-        System.arraycopy(SPDY_NPN, 0, SPDY_NPN_OUT, 1, SPDY_NPN.length);
-        SPDY_NPN_OUT[0] = (byte) SPDY_NPN.length;
-    }
 
     private Executor executor;
 
     int defaultFrameSize = 8192;
 
-    public static boolean debug = false;
+    protected boolean debug = true;
 
     protected boolean tls = true;
     protected boolean compression = true;
 
+    // Delegate socket creation
     private NetSupport netSupport;
 
+    SpdyHandler handler;
 
-    public static abstract class NetSupport {
+
+    /**
+     * Class implementing the network communication and SSL negotiation. 
+     * 
+     * Provided: Java7 + JettyNPN, Java6/7 with APR+OpenSSL, Android. 
+     * Also in coyote 
+     */
+    public abstract static class NetSupport {
         protected SpdyContext ctx;
-        
+        protected String[] npnSupported = 
+                new String[] {"spdy/3", "http/1.1"};
+        protected List<String> npnSupportedList = Arrays.asList(npnSupported);
+        protected byte[] npnSupportedBytes = getNpnBytes(npnSupported);
+
+
         public void setSpdyContext(SpdyContext ctx) {
             this.ctx = ctx;
         }
-        
-        public abstract SpdyConnection getConnection(String host, int port) throws IOException;
+
+        /**
+         * Client mode: initiate a connection and negotiate SSL / NPN.
+         */
+        public abstract SpdyConnection getConnection(String host, int port)
+                throws IOException;
+
+        public String getNpn(Object socketW) {
+            return null;
+        }
+
+        public void onAccept(Object socket, String proto) {
+        }
+        public abstract void listen(int port, String cert, String key)
+                throws IOException;
+
+        public abstract void stop() throws IOException;
 
         public void onCreateEngine(Object engine) {
         }
+        
+        public static final byte[] getNpnBytes(String[] npns) {
+            int len = 0;
+            for (int i = 0; i < npns.length; i++) {
+                byte[] data = npns[i].getBytes();
+                len += data.length + 1;
+            }
 
-        public boolean isSpdy(Object socketW) {
-            return false;
-        }
+            byte[] npnB = new byte[len + 1];
+            int off = 0;
+            for (int i = 0; i < npns.length; i++) {
+                byte[] data = npns[i].getBytes();
 
-        public void onAccept(Object socket) throws IOException {
-        }
-
-        public void listen(int port, String cert, String key)
-                throws IOException {
-        }
-
-        public void stop() throws IOException {
+                npnB[off++] = (byte) data.length;
+                System.arraycopy(data, 0, npnB, off, data.length);
+                off += data.length;
+            }
+            npnB[off++] = 0;
+            return npnB;
         }
     }
-    
+
     public SpdyContext() {
     }
-    
+
+    /**
+     * By default compression and tls are enabled. Use this to change, for example
+     * if a proxy handles TLS or compression.
+     */
     public void setTlsComprression(boolean tls, boolean compress) {
         this.tls = tls;
         this.compression = compress;
@@ -95,11 +119,9 @@ public final class SpdyContext {
     /**
      * Get a frame - frames are heavy buffers, may be reused.
      */
-    public SpdyFrame getFrame() {
-        return new SpdyFrame(defaultFrameSize);
-    }
-
-    public void releaseFrame(SpdyFrame done) {
+    SpdyFrame getFrame(int size) {
+        // TODO: pool, reuse. Send will return to pool.
+        return new SpdyFrame(size);
     }
 
     /**
@@ -116,48 +138,59 @@ public final class SpdyContext {
     }
 
     /**
-     * Override for server side to return a custom stream.
+     * Get a Stream object for the given connection.
+     * Streams may be pooled/reused. 
      */
-    public SpdyStream getStream(SpdyConnection framer) {
+    protected SpdyStream getStream(SpdyConnection framer) {
         SpdyStream spdyStream = new SpdyStream(framer);
         return spdyStream;
     }
 
+    /**
+     * Use a custom executor
+     */
     public void setExecutor(Executor executor) {
         this.executor = executor;
     }
 
+
+    /** 
+     * Use a specific SSL / NPN handler.
+     */
     public void setNetSupport(NetSupport netSupport) {
         this.netSupport = netSupport;
         netSupport.setSpdyContext(this);
     }
 
+    /**
+     * Return the SSL/NPN handler - if none was set attempt to load APR, if not 
+     * available fallback to java socket.
+     */
     public NetSupport getNetSupport() {
         if (netSupport == null) {
-            try {
-                Class<?> c0 = Class.forName("org.apache.tomcat.spdy.NetSupportOpenSSL");
-                netSupport = (NetSupport) c0.newInstance();
+            for (String nsClass: new String[] {"org.apache.tomcat.spdy.NetSupportOpenSSL",
+                    "org.apache.tomcat.spdy.NetSupportJava7",
+                    "org.apache.tomcat.spdy.NetSupportSocket"}) {
+                try {
+                    Class<?> c0 = Class.forName(nsClass);
+                    netSupport = (NetSupport) c0.newInstance();
+                    break;
+                } catch (Throwable t) {
+                    // ignore, openssl not supported
+                }
+                
+            }
+            if (netSupport != null) {
                 netSupport.setSpdyContext(this);
                 return netSupport;
-            } catch (Throwable t) {
-                // ignore, openssl not supported
             }
-            try {
-                Class<?> c1 = Class.forName("org.apache.tomcat.spdy.NetSupportJava7");
-                netSupport = (NetSupport) c1.newInstance();
-                netSupport.setSpdyContext(this);
-                return netSupport;
-            } catch (Throwable t) {
-                // ignore, npn not supported
-            }
-            // non-ssl mode must be set explicitly
-            throw new RuntimeException("SSL NextProtoclNegotiation no supported.");
+            throw new RuntimeException("Missing net support class.");
         }
-        
+
         return netSupport;
     }
-    
-    
+
+
     /**
      * SPDY is a multiplexed protocol - the SpdyProcessors will be executed on
      * this executor.
@@ -172,8 +205,6 @@ public final class SpdyContext {
         return executor;
     }
 
-    SpdyHandler handler;
-    
     public SpdyHandler getHandler() {
         return handler;
     }
@@ -182,43 +213,46 @@ public final class SpdyContext {
         this.handler = handler;
     }
 
+    /**
+     * Called when a new strem has been stareted on a connection. 
+     */
     public static interface SpdyHandler {
         public void onStream(SpdyConnection spdyCon, SpdyStream ch) throws IOException;
-        
+
     }
 
     /**
      * A handler implementing this interface will be called in the 'io' thread - the
-     * thread reading the multiplexed stream, and in the case of non-blocking 
+     * thread reading the multiplexed stream, and in the case of non-blocking
      * transports also handling polling the socket.
-     *  
+     *
      */
     public static interface NonBlockingSpdyHandler extends SpdyHandler {
     }
-    
+
 
     /**
      * Client mode: return a connection for host/port.
-     * @throws IOException
      */
     public SpdyConnection getConnection(String host, int port) throws IOException {
-        return netSupport.getConnection(host, port);
-    }
-
-    public void releaseConnection(SpdyConnection con) {
+        return getNetSupport().getConnection(host, port);
     }
 
     public final void listen(final int port, String cert, String key) throws IOException {
-        netSupport.listen(port, cert, key);
+        getNetSupport().listen(port, cert, key);
     }
 
     /**
      * Close all pending connections and free resources.
      */
     public final void stop() throws IOException {
-        netSupport.stop();
+        getNetSupport().stop();
     }
 
+    /**
+     * Called when a stream has been created - you can override this method, or use 
+     * the handler callback.
+     */
     public void onStream(SpdyConnection spdyConnection, SpdyStream ch) throws IOException {
         if (handler instanceof NonBlockingSpdyHandler) {
             handler.onStream(spdyConnection, ch);

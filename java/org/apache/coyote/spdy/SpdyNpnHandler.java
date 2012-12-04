@@ -18,19 +18,15 @@ import org.apache.tomcat.util.net.SocketStatus;
 import org.apache.tomcat.util.net.SocketWrapper;
 
 
-public class SpdyNpnHandler implements NpnHandler{
+public class SpdyNpnHandler implements NpnHandler<Socket> {
 
     SpdyContext spdyContext;
     
     @Override
-    public SocketState process(SocketWrapper<?> socket, SocketStatus status) {
-        SocketWrapper<Socket> socketW = (SocketWrapper<Socket>) socket;
-        if (spdyContext.getNetSupport().isSpdy(socketW.getSocket())) {
-            try {
-                spdyContext.getNetSupport().onAccept(socketW.getSocket());
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+    public SocketState process(SocketWrapper<Socket> socketW, SocketStatus status) {
+        String npn = spdyContext.getNetSupport().getNpn(socketW.getSocket());
+        if (npn != null && npn.startsWith("spdy/")) {
+            spdyContext.getNetSupport().onAccept(socketW.getSocket(), npn);
             return SocketState.CLOSED;
         }
         return SocketState.OPEN;

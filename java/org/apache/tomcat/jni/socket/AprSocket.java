@@ -264,6 +264,9 @@ public class AprSocket implements Runnable {
                 if (sent <= 0) {
                     break;
                 }
+                if (context.rawDataHandler != null) {
+                    context.rawData(this, false, data, off, sent, len, false);
+                }
                 off += sent;
                 len -= sent;
             }
@@ -271,9 +274,6 @@ public class AprSocket implements Runnable {
             status &= ~WRITING;
         }
 
-        if (context.rawDataHandler != null) {
-            context.rawData(this, false, data, off, sent, len, false);
-        }
 
         if (sent <= 0) {
             if (sent == -Status.TIMEUP || sent == -Status.EAGAIN || sent == 0) {
@@ -281,7 +281,9 @@ public class AprSocket implements Runnable {
                 updatePolling();
                 return rt;
             }
-            log.warning("apr.send(): Failed to send, closing " + sent);
+            if (log.isLoggable(Level.FINE)) {
+                log.warning("apr.send(): Failed to send, closing " + sent);
+            }
             reset();
             throw new IOException("Error sending " + sent + " " + Error.strerror(-sent));
         } else {

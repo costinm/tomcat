@@ -66,7 +66,7 @@ public class SpdyStream implements Runnable {
         END_FRAME.endData = 0;
         END_FRAME.off = 0;
         END_FRAME.c = false;
-        END_FRAME.flags =SpdyConnection.FLAG_HALF_CLOSE;
+        END_FRAME.flags = SpdyConnection.FLAG_FIN;
     }
 
     public SpdyStream(SpdyConnection spdy) {
@@ -172,20 +172,6 @@ public class SpdyStream implements Runnable {
         }
     }
 
-    public void getHeaders(Map<String, String> resHeaders) {
-        SpdyFrame f = resFrame;
-        int nvCount = f.nvCount;
-        for (int i = 0; i < nvCount; i++) {
-            int len = f.read16();
-            String n = new String(f.data, f.off, len, UTF8);
-            f.advance(len);
-            len = f.read16();
-            String v = new String(f.data, f.off, len, UTF8);
-            f.advance(len);
-            resHeaders.put(n, v);
-        }
-    }
-
     public SpdyFrame getRequest() {
         if (reqFrame == null) {
             reqFrame = spdy.getFrame(SpdyConnection.TYPE_SYN_STREAM);
@@ -226,22 +212,25 @@ public class SpdyStream implements Runnable {
         send("http", "GET");
     }
 
+    public void setUrl(String host, String url) {
+        getRequest().addHeader(SpdyFrame.HOST, host);
+        getRequest().addHeader(SpdyFrame.PATH, url);
+    }
+    
     public void send(String host, String url, String scheme, String method) {
-        getRequest().addHeader("host", host);
-        getRequest().addHeader("url", url);
-
+        setUrl(host, url);
+        
         send(scheme, method);
     }
 
     public void send(String scheme, String method) {
-        getRequest();
         if ("GET".equalsIgnoreCase(method)) {
             // TODO: add the others
             reqFrame.halfClose();
         }
-        getRequest().addHeader("scheme", scheme);
-        getRequest().addHeader("method", method);
-        getRequest().addHeader("version", "HTTP/1.1");
+        getRequest().addHeader(SpdyFrame.SCHEME, SpdyFrame.HTTP); // todo
+        getRequest().addHeader(SpdyFrame.METHOD, method);
+        getRequest().addHeader(SpdyFrame.VERSION, SpdyFrame.HTTP11);
         if (reqFrame.isHalfClose()) {
             finSent = true;
         }
@@ -277,7 +266,7 @@ public class SpdyStream implements Runnable {
         @Override
         public int read() throws IOException {
             fill();
-            if (current == null) {
+            if (current == null || current == END_FRAME) {
                 return -1;
             }
             return current.readByte();
@@ -286,7 +275,7 @@ public class SpdyStream implements Runnable {
         @Override
         public int read(byte b[], int off, int len) throws IOException {
             fill();
-            if (current == null) {
+            if (current == null || current == END_FRAME) {
                 return -1;
             }
             // don't wait for next frame

@@ -27,6 +27,7 @@ import javax.servlet.http.ProtocolHandler;
 import org.apache.coyote.AbstractProcessor;
 import org.apache.coyote.ActionCode;
 import org.apache.coyote.AsyncContextCallback;
+import org.apache.coyote.Constants;
 import org.apache.coyote.InputBuffer;
 import org.apache.coyote.OutputBuffer;
 import org.apache.coyote.Request;
@@ -104,15 +105,17 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
             }
 
             int rd = Math.min(inFrame.remaining(), bchunk.getBytes().length);
+            
             System.arraycopy(inFrame.data, inFrame.off, bchunk.getBytes(),
-                    bchunk.getStart(), rd);
+                    0, rd);
             inFrame.advance(rd);
             if (inFrame.remaining() == 0) {
                 if (!inFrame.isHalfClose()) {
                     inFrame = null;
                 }
             }
-            bchunk.setEnd(bchunk.getEnd() + rd);
+            bchunk.setOffset(0);
+            bchunk.setEnd(rd);
             return rd;
         }
     }
@@ -155,6 +158,7 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
     public void run() {
         RequestInfo rp = request.getRequestProcessor();
         try {
+            request.setAttribute(Constants.SENDFILE_SUPPORTED_ATTR, Boolean.FALSE);
             rp.setStage(org.apache.coyote.Constants.STAGE_SERVICE);
             getAdapter().service(request, response);
         } catch (InterruptedIOException e) {
@@ -219,10 +223,6 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
 
     @Override
     public void action(ActionCode actionCode, Object param) {
-        if (SpdyContext.debug) {
-            // System.err.println(actionCode);
-        }
-
         // TODO: async
 
         if (actionCode == ActionCode.COMMIT) {
@@ -513,43 +513,41 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
         mimeHeaders.setLimit(endpoint.getMaxHeaderCount());
 
         for (int i = 0; i < frame.nvCount; i++) {
-            int nameLen = frame.read16();
+            int nameLen = frame.readCount();
             if (nameLen > frame.remaining()) {
                 throw new IOException("Name too long");
             }
 
             keyBuffer.setBytes(frame.data, frame.off, nameLen);
-            if (keyBuffer.equals("method")) {
+            if (keyBuffer.equals("method") || keyBuffer.equals(":method")) {
                 frame.advance(nameLen);
-                int valueLen = frame.read16();
+                int valueLen = frame.readCount();
                 if (valueLen > frame.remaining()) {
                     throw new IOException("Name too long");
                 }
                 request.method().setBytes(frame.data, frame.off, valueLen);
                 frame.advance(valueLen);
-            } else if (keyBuffer.equals("url")) {
+            } else if (keyBuffer.equals("url") || keyBuffer.equals(":path")) {
                 frame.advance(nameLen);
-                int valueLen = frame.read16();
+                int valueLen = frame.readCount();
                 if (valueLen > frame.remaining()) {
                     throw new IOException("Name too long");
                 }
-                request.requestURI().setBytes(frame.data, frame.off, valueLen);
-                if (SpdyContext.debug) {
-                    System.err.println("URL= " + request.requestURI());
-                }
+                processQuery(frame.data, frame.off, valueLen);
                 frame.advance(valueLen);
-            } else if (keyBuffer.equals("version")) {
+            } else if (keyBuffer.equals("version") || keyBuffer.equals(":version")) {
                 frame.advance(nameLen);
-                int valueLen = frame.read16();
+                int valueLen = frame.readCount();
                 if (valueLen > frame.remaining()) {
                     throw new IOException("Name too long");
                 }
+                request.protocol().setBytes(frame.data, frame.off, valueLen);
                 frame.advance(valueLen);
             } else {
                 MessageBytes value = mimeHeaders.addValue(frame.data,
                         frame.off, nameLen);
                 frame.advance(nameLen);
-                int valueLen = frame.read16();
+                int valueLen = frame.readCount();
                 if (valueLen > frame.remaining()) {
                     throw new IOException("Name too long");
                 }
@@ -559,6 +557,26 @@ public class SpdyProcessor extends AbstractProcessor<Object> implements
         }
 
         onRequest();
+    }
+
+    private void processQuery(byte[] data, int off, int valueLen) {
+        request.unparsedURI().setBytes(data, off, valueLen);
+        int end = off + valueLen;
+        int q = -1;
+        for (int i = off; i < end; i++) {
+            if (data[i] == '?') {
+                q = i;
+                break;
+            }
+        }
+        
+        if (q == -1) {
+            request.requestURI().setBytes(data, off, valueLen);
+        } else {
+            request.queryString().setBytes(data, q + 1,
+                    end - q - 1);
+            request.requestURI().setBytes(data, off, q - off);
+        }
     }
 
     @Override

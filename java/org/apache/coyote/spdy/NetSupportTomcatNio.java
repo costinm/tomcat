@@ -7,7 +7,6 @@ import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.nio.ByteBuffer;
 import java.nio.channels.Selector;
-import java.util.Arrays;
 import java.util.List;
 
 import javax.net.ssl.SSLEngine;
@@ -21,11 +20,11 @@ import org.apache.tomcat.util.net.SecureNioChannel;
 import org.apache.tomcat.util.net.SocketWrapper;
 import org.eclipse.jetty.npn.NextProtoNego;
 
-
+/**
+ * Implementation of SpdyContext.NetSupport for coyote NIO
+ * 
+ */
 public class NetSupportTomcatNio extends SpdyContext.NetSupport {
-
-    List<String> protos = Arrays.asList(new String[] {"spdy/2", "http/1.1"});
-
     /**
      * Selector pool, for blocking reads and blocking writes
      */
@@ -36,11 +35,13 @@ public class NetSupportTomcatNio extends SpdyContext.NetSupport {
         
         @Override
         public void unsupported() {
+            System.out.println("Unsupported");
         }
 
         @Override
         public List<String> protocols() {
-            return protos;
+            System.out.println("Send protocols");
+            return npnSupportedList;
         }
 
         @Override
@@ -49,38 +50,39 @@ public class NetSupportTomcatNio extends SpdyContext.NetSupport {
         }
     }
 
+    /** 
+     * Not supported in client mode 
+     */
     @Override
     public SpdyConnection getConnection(String host, int port)
             throws IOException {
         return null;
     }
 
-
+    @Override
     public void onCreateEngine(Object engine) {
         NextProtoNego.debug = true;
         NextProtoNego.put((SSLEngine) engine, new SpdyNpnProvider());
     }
-    
-    public boolean isSpdy(Object channel) {
+
+    @Override
+    public String getNpn(Object channel) {
         if (channel instanceof SecureNioChannel) {
             SpdyNpnProvider provider = (SpdyNpnProvider) NextProtoNego.get(((SecureNioChannel) channel).getSslEngine());
-            if ("spdy/2".equals(provider.selected)) {
-                return true;
-            }            
+            return provider.selected;
         }
-        return false;
+        return null;
     }
 
-    public void onAccept(Object socket) {
-        SpdyConnectionChannel ch = new SpdyConnectionChannel(ctx, (SocketWrapper<NioChannel>) socket);
+    @Override
+    public void onAccept(Object socket, String proto) {
+        SpdyConnectionChannel ch = new SpdyConnectionChannel(ctx, (SocketWrapper<NioChannel>) socket, proto);
         ch.pool = pool;
         ch.onBlockingSocket();                
     }
 
     public static class SpdyConnectionChannel extends SpdyConnection {
         SecureNioChannel socket;
-
-//        private KeyAttachment socketW;
 
         public NioSelectorPool pool;
 
@@ -98,14 +100,10 @@ public class NetSupportTomcatNio extends SpdyContext.NetSupport {
             }
         };
 
-        public SpdyConnectionChannel(SpdyContext spdyContext) {
-            super(spdyContext);
-        }
-
-        public SpdyConnectionChannel(SpdyContext spdyContext, SocketWrapper<NioChannel> socket) {
-            super(spdyContext);
+        public SpdyConnectionChannel(SpdyContext spdyContext, SocketWrapper<NioChannel> socket,
+                                     String proto) {
+            super(spdyContext, proto);
             this.socket = (SecureNioChannel) socket.getSocket();
-//            this.socketW = socket;
         }
 
         @Override
@@ -123,7 +121,8 @@ public class NetSupportTomcatNio extends SpdyContext.NetSupport {
             return len;
         }
 
-        private synchronized int writeToSocket(ByteBuffer bytebuffer, boolean block, boolean flip) throws IOException {
+        private synchronized int writeToSocket(ByteBuffer bytebuffer, boolean block, boolean flip)
+                throws IOException {
             if ( flip ) bytebuffer.flip();
 
             int written = 0;
@@ -141,7 +140,7 @@ public class NetSupportTomcatNio extends SpdyContext.NetSupport {
                 //make sure we are flushed
                 do {
                     if (socket.flush(true,selector,writeTimeout)) break;
-                }while ( true );
+                } while ( true );
             }finally {
                 if ( selector != null ) pool.put(selector);
             }
@@ -151,15 +150,16 @@ public class NetSupportTomcatNio extends SpdyContext.NetSupport {
 
         /**
          * Perform blocking read with a timeout if desired
+         * 
+         * Data is written to the socket's read buffer.
+         * 
          * @param timeout boolean - if we want to use the timeout data
          * @param block - true if the system should perform a blocking read, false otherwise
          * @return boolean - true if data was read, false is no data read, EOFException if EOF is reached
          * @throws IOException if a socket exception occurs
          * @throws EOFException if end of stream is reached
          */
-
-        private int readSocket(boolean timeout, boolean block,
-                byte[] buf, int pos, int len) throws IOException {
+        private int readSocket(boolean timeout, boolean block) throws IOException {
 
             int nRead = 0;
             socket.getBufHandler().getReadBuffer().clear();
@@ -182,38 +182,48 @@ public class NetSupportTomcatNio extends SpdyContext.NetSupport {
             } else {
                 nRead = socket.read(socket.getBufHandler().getReadBuffer());
             }
-            if (nRead > 0) {
-                socket.getBufHandler().getReadBuffer().flip();
-                socket.getBufHandler().getReadBuffer().limit(nRead);
-                //expand(nRead + pos);
-                socket.getBufHandler().getReadBuffer().get(buf, pos, nRead);
-                //lastValid = pos + nRead;
-                return nRead;
-            } else if (nRead == -1) {
-                //return false;
-                return nRead;
-            } else {
-                return 0;
-            }
+            return nRead;
         }
-
-
+        
+        ByteBuffer readBuffer = null;
         
         @Override
         public int read(byte[] data, int off, int len) throws IOException {
             try {
-                ByteBuffer readBuffer = socket.getBufHandler().getReadBuffer();
-                int rd = readSocket(true, true, data, off, len);
+                if (readBuffer != null && readBuffer.remaining() > 0) {
+                    int toRead = Math.min(len, readBuffer.remaining());
+                    System.err.println("RD: " + off + " " + len + " " + toRead + " " + data.length);
+                    readBuffer.get(data, off, toRead);
+                    return toRead;
+                }
+                // readBuffer is empty
+                int rd = readSocket(true, true);
+                
+                readBuffer = socket.getBufHandler().getReadBuffer();
+                
                 if (rd > 0) {
-                    readBuffer.flip();
-                    System.arraycopy(readBuffer.array(), readBuffer.position() + readBuffer.arrayOffset(), 
-                            data, off, len);
+                    readBuffer.flip(); // only first time, after read
+                    int toRead = Math.min(len, readBuffer.remaining());
+                    readBuffer.get(data, off, toRead);
+                    return toRead;
                 }
                 return rd;
-            } catch (SocketTimeoutException ex) {
+            } catch (IOException ex) {
                 return 0;
             }
         }
+    }
+
+    /** 
+     * Not supported in standalone mode
+     */
+    @Override
+    public void listen(int port, String cert, String key) throws IOException {
+    }
+
+
+    @Override
+    public void stop() throws IOException {
     }
 
 

@@ -25,7 +25,7 @@ import org.apache.tomcat.util.net.SocketWrapper;
 
 /**
  * Interface specific for protocols that negotiate at NPN level, like
- * SPDY. This is only available for APR, will replace the HTTP framing.
+ * SPDY.
  */
 public interface NpnHandler<S> {
 
@@ -50,7 +50,7 @@ public interface NpnHandler<S> {
 
     /**
      * Called when a SSLSocket or SSLEngine are first used, to initialize
-     * NPN extension.
+     * NPN extension. Not used for APR.
      *
      * @param socket SSLEngine or SSLSocket
      */

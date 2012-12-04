@@ -18,20 +18,48 @@ package org.apache.tomcat.spdy;
 
 import java.util.Map;
 
-public class SpdyFrame {
-    public static byte[] STATUS = "status".getBytes();
+// TODO: to support multiple versions ( or other framed protocols ) we could
+// turn this into a base class.
 
-    public static byte[] VERSION = "version".getBytes();
+/**
+ * Frames are exposed as a low-level interface - Input/OutputStreams are 
+ * implemented on top of frames, but it can be more efficient to use the 
+ * frames.
+ */
+public class SpdyFrame {
+
+    public static byte[] METHOD = ":method".getBytes();
+
+    public static byte[] PATH = ":path".getBytes();
+
+    public static byte[] HOST = ":host".getBytes();
+
+    public static byte[] SCHEME = ":scheme".getBytes();
+
+    public static byte[] STATUS = ":status".getBytes();
+
+    public static byte[] VERSION = ":version".getBytes();
 
     public static byte[] HTTP11 = "HTTP/1.1".getBytes();
 
     public static byte[] OK200 = "200 OK".getBytes();
 
+    public static byte[] HTTP = "http".getBytes();
+
+    public static byte[] HTTPS = "https".getBytes();
+
+
+    private static byte[] URL = {'u', 'r', 'l'};
 
     // This is a bit more complicated, to avoid multiple reads/writes.
     // We'll read as much as possible - possible past frame end. This may
-    // cost an extra copy - or even more complexity for dealing with slices
-    // if we want to save the copy.
+    // cost an extra copy if multiple frames are read in one IO.
+    
+    // Format: 
+    //  - first 8 bytes are header
+    //  - content is between 'off' and 'endData'
+    //  - parts of next frame between 'endData' and 'endReadData'
+    // After read the header is parsed and the 'extra' is moved to the next frame.
     public byte[] data;
 
     public int off = 8; // used when reading - current offset
@@ -41,7 +69,7 @@ public class SpdyFrame {
     // On write it is incremented.
 
     /**
-     *  end of data in the buffer.
+     *  end of data in the buffer == frame body length + 8 (header)
      */
     public int endData;
 
@@ -87,7 +115,7 @@ public class SpdyFrame {
     public String toString() {
         if (c) {
             if (type == 6) {
-                return "C PING " + read32(data, 0);
+                return "C PING " + associated;
             }
             return "C" + " S=" + streamId + (flags != 0 ? " F=" + flags : "")
                     + (version != 2 ? "  v" + version : "") + " t=" + type
@@ -101,13 +129,12 @@ public class SpdyFrame {
     public int serializeHead() {
         if (c) {
             data[0] = (byte) 0x80;
-            data[1] = 2;
+            data[1] = (byte) version;
             data[2] = 0;
             data[3] = (byte) type;
             data[4] = (byte) flags;
             append24(data, 5, endData - 8);
             if (type == SpdyConnection.TYPE_SYN_STREAM) {
-                // nvcount is added before
                 append32(data, 8, streamId);
                 append32(data, 12, associated);
                 data[16] = 0; // TODO: priority
@@ -115,13 +142,17 @@ public class SpdyFrame {
                 return 18;
             } else if (type == SpdyConnection.TYPE_SYN_REPLY) {
                 append32(data, 8, streamId);
-                data[12] = 0;
-                data[13] = 0;
+                if (version == 2) {
+                    data[12] = 0;
+                    data[13] = 0;
+                }
                 return 14;
             } else if (type == SpdyConnection.TYPE_HEADERS) {
                 append32(data, 8, streamId);
-                data[12] = 0;
-                data[13] = 0;
+                if (version == 2) {
+                    data[12] = 0;
+                    data[13] = 0;
+                }
                 return 14;
             }
         } else {
@@ -132,7 +163,7 @@ public class SpdyFrame {
         return 8;
     }
 
-    public boolean parse() {
+    public boolean parse(int ver) {
         endData = 0;
         streamId = 0;
         nvCount = 0;
@@ -142,13 +173,15 @@ public class SpdyFrame {
             // data frame
             c = false;
             streamId = read32(data, 0);
-            version = 2;
+            version = ver;
         } else {
             c = true;
             b0 -= 128;
             version = ((b0 << 8) | data[1] & 0xFF);
-            if (version > 2) {
-                return false;
+            if (version != ver) {
+                if (ver != 0) { // 0 on first frame
+                    return false;
+                }
             }
             b0 = data[2] & 0xFF;
             type = ((b0 << 8) | (data[3] & 0xFF));
@@ -168,15 +201,15 @@ public class SpdyFrame {
     }
 
     public boolean isHalfClose() {
-        return (flags & SpdyConnection.FLAG_HALF_CLOSE) != 0;
+        return (flags & SpdyConnection.FLAG_FIN) != 0;
     }
 
     public void halfClose() {
-        flags = SpdyConnection.FLAG_HALF_CLOSE;
+        flags = SpdyConnection.FLAG_FIN;
     }
 
     public boolean closed() {
-        return (flags & SpdyConnection.FLAG_HALF_CLOSE) != 0;
+        return (flags & SpdyConnection.FLAG_FIN) != 0;
     }
 
     static void append24(byte[] buff, int off, int v) {
@@ -200,13 +233,24 @@ public class SpdyFrame {
         data[off++] = (byte) ((v & 0xFF));
     }
 
-    public void append16(int v) {
+    private void append16(int v) {
         makeSpace(2);
         data[off++] = (byte) ((v & 0xFF00) >> 8);
         data[off++] = (byte) ((v & 0xFF));
     }
 
+    /**
+     *  Update the name/value pair count before sending.
+     *  Headers can be added at any time, no need to know the count
+     *  before.
+     *  
+     * @param nvPos offset where nv count is stored based on type of frame 
+     */
     void fixNV(int nvPos) {
+        if (version == 3) {
+            data[nvPos++] = 0;
+            data[nvPos++] = 0;
+        }
         data[nvPos++] = (byte) ((nvCount & 0xFF00) >> 8);
         data[nvPos] = (byte) ((nvCount & 0xFF));
     }
@@ -217,23 +261,49 @@ public class SpdyFrame {
         off += len;
     }
 
+    /** 
+     * Append a string length or nv/pair count. 2B in v2, 4B in v3.
+     */
+    public void appendCount(int len) {
+        if (version == 2) {
+            append16(len);
+        } else {
+            append32(len);
+        }
+    }
+    
     public void headerValue(byte[] buf, int soff, int len) {
         makeSpace(len + 4);
-        append16(len);
+        appendCount(len);
         System.arraycopy(buf, soff, data, off, len);
         off += len;
     }
 
+    /**
+     * Serialize the header name. For special headers use v3 syntax.
+     */
     public void headerName(byte[] buf, int soff, int len) {
         // if it's the first header, leave space for extra params and NV count.
         // they'll be filled in by send.
+        if (buf[soff] == ':' && version == 2) {
+            // Adjust for v2 special header names. Will go away when v2 is removed
+            soff++; // v2 uses "status", "version"
+            if (buf[soff] == 'p' && buf[soff + 1] == 'a') { // th
+                buf = URL;
+                soff = 0;
+                len = 3;
+            }
+            if (buf[soff] == 'h' && buf[soff + 1] == 'o') { // st
+                return; // not used
+            }
+        }
         if (off == 8) {
             if (type == SpdyConnection.TYPE_SYN_REPLY) {
-                off = 16;
+                off = version == 3 ? 16 : 18;
             } else if (type == SpdyConnection.TYPE_SYN_STREAM) {
-                off = 20;
+                off = version == 3 ? 22 : 20;
             } else if (type != SpdyConnection.TYPE_HEADERS) {
-                off = 16;
+                off = version == 3 ? 16 : 18;
             } else {
                 throw new RuntimeException("Wrong frame type");
             }
@@ -262,10 +332,10 @@ public class SpdyFrame {
 
     public void getHeaders(Map<String, String> resHeaders) {
         for (int i = 0; i < nvCount; i++) {
-            int len = read16();
+            int len = readCount();
             String n = new String(data, off, len, SpdyStream.UTF8);
             advance(len);
-            len = read16();
+            len = readCount();
             String v = new String(data, off, len, SpdyStream.UTF8);
             advance(len);
             resHeaders.put(n, v);
@@ -286,12 +356,21 @@ public class SpdyFrame {
 
         if (data.length < newEnd) {
             byte[] tmp = new byte[newEnd];
-            System.err.println("cp " + off + " " + data.length + " " + len
-                    + " " + tmp.length);
             System.arraycopy(data, 0, tmp, 0, off);
             data = tmp;
         }
 
+    }
+
+    /**
+     *  16 for v2, 32 for v3
+     */
+    public int readCount() {
+        if (version == 2) {
+            return read16();
+        } else {
+            return read32();
+        }
     }
 
     public int read16() {
@@ -350,5 +429,4 @@ public class SpdyFrame {
     public boolean isData() {
         return !c;
     }
-    
 }

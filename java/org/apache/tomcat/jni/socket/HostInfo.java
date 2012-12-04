@@ -73,6 +73,9 @@ public class HostInfo implements Serializable {
     }
 
     public String getNpn() {
+        if (npn == null) {
+            return null;
+        }
         return new String(npn, 0, npnLen);
     }
 

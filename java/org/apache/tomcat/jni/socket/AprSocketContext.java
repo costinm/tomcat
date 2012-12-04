@@ -254,19 +254,8 @@ public class AprSocketContext {
      *   - if ClientHello includes the npn extension
      *    -- will send this string as list of supported protocols in ServerHello
      *   - read the selection before Finish.
-     * @param npn
+     * @param npns
      */
-    public void setNpn(String npn) {
-        byte[] data = npn.getBytes();
-        byte[] npnB = new byte[data.length + 2];
-
-        System.arraycopy(data, 0, npnB, 1, data.length);
-        npnB[0] = (byte) data.length;
-        npnB[npnB.length - 1] = 0;
-        spdyNPN = npnB;
-
-    }
-
     public void setNpn(byte[] data) {
         spdyNPN = data;
     }
@@ -371,6 +360,14 @@ public class AprSocketContext {
         return pi;
     }
 
+    /**
+     * Add a listener on the raw bytes getting sent and received.
+     * Used for debug or tracking.
+     */
+    public void setRawHandler(RawDataHandler raw) {
+        rawDataHandler = raw;
+    }
+    
     protected void rawData(AprSocket ch, boolean inp, byte[] data, int pos,
             int len, int requested, boolean closed) {
         if (rawDataHandler != null) {

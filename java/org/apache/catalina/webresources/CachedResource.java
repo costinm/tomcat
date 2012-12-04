@@ -73,7 +73,9 @@ public class CachedResource implements WebResource {
 
         // If modified date or length change - resource has changed / been
         // removed etc.
-        if (webResource.getLastModified() != getLastModified() ||
+        // Empty resource ( previous 404 ) doesn't re-check
+        if (webResource instanceof EmptyResource ||
+                webResource.getLastModified() != getLastModified() ||
                 webResource.getContentLength() != getContentLength()) {
             return false;
         }

@@ -20,20 +20,17 @@ import org.apache.tomcat.util.net.SocketStatus;
 import org.apache.tomcat.util.net.SocketWrapper;
 
 
-public class SpdyNioNpnHandler implements NpnHandler{
+public class SpdyNioNpnHandler implements NpnHandler<NioChannel> {
 
     SpdyContext spdyContext;
     
     @Override
-    public SocketState process(SocketWrapper<?> socket, SocketStatus status) {
+    public SocketState process(SocketWrapper<NioChannel> socket, SocketStatus status) {
         SocketWrapper<NioChannel> socketW = (SocketWrapper<NioChannel>) socket;
         NioChannel channel = socketW.getSocket();
-        if (spdyContext.getNetSupport().isSpdy(channel)) {
-            try {
-                spdyContext.getNetSupport().onAccept(socketW);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+        String npn = spdyContext.getNetSupport().getNpn(socketW.getSocket());
+        if (npn != null && npn.startsWith("spdy/")) {
+            spdyContext.getNetSupport().onAccept(socketW, npn);
                 
             return SocketState.CLOSED;
         }

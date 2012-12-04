@@ -5,22 +5,19 @@ package org.apache.tomcat.spdy;
 import java.io.IOException;
 import java.net.Socket;
 import java.security.NoSuchAlgorithmException;
-import java.util.Arrays;
 import java.util.List;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocket;
 
 import org.apache.tomcat.spdy.NetSupportSocket.SpdyConnectionSocket;
-import org.apache.tomcat.util.net.NioChannel;
-import org.apache.tomcat.util.net.SocketWrapper;
 import org.eclipse.jetty.npn.NextProtoNego;
 import org.eclipse.jetty.npn.NextProtoNego.ClientProvider;
 
-
+/**
+ * SSL negotiation using regular sockets and Jetty NPN implementation for Java7. 
+ */
 public class NetSupportJava7 extends SpdyContext.NetSupport {
-
-    List<String> protos = Arrays.asList(new String[] {"spdy/2", "http/1.1"});
 
     private final class SpdyNpnProvider implements NextProtoNego.ServerProvider {
         String selected;
@@ -31,7 +28,7 @@ public class NetSupportJava7 extends SpdyContext.NetSupport {
 
         @Override
         public List<String> protocols() {
-            return protos;
+            return npnSupportedList;
         }
 
         @Override
@@ -40,21 +37,23 @@ public class NetSupportJava7 extends SpdyContext.NetSupport {
         }
     }
 
+    @Override
     public void onCreateEngine(Object engine) {
         NextProtoNego.debug = true;
         NextProtoNego.put((SSLSocket) engine, new SpdyNpnProvider());
 
     }
-    
-    public boolean isSpdy(Object socketW) {
+
+    @Override
+    public String getNpn(Object socketW) {
         if (socketW instanceof SSLSocket) {
             SpdyNpnProvider provider = 
                     (SpdyNpnProvider) NextProtoNego.get((SSLSocket) socketW);
-            if (provider != null && "spdy/2".equals(provider.selected)) {
-                return true;
+            if (provider != null) {
+                return provider.selected;
             }
         }
-        return false;
+        return null;
     }
 
     @Override
@@ -64,7 +63,7 @@ public class NetSupportJava7 extends SpdyContext.NetSupport {
             Socket sock = getSocket(host, port);
 
             sock.getInputStream();
-            SpdyConnectionSocket con = new SpdyConnectionSocket(ctx, sock);
+            SpdyConnectionSocket con = new SpdyConnectionSocket(ctx, sock, getNpn(sock));
 
             ctx.getExecutor().execute(con.inputThread);
             return con;
@@ -75,7 +74,7 @@ public class NetSupportJava7 extends SpdyContext.NetSupport {
     }
     
     public void onAccept(Object socket) {
-        SpdyConnectionSocket ch = new SpdyConnectionSocket(ctx, (Socket) socket);
+        SpdyConnectionSocket ch = new SpdyConnectionSocket(ctx, (Socket) socket, getNpn(socket));
         ch.onBlockingSocket();                
     }
     
@@ -112,6 +111,14 @@ public class NetSupportJava7 extends SpdyContext.NetSupport {
             throw new IOException(e);
         }
         
+    }
+
+    @Override
+    public void listen(int port, String cert, String key) throws IOException {
+    }
+
+    @Override
+    public void stop() throws IOException {
     }
 
 }

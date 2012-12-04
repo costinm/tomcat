@@ -73,10 +73,11 @@ public class SpdyAprNpnHandler implements NpnHandler<Long> {
             spdyContext.setTlsComprression(false, false);
             return;
         }
-        if (0 != SSLExt.setNPN(sslContext, SpdyContext.SPDY_NPN_OUT)) {
+        NetSupportOpenSSL netSupport = new NetSupportOpenSSL();
+        if (0 != SSLExt.setNPN(sslContext, netSupport.getProtocolBytes())) {
             log.warn("SPDY/NPN not supported");
         }
-        spdyContext.setNetSupport(new NetSupportOpenSSL());
+        spdyContext.setNetSupport(netSupport);
         spdyContext.setExecutor(ep.getExecutor());
         spdyContext.setHandler(new SpdyHandler() {
             @Override
@@ -92,15 +93,13 @@ public class SpdyAprNpnHandler implements NpnHandler<Long> {
     @Override
     public SocketState process(SocketWrapper<Long> socketWrapper,
             SocketStatus status) {
-
         long socket = socketWrapper.getSocket().longValue();
-
-        if (! spdyContext.getNetSupport().isSpdy(socketWrapper.getSocket())) {
-            return SocketState.OPEN;
+        String npn = spdyContext.getNetSupport().getNpn(socketWrapper.getSocket());
+        if (npn == null || !npn.startsWith("spdy/")) {
+            return SocketState.OPEN;            
         }
 
-        ((NetSupportOpenSSL) spdyContext.getNetSupport()).onAcceptLong(socket);
-
+        ((NetSupportOpenSSL) spdyContext.getNetSupport()).onAcceptLong(socket, npn);
         // No need to keep tomcat thread busy - but socket will be handled by apr socket context.
         return SocketState.LONG;
     }
